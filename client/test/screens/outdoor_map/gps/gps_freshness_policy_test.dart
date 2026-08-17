@@ -67,18 +67,18 @@ void main() {
     });
   });
 
-  group('streamFirstFixTimeout', () {
+  group('streamSilenceTimeout', () {
     test('실측에서 기기가 좌표를 만든 최대 간격보다 넉넉히 길다', () {
       // 이 값이 짧으면 **느릴 뿐 살아 있는 스트림**을 끊는다. 그러면 재등록이
       // 겹치며 오히려 더 느려진다. 실기기(더현대 앞, 2026-08-13)에서 일회성
       // 조회가 좌표를 받아 낸 간격의 최댓값이 9.0초였다.
-      expect(streamFirstFixTimeout, greaterThan(const Duration(seconds: 9)));
+      expect(streamSilenceTimeout, greaterThan(const Duration(seconds: 9)));
     });
 
     test('시작 직후 벙어리 구간이 하염없이 길지는 않다', () {
       // 그동안 화면은 일회성 조회가 떠받치지만, 스트림 없이 오래 가면 그만큼
       // 배터리를 일회성 조회로 태운다.
-      expect(streamFirstFixTimeout, lessThanOrEqualTo(const Duration(seconds: 20)));
+      expect(streamSilenceTimeout, lessThanOrEqualTo(const Duration(seconds: 20)));
     });
   });
 
