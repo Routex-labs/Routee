@@ -17,9 +17,25 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import kotlin.math.abs
 import kotlin.math.atan2
+import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sqrt
+
+/** gyro heading을 rotation vector 쪽으로 끌어오는 시정수(초). 근거는 docs/client/android-heading-drift.md. */
+private const val GYRO_REANCHOR_TAU_SECONDS = 45.0
+
+/** gyro hold에 **들어가는** innovation 문턱(도). */
+private const val GYRO_HOLD_ENTER_DEG = 35.0
+
+/** gyro hold에서 **나오는** innovation 문턱(도). 진입보다 낮아야 경계에서 안 떤다. */
+private const val GYRO_HOLD_RELEASE_DEG = 15.0
+
+/** gyro hold를 붙들 수 있는 최대 시간(ns). 넘으면 rotation vector로 강제 재잠금. */
+private const val GYRO_HOLD_MAX_NANOS = 8_000_000_000L
+
+/** 전방 벡터의 수평 성분이 이보다 커야 heading을 읽을 수 있다(iOS와 같은 값). */
+private const val HEADING_HORIZONTAL_MIN = 0.4
 
 /**
  * Android SensorManager -> typed Dart PDR boundary.
@@ -52,6 +68,18 @@ class PdrMotionBridge(
     private var fusedHeadingDeg = 0.0
     private var gyroHeadingDeg = 0.0
     private var gyroHeadingInitialized = false
+
+    // 마지막 rotation vector 표본이 수평 게이트를 통과했는가. 통과 못 했으면
+    // rawRotationHeadingDeg는 그때 그대로 멈춰 있는 옛 값이다 — iOS는 그 구간을
+    // headingStable=false로 알리는데 Android만 알리지 않고 있었다.
+    private var rawRotationHeadingFresh = false
+
+    // 연속 재앵커링에 쓰는 직전 rotation 표본 시각. 0이면 아직 기준이 없다.
+    private var lastRotationNs = 0L
+
+    // 지금 gyro hold 중인가. 진입·해제 문턱이 다르므로(히스테리시스) 상태가 필요하다.
+    private var gyroHoldActive = false
+    private var gyroHoldStartedNs = 0L
     private var selectedHeadingSource = "unavailable"
     private var deviceHeadingDeg = -1.0
     private var yawDeg = 0.0
@@ -228,17 +256,44 @@ class PdrMotionBridge(
         val cameraWeight = ((topUp - 0.5) / 0.37).coerceIn(0.0, 1.0)
         val forwardEast = rotationMatrix[1].toDouble() - cameraWeight * rotationMatrix[2]
         val forwardNorth = rotationMatrix[4].toDouble() - cameraWeight * rotationMatrix[5]
-        if (sqrt(forwardEast * forwardEast + forwardNorth * forwardNorth) > 0.4) {
+        rawRotationHeadingFresh =
+            sqrt(forwardEast * forwardEast + forwardNorth * forwardNorth) > HEADING_HORIZONTAL_MIN
+        if (rawRotationHeadingFresh) {
             rawRotationHeadingDeg = normalizeDegrees(Math.toDegrees(atan2(forwardEast, forwardNorth)))
             deviceHeadingDeg = rawRotationHeadingDeg
-            if (!gyroHeadingInitialized) {
+            if (gyroHeadingInitialized) {
+                reanchorGyroHeading(event.timestamp)
+            } else {
                 gyroHeadingDeg = rawRotationHeadingDeg
                 gyroHeadingInitialized = true
+                lastRotationNs = event.timestamp
             }
         }
         yawDeg = normalizeDegrees(Math.toDegrees(orientation[0].toDouble()))
         pitchDeg = Math.toDegrees(orientation[1].toDouble())
         rollDeg = Math.toDegrees(orientation[2].toDouble())
+    }
+
+    /**
+     * gyro 적분 heading을 rotation vector 쪽으로 아주 천천히(τ≈45s) 끌어온다.
+     *
+     * **hold 여부와 무관하게 매 rotation 표본마다 돈다.** 세션당 한 번만 앵커링하면
+     * 잔류 bias가 무제한 누적되는데, hold의 해제 조건(innovation)이 바로 그
+     * gyroHeading을 입력으로 쓴다 — 드리프트가 스스로 해제 조건을 키워 hold가
+     * 영구 래치가 된다. 시정수가 커서 한 표본이 옮기는 양은 걸음 회전에 묻히고,
+     * 자기 교란 구간(hold)에서 끌려가는 총량도 상한 시간만큼으로 묶인다.
+     */
+    private fun reanchorGyroHeading(sensorNs: Long) {
+        val previousNs = lastRotationNs
+        lastRotationNs = sensorNs
+        if (previousNs == 0L) return
+        val dt = (sensorNs - previousNs) / 1_000_000_000.0
+        // 앱이 백그라운드에 있다 돌아온 구간은 한 번에 끌어당기지 않는다.
+        if (dt <= 0.0 || dt > 0.5) return
+        val gain = 1.0 - exp(-dt / GYRO_REANCHOR_TAU_SECONDS)
+        gyroHeadingDeg = normalizeDegrees(
+            gyroHeadingDeg + gain * shortestAngleDelta(rawRotationHeadingDeg, gyroHeadingDeg),
+        )
     }
 
     private fun updateGyro(event: SensorEvent) {
@@ -300,8 +355,16 @@ class PdrMotionBridge(
     }
 
     /** A short gyro hold avoids a sudden magnetic jump; healthy rotation-vector
-     * values relock immediately. SensorManager still supplies the base fusion. */
+     * values relock immediately. SensorManager still supplies the base fusion.
+     * 진입·해제 문턱과 상한 시간의 근거는 docs/client/android-heading-drift.md. */
     private fun selectHeading() {
+        // **baseline은 hold 밖에서 갱신한다.** 예전에는 hold가 아닐 때만 갱신해서,
+        // hold에 들어간 순간 기준값이 얼어붙었다 — 자기장이 정상으로 돌아와도
+        // fieldDeviation이 옛 기준과 비교돼 0.35 아래로 못 내려오고, hold가
+        // 자기 자신의 해제를 막는 래치가 됐다.
+        if (magneticField > 1) {
+            magneticFieldBaseline = (magneticFieldBaseline ?: magneticField) * 0.985 + magneticField * 0.015
+        }
         val baseline = magneticFieldBaseline
         val fieldDeviation = if (baseline != null && baseline > 1 && magneticField > 1) {
             abs(magneticField - baseline) / baseline
@@ -309,9 +372,29 @@ class PdrMotionBridge(
         val innovation = angularDistance(rawRotationHeadingDeg, gyroHeadingDeg)
         val poorMagnetic = magneticAccuracy == "low" || magneticAccuracy == "uncalibrated"
         val inaccurate = rotationHeadingAccuracyDeg > 35
-        val useGyroHold = rotationSource.contains("game_rotation_vector") || poorMagnetic ||
-            fieldDeviation > 0.35 || innovation > 35 || inaccurate
+        // 진입 35°, 해제 15°. 한 값이면 문턱 근처에서 표본마다 hold가 뒤집혀
+        // heading이 두 값 사이를 오간다.
+        val innovationHigh = innovation >
+            if (gyroHoldActive) GYRO_HOLD_RELEASE_DEG else GYRO_HOLD_ENTER_DEG
+        val gameRotationVector = rotationSource.contains("game_rotation_vector")
+        var useGyroHold = gameRotationVector || poorMagnetic ||
+            fieldDeviation > 0.35 || innovationHigh || inaccurate
+        // 마지막 안전장치. 위 조건이 무엇이든 8초를 넘겨 붙들지 않는다 — 조건
+        // 하나가 다시 래치가 되어도 여기서 끊긴다. **game rotation vector는 뺀다**:
+        // 그쪽은 자력계를 안 써서 재잠금할 절대 북 자체가 없고, 그 hold는 고장이
+        // 아니라 설계다.
+        if (useGyroHold && gyroHoldActive && !gameRotationVector &&
+            rawRotationHeadingFresh &&
+            SystemClock.elapsedRealtimeNanos() - gyroHoldStartedNs > GYRO_HOLD_MAX_NANOS
+        ) {
+            gyroHeadingDeg = rawRotationHeadingDeg
+            useGyroHold = false
+        }
         if (useGyroHold && gyroHeadingInitialized) {
+            if (!gyroHoldActive) {
+                gyroHoldActive = true
+                gyroHoldStartedNs = SystemClock.elapsedRealtimeNanos()
+            }
             fusedHeadingDeg = gyroHeadingDeg
             // TYPE_ROTATION_VECTOR는 자력계까지 포함한 9-axis fusion이라
             // gyro hold 중에도 마지막 절대 북 기준 frame을 이어받는다. hold는
@@ -328,12 +411,17 @@ class PdrMotionBridge(
             headingStable = false
             return
         }
+        gyroHoldActive = false
         fusedHeadingDeg = rawRotationHeadingDeg
         selectedHeadingSource = rotationSource
-        headingStable = rotationSource.contains("rotation_vector") && !rotationSource.contains("game")
-        if (magneticField > 1) {
-            magneticFieldBaseline = (magneticFieldBaseline ?: magneticField) * 0.985 + magneticField * 0.015
-        }
+        // **기울기 게이트를 iOS와 맞춘다.** 폰을 눕히면 전방 벡터의 수평 성분이
+        // 사라져 rawRotationHeadingDeg가 마지막 값에 얼어붙는데, 예전에는 그
+        // 구간에서도 stable=true였다. 공용 코어가 이 값으로 smoothing 시정수를
+        // 0.6s/0.1s로 가르므로(packages/indoor_pdr_core/lib/src/application/
+        // pdr_session.dart), Android만 멈춘 값을 빠른 시정수로 따라갔다.
+        headingStable = rotationSource.contains("rotation_vector") &&
+            !rotationSource.contains("game") &&
+            rawRotationHeadingFresh
     }
 
     private fun updateStepCounter(value: Float, sensorNs: Long) {
@@ -454,6 +542,10 @@ class PdrMotionBridge(
         horizontalSamples.clear()
         walkDirConfidence = 0.0
         gyroHeadingInitialized = false
+        rawRotationHeadingFresh = false
+        lastRotationNs = 0L
+        gyroHoldActive = false
+        gyroHoldStartedNs = 0L
         magneticFieldBaseline = null
         roninEstimator.resetSession()
         emit("snapshot")
@@ -652,8 +744,12 @@ class PdrMotionBridge(
     private fun magnitude(values: FloatArray): Double =
         sqrt(values.sumOf { value -> value.toDouble() * value.toDouble() })
 
+    /** [a] − [b]를 (−180, 180]으로 접은 **부호 있는** 각차. 재앵커링의 방향이 이 부호다. */
+    private fun shortestAngleDelta(a: Double, b: Double): Double =
+        ((a - b + 540.0) % 360.0) - 180.0
+
     private fun angularDistance(a: Double, b: Double): Double =
-        abs(((a - b + 540.0) % 360.0) - 180.0)
+        abs(shortestAngleDelta(a, b))
 
     private fun normalizeDegrees(degrees: Double): Double =
         ((degrees % 360.0) + 360.0) % 360.0
