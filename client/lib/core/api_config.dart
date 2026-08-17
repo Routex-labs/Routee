@@ -22,6 +22,17 @@ String get apiBaseUrl {
 /// Studio 1F만 적재하는 기본 개발 DB와 맞춘 데모 건물 ID.
 const demoBuildingId = 'thehyundai-seoul';
 
+/// 검색·경로 HTTP 한 건이 응답을 기다리는 상한.
+///
+/// **timeout이 없으면 화면이 영원히 「찾는 중」에 머무를 수 있다.** 소켓이 끊기지
+/// 않고 멎으면 `http` 패키지는 스스로 포기하지 않는다 — 응답도 오류도 오지
+/// 않으니 `await`가 영영 안 풀리고, 그 뒤에 있는 스피너도 안 내려간다. 실제로
+/// 길찾기 칸의 후보 목록이 그렇게 멈춘 적이 있다.
+///
+/// 8초는 "느린 셀룰러에서 한 번은 성공할 만큼 길고, 사용자가 고장으로 읽기
+/// 전에는 끝나는" 자리다. 넘기면 실패로 다루므로 화면은 결론을 얻는다.
+const searchRequestTimeout = Duration(seconds: 8);
+
 /// TMAP 보행자 경로·POI 통합검색. 비면 `MockDirectionsRepository`로 떨어진다.
 const tmapAppKey = String.fromEnvironment('TMAP_APP_KEY');
 const tmapBaseUrl = 'https://apis.openapi.sk.com/tmap';

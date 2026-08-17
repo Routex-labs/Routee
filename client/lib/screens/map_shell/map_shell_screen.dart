@@ -299,13 +299,36 @@ class _MapShellScreenState extends State<MapShellScreen> {
   final _routeOriginFocus = FocusNode();
   final _routeDestinationFocus = FocusNode();
 
-  /// 지금 치고 있는 칸에 보여 줄 후보들.
-  List<DirectionsCandidate> _routeResults = const [];
+  /// 지금 치고 있는 칸에 보여 줄 후보들. **세 출처를 각자의 칸에 담는다** — 셋이
+  /// 서로 다른 속도로 도착하는데 한 리스트에 이어 붙이면 늦게 온 쪽이 먼저 온
+  /// 쪽을 덮거나 순서를 흔든다.
+  List<DirectionsCandidate> get _routeResults => [
+    ..._routeSemanticRows,
+    ..._routeIndoorRows,
+    ..._routeOutdoorRows,
+  ];
+
+  /// 실내 매장·건물. 이 줄이 도착하는 순간이 곧 "찾는 중"의 끝이다.
+  List<DirectionsCandidate> _routeIndoorRows = const [];
+
+  /// 실내가 빈손일 때만 채워지는 의미 검색 결과. 맨 위에 붙는다.
+  List<DirectionsCandidate> _routeSemanticRows = const [];
+
+  /// 건물 밖 장소(TMAP). **스피너를 붙들지 않는다** — 실내보다 훨씬 느려서,
+  /// 기다렸다 함께 붙이면 야외 건물 검색이 통째로 그 대기 시간이 된다.
+  List<DirectionsCandidate> _routeOutdoorRows = const [];
+
   bool _routeSearching = false;
 
   /// 후보 조회 순번. 빠르게 타이핑하면 요청이 겹치는데, 늦게 도착한 옛 응답이
   /// 새 결과를 덮으면 목록이 방금 친 글자와 무관한 것을 보여 준다.
   int _routeSearchSeq = 0;
+
+  /// 후보 조회 디바운스. 글자마다 서버를 때리지 않게 잠깐 모았다 보낸다 —
+  /// 상단 검색창과 **같은 리듬**이어야 같은 검색어가 어디에 치느냐에 따라
+  /// 요청 수가 달라지지 않는다(`SearchPanel._lightDebounce`).
+  static const _routeSearchDebounceDelay = Duration(milliseconds: 300);
+  Timer? _routeSearchDebounce;
 
   /// 지금 고른 이동 수단.
   RoutePlanMode _travelMode = RoutePlanMode.walk;
@@ -410,6 +433,7 @@ class _MapShellScreenState extends State<MapShellScreen> {
     _routeDestinationFocus.dispose();
     _routeOriginController.dispose();
     _routeDestinationController.dispose();
+    _routeSearchDebounce?.cancel();
     super.dispose();
   }
 
@@ -591,10 +615,13 @@ class _MapShellScreenState extends State<MapShellScreen> {
     _unfocusRouteFields();
     _routeOriginController.clear();
     _routeDestinationController.clear();
+    // 걸려 있던 조회를 끊고 스피너도 함께 내린다. 순번만 올리면 조기 반환한
+    // 조회가 [_routeSearching]을 안 내려 빈 카드에 스피너만 남는다.
+    _stopRouteSearch();
     setState(() {
       _routeMode = false;
       _routeEditingField = null;
-      _routeResults = const [];
+      _clearRouteResults();
       _routeSuggestions = const [];
       _selectedOrigin = null;
       _routeDraftDestination = null;
@@ -1055,7 +1082,7 @@ class _MapShellScreenState extends State<MapShellScreen> {
             ? _routeOriginFocus
             : _routeDestinationFocus)
         .requestFocus();
-    await _searchRouteCandidates('');
+    _scheduleRouteCandidates('', immediate: true);
   }
 
   /// 자동완성 원본을 받아 둔다. 실패는 삼킨다 — 자동완성만 포기하고 검색은
@@ -1148,7 +1175,8 @@ class _MapShellScreenState extends State<MapShellScreen> {
         ? _routeOriginController
         : _routeDestinationController;
     controller.text = store.name;
-    unawaited(_searchRouteCandidates(store.name));
+    // 사용자가 콕 집어 골랐다. 여기서 300ms를 더 기다릴 이유가 없다.
+    _scheduleRouteCandidates(store.name, immediate: true);
   }
 
   void _onRouteOriginFocusChanged() {
@@ -1170,7 +1198,9 @@ class _MapShellScreenState extends State<MapShellScreen> {
     // 후보를 골라 경로를 그린 **뒤에도** 다음 지도 탭이 그 칸으로 먹힌다.
     _stopPickingOnMap();
     setState(() => _routeEditingField = field);
-    unawaited(_searchRouteCandidates(query));
+    // 칸을 옮긴 것이지 글자를 친 것이 아니다 — 이미 들어 있던 글자의 답은
+    // 기다릴 것 없이 바로 찾는다.
+    _scheduleRouteCandidates(query, immediate: true);
   }
 
   void _unfocusRouteFields() {
@@ -1191,16 +1221,63 @@ class _MapShellScreenState extends State<MapShellScreen> {
         _routeDraftDestination = null;
       }
     });
-    unawaited(_searchRouteCandidates(query));
+    _scheduleRouteCandidates(query);
   }
 
+  void _clearRouteResults() {
+    _routeIndoorRows = const [];
+    _routeSemanticRows = const [];
+    _routeOutdoorRows = const [];
+  }
+
+  /// 진행 중인 후보 조회를 끊고 스피너도 함께 내린다.
+  ///
+  /// **순번만 올리면 안 된다.** 무효화된 조회는 조기 반환하면서 [_routeSearching]을
+  /// 안 내리므로, 뒤이어 새 조회를 걸지 않는 경로(칸 교체·초안 비우기)에서는
+  /// 스피너가 영영 남는다.
+  void _stopRouteSearch() {
+    _routeSearchDebounce?.cancel();
+    _routeSearchDebounce = null;
+    _routeSearchSeq++;
+    if (!mounted) return;
+    setState(() => _routeSearching = false);
+  }
+
+  /// 후보 조회를 예약한다. 글자마다 서버를 때리지 않게 잠깐 모았다 보낸다.
+  ///
+  /// [immediate]는 사용자가 이미 "다 쳤다"고 말한 경우다(후보를 탭했거나, 글자가
+  /// 남아 있는 칸에 커서가 들어왔거나). 그때 300ms를 더 기다리면 목록이 늦게 뜬 것
+  /// 처럼만 보인다.
+  void _scheduleRouteCandidates(String query, {bool immediate = false}) {
+    _routeSearchDebounce?.cancel();
+    _routeSearchDebounce = null;
+    // 새 입력이 들어온 순간 진행 중인 조회를 무효화한다. 디바운스가 끝나기
+    // 전에도 이전 조회의 늦은 응답이 화면을 덮으면 목록과 검색어가 어긋난다.
+    _routeSearchSeq++;
+    setState(() {
+      // 서버 응답을 기다리지 않는다. 이게 후보가 즉시 뜨는 이유다.
+      _routeSuggestions = _computeRouteSuggestions(query.trim());
+      _routeSearching = true;
+    });
+    if (immediate) {
+      unawaited(_searchRouteCandidates(query));
+      return;
+    }
+    _routeSearchDebounce = Timer(
+      _routeSearchDebounceDelay,
+      () => unawaited(_searchRouteCandidates(query)),
+    );
+  }
+
+  /// 실내 후보를 조회해 화면에 붙이고, 느린 두 갈래(바깥 POI·의미 검색)는
+  /// **기다리지 않고** 따로 띄운다.
+  ///
+  /// 「찾는 중」이 끝나는 시점은 **실내 답이 나온 순간**이다. 예전에는 바깥
+  /// 조회까지 직렬로 기다렸는데, 야외 건물을 검색하면 실내가 빈손이라 화면에 뜰
+  /// 것이 전적으로 그 느린 경로에 달려 있었다 — 사용자에게는 스피너만 도는
+  /// 화면이었다.
   Future<void> _searchRouteCandidates(String query) async {
     final seq = ++_routeSearchSeq;
-    // 서버 응답을 기다리지 않는다. 이게 후보가 즉시 뜨는 이유다.
-    setState(() {
-      _routeSearching = true;
-      _routeSuggestions = _computeRouteSuggestions(query.trim());
-    });
     // 층을 좁히는 경우는 둘뿐이다.
     //  1. 온디바이스 후보를 **탭한** 경우 — 그 후보의 층(한 번 쓰고 지운다).
     //  2. 질의가 **층마다 있는 시설**을 가리키는 경우 — 가장 가까운 층.
@@ -1212,36 +1289,98 @@ class _MapShellScreenState extends State<MapShellScreen> {
           reachByNodeId: _reachByNodeId,
         );
     _routeFloorScopeOnce = null;
-    var results = await searchDirectionsCandidates(
-      query,
-      floorId: floorId,
-      buildingId: _buildingId,
-      indoorContextActive: _indoorContextActive,
-      outdoor: _outdoorSearchContext,
-    );
+
+    final IndoorDirectionsCandidates indoor;
+    try {
+      indoor = await searchDirectionsCandidates(
+        query,
+        floorId: floorId,
+        buildingId: _buildingId,
+        indoorContextActive: _indoorContextActive,
+        outdoor: _outdoorSearchContext,
+      );
+    } on Object catch (error) {
+      // **실패해도 스피너는 반드시 내린다.** 예전에는 try/catch가 아예 없어,
+      // 백엔드 5xx나 네트워크 끊김 한 번이면 후보 목록이 영원히 「찾는 중」에
+      // 남았다. 상단 검색창은 같은 실패를 잡아 안내 문구로 바꾼다.
+      debugPrint('[route-search] "$query" 실내 후보 조회 실패: $error');
+      if (!mounted || seq != _routeSearchSeq) return;
+      setState(() {
+        _clearRouteResults();
+        _routeSearching = false;
+      });
+      return;
+    }
     // 여러 조회가 겹쳐 뜰 수 있어(빠른 타이핑) 마지막 요청 결과만 반영한다.
     if (!mounted || seq != _routeSearchSeq) return;
+
+    setState(() {
+      _routeIndoorRows = indoor.rows;
+      _routeSemanticRows = const [];
+      _routeOutdoorRows = const [];
+      _routeSearching = false;
+    });
+
+    unawaited(_appendOutdoorRouteCandidates(query, indoor, seq));
 
     // 경량이 빈손이면 **의미 검색까지 이어 간다.** 건물 안을 보고 있을 때만 부른다 —
     // `/query/ai`는 건물 안 매장을 찾는 계약이다.
     //
     // "빈손"의 기준은 **실내 줄이 없는가**이지 결과가 비었는가가 아니다. 개수로 재면
     // 바깥 POI가 채워 주는 순간부터 실내 의미 검색이 영영 안 돈다.
-    final hasIndoorHit = results.any((c) => c.nodeId != null);
-    if (!hasIndoorHit && query.trim().isNotEmpty && _indoorContextActive) {
-      final semantic = await semanticDirectionsCandidates(
-        query,
-        buildingId: _buildingId,
-      );
-      if (!mounted || seq != _routeSearchSeq) return;
-      // 바깥 결과를 **버리지 않고 뒤에 붙인다.** 의미 검색도 빈손일 수 있고,
-      // 그때 바깥 줄까지 날리면 사용자는 아무것도 못 본다.
-      results = [...semantic, ...results];
+    if (indoor.rows.every((c) => c.nodeId == null) &&
+        query.trim().isNotEmpty &&
+        _indoorContextActive) {
+      unawaited(_appendSemanticRouteCandidates(query, seq));
     }
+  }
+
+  /// 바깥(TMAP) 줄을 뒤늦게 이어 붙인다. 되묻기로 실내 매장이 늘어날 수 있어
+  /// 실내 줄도 함께 갈아 끼운다([outdoorDirectionsCandidates]).
+  Future<void> _appendOutdoorRouteCandidates(
+    String query,
+    IndoorDirectionsCandidates indoor,
+    int seq,
+  ) async {
+    final ({List<DirectionsCandidate> stores, List<DirectionsCandidate> outdoor})
+    found;
+    try {
+      found = await outdoorDirectionsCandidates(
+        query,
+        indoor: indoor,
+        buildingId: _buildingId,
+        outdoor: _outdoorSearchContext,
+      );
+    } on Object catch (error) {
+      // 곁들이는 정보다. 실내 후보는 이미 화면에 있으므로 조용히 빠진다.
+      debugPrint('[route-search] "$query" 바깥 후보 조회 실패: $error');
+      return;
+    }
+    if (!mounted || seq != _routeSearchSeq) return;
+    if (found.stores.isEmpty && found.outdoor.isEmpty) return;
     setState(() {
-      _routeResults = results;
-      _routeSearching = false;
+      if (found.stores.isNotEmpty) {
+        // 되묻기 결과는 건물 줄 **앞**에 온다. 실내 줄과 건물 줄의 순서는
+        // [searchDirectionsCandidates]가 정한 그대로 유지한다.
+        _routeIndoorRows = [
+          ...found.stores,
+          ...indoor.rows.where((c) => c.buildingId != null),
+        ];
+      }
+      _routeOutdoorRows = found.outdoor;
     });
+  }
+
+  /// 의미 검색 결과를 맨 위에 얹는다. 실패는 [semanticDirectionsCandidates]가
+  /// 빈 목록으로 삼킨다 — 여기까지 왔다는 것은 이미 다른 후보가 화면에 있거나
+  /// 아무것도 없다는 뜻이라, 오류 화면으로 덮어도 할 수 있는 일이 늘지 않는다.
+  Future<void> _appendSemanticRouteCandidates(String query, int seq) async {
+    final semantic = await semanticDirectionsCandidates(
+      query,
+      buildingId: _buildingId,
+    );
+    if (!mounted || seq != _routeSearchSeq || semantic.isEmpty) return;
+    setState(() => _routeSemanticRows = semantic);
   }
 
   /// 출발지 ↔ 도착지 교체. **확정된 후보만 뒤집는다** — 타이핑 중인 글자는 검색어라,
@@ -1303,7 +1442,7 @@ class _MapShellScreenState extends State<MapShellScreen> {
     });
     // 교체 직전에 걸려 있던 조회를 무효화한다. 늦게 도착한 응답이 반대 칸의
     // 목록을 덮으면, 방금 만든 조합과 무관한 후보가 뜬다.
-    _routeSearchSeq++;
+    _stopRouteSearch();
     _unfocusRouteFields();
     // 출발점이 바뀌었으니 목록 거리도 전부 옛 값이다.
     unawaited(_refreshReach());
@@ -1367,7 +1506,10 @@ class _MapShellScreenState extends State<MapShellScreen> {
     if (destination == null) {
       setState(() => _routeEditingField = RoutePlanField.destination);
       _routeDestinationFocus.requestFocus();
-      unawaited(_searchRouteCandidates(_routeDestinationController.text));
+      _scheduleRouteCandidates(
+        _routeDestinationController.text,
+        immediate: true,
+      );
       return;
     }
     setState(() => _routeEditingField = null);

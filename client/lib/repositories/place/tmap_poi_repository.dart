@@ -65,7 +65,11 @@ class TmapPoiRepository implements OutdoorPoiRepository {
 
     final http.Response response;
     try {
-      response = await _client.get(uri, headers: {'appKey': _appKey});
+      // **상한이 없으면 이 await가 안 풀린다.** 소켓이 끊기지 않고 멎는 경우가
+      // 있는데, 그때 호출자(길찾기 후보 목록)의 「찾는 중」이 함께 멈춘다.
+      response = await _client
+          .get(uri, headers: {'appKey': _appKey})
+          .timeout(searchRequestTimeout);
     } on Object catch (error) {
       // 네트워크 실패는 실내 검색까지 막을 이유가 없다. 이 화면에서 POI는
       // 곁들이는 정보라, 조용히 빠지고 나머지 결과는 그대로 뜬다.

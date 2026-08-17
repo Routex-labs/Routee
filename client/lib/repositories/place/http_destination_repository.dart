@@ -51,17 +51,21 @@ class HttpDestinationRepository implements DestinationRepository {
     // HTTP를 아예 태우지 않고 조용히 빈 결과를 돌려준다.
     if (query.trim().isEmpty) return const [];
 
-    final response = await _client.post(
-      Uri.parse('$apiBaseUrl/query/$endpoint'),
-      headers: const {'Content-Type': 'application/json; charset=utf-8'},
-      body: utf8.encode(
-        jsonEncode({
-          'text': query,
-          'building_id': buildingId,
-          'current_floor_id': ?currentFloorId,
-        }),
-      ),
-    );
+    // 상한을 두는 이유는 [searchRequestTimeout]에 있다 — 없으면 멎은 소켓 하나가
+    // 화면의 「찾는 중」을 영구히 붙든다. 초과는 예외라 호출자의 실패 경로를 탄다.
+    final response = await _client
+        .post(
+          Uri.parse('$apiBaseUrl/query/$endpoint'),
+          headers: const {'Content-Type': 'application/json; charset=utf-8'},
+          body: utf8.encode(
+            jsonEncode({
+              'text': query,
+              'building_id': buildingId,
+              'current_floor_id': ?currentFloorId,
+            }),
+          ),
+        )
+        .timeout(searchRequestTimeout);
 
     // 건물이 없거나(404) 검증 실패(422) 등은 검색 UX 관점에서 "결과 없음"과
     // 같아서 그대로 빈 리스트를 돌려준다 — 시트가 계속 뜨도록 예외를 던지지
@@ -132,19 +136,23 @@ class HttpDestinationRepository implements DestinationRepository {
       return DiscoveryResult(mode: DiscoveryMode.noMatch, query: query);
     }
 
-    final response = await _client.post(
-      Uri.parse('$apiBaseUrl/query/ai'),
-      headers: const {'Content-Type': 'application/json; charset=utf-8'},
-      body: utf8.encode(
-        jsonEncode({
-          'text': query,
-          'building_id': buildingId,
-          'current_floor_id': ?currentFloorId,
-          'selected_facets': ?selectedFacets,
-          'show_all': showAll,
-        }),
-      ),
-    );
+    // 의미 검색은 모델 로드로 첫 한 번이 느리므로 상한을 넉넉히 잡는다.
+    // 그래도 상한 자체는 있어야 한다 — 근거는 [searchRequestTimeout].
+    final response = await _client
+        .post(
+          Uri.parse('$apiBaseUrl/query/ai'),
+          headers: const {'Content-Type': 'application/json; charset=utf-8'},
+          body: utf8.encode(
+            jsonEncode({
+              'text': query,
+              'building_id': buildingId,
+              'current_floor_id': ?currentFloorId,
+              'selected_facets': ?selectedFacets,
+              'show_all': showAll,
+            }),
+          ),
+        )
+        .timeout(searchRequestTimeout * 3);
 
     // 건물이 없거나(404) 검증 실패(422)는 검색 UX 관점에서 "결과 없음"과
     // 같다 — 예외를 던지지 않고 no_match로 흡수한다. 다른 5xx는 진짜 서버
