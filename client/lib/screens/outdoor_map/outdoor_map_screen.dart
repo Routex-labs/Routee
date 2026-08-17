@@ -94,6 +94,8 @@ import 'layers/pdr_debug_map_layers.dart';
 import 'pdr_session_lifecycle.dart';
 import 'layers/route_map_layers.dart';
 import 'layers/transit_map_layers.dart';
+import 'transition/indoor_transition_overlay.dart';
+import 'transition/indoor_transition_timeline.dart';
 
 part 'parts/escalator.dart';
 part 'parts/pdr.dart';
@@ -353,7 +355,23 @@ const _storeFocusMaxZoom = 20.4;
 
 LatLng _toMapLatLng(ll.LatLng point) => LatLng(point.latitude, point.longitude);
 
-class OutdoorMapBodyState extends State<OutdoorMapBody> {
+class OutdoorMapBodyState extends State<OutdoorMapBody>
+    with SingleTickerProviderStateMixin {
+  /// 진입·이탈 전환 연출의 진행률(0~1). 연출 중이 아니면 0이라 오버레이가 아무
+  /// 것도 그리지 않는다. 굴리는 곳은 [_runIndoorTransition] 한 곳뿐이다.
+  ///
+  /// **다른 연출들(선택 확대·핀 등장)과 달리 ticker를 쓴다.** 그쪽은 MapLibre
+  /// 채널로 값을 밀어 넣어 60fps가 오히려 끊기게 만들지만([_animateSelectionScale]),
+  /// 이 오버레이는 순수 Flutter 위젯이라 vsync에 맞추는 것이 맞다.
+  late final AnimationController _indoorTransition = AnimationController(
+    vsync: this,
+    duration: indoorEnterTransitionDuration,
+  );
+
+  /// 지금 굴러가는 연출의 방향. 문이 당겨 열릴지 밀려 열릴지를 정한다.
+  IndoorTransitionDirection _indoorTransitionDirection =
+      IndoorTransitionDirection.enter;
+
   /// 선택 확대 애니메이션의 지금 배수(1.0 = 확대 없음).
   /// 근거와 진행 방식은 [_animateSelectionScale].
   double _selectionScale = 1.0;
@@ -938,6 +956,7 @@ class OutdoorMapBodyState extends State<OutdoorMapBody> {
     // 돌아오지 않아 뒤따르는 mounted 검사에 닿지 못한다.
     if (!_styleReadySignal.isCompleted) _styleReadySignal.complete();
     _buildingRetryTimer?.cancel();
+    _indoorTransition.dispose();
     _selectionScaleTimer?.cancel();
     _pinIntroTimer?.cancel();
     _gps.dispose();

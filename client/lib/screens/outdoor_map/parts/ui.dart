@@ -496,6 +496,20 @@ extension OutdoorMapUi on OutdoorMapBodyState {
               ),
             ),
           ),
+
+        // 진입·이탈 전환 연출. **Stack 맨 위여야 한다** — 덮개의 존재 이유가
+        // 화면이 갈리는 순간을 가리는 것이라, 배지·ETA 카드·층 선택기가 그 위에
+        // 남으면 덮은 의미가 없다. 연출 중이 아니면 스스로 빈 위젯이 된다.
+        Positioned.fill(
+          child: AnimatedBuilder(
+            animation: _indoorTransition,
+            builder: (context, _) => IndoorTransitionOverlay(
+              progress: _indoorTransition.value,
+              direction: _indoorTransitionDirection,
+              buildingName: _building?.name,
+            ),
+          ),
+        ),
       ],
     );
   }

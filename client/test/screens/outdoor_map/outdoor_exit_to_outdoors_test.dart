@@ -17,6 +17,8 @@ import 'package:navigation_client/repositories/place/destination_repository.dart
 import 'package:navigation_client/repositories/place/mock_destination_repository.dart';
 import 'package:navigation_client/screens/outdoor_map/entry/indoor_entry_gps.dart';
 import 'package:navigation_client/screens/outdoor_map/outdoor_map_screen.dart';
+import 'package:navigation_client/screens/outdoor_map/transition/indoor_transition_overlay.dart';
+import 'package:navigation_client/screens/outdoor_map/transition/indoor_transition_timeline.dart';
 import 'package:navigation_client/screens/outdoor_map/widgets/floor_selector.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -254,6 +256,86 @@ void main() {
       isNull,
       reason: '야외에 선 사용자에게 30초짜리 실내 좌표가 남아 있으면 안 된다',
     );
+  });
+
+  group('전환 연출은 물리적인 진입·이탈에서만 뜬다', () {
+    // **이 구분이 연출의 핵심 계약이다.** 건물 탭·홈 버튼처럼 사용자가 도면을
+    // 여닫는 조작에까지 붙으면, 2 km 밖에서 건물을 눌러 본 사람에게 "들어가는
+    // 중"이라고 말하게 된다.
+    testWidgets('GPS 진입에서는 문과 문구가 뜬다', (WidgetTester tester) async {
+      final positions = StreamController<Position>.broadcast();
+      watchPosition = () => positions.stream;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light,
+          home: Scaffold(body: OutdoorMapBody()),
+        ),
+      );
+      await drain(tester);
+
+      positions.add(fix(entrance, 10));
+      // 덮개가 덮이는 중간을 잡는다. drain까지 돌리면 연출이 끝나 버려서 "떴다"를
+      // 확인할 수 없다.
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.pump(
+        indoorTransitionSwapDelay(IndoorTransitionDirection.enter),
+      );
+      expect(find.byType(IndoorTransitionOverlay), findsOneWidget);
+      expect(find.textContaining('들어가는 중'), findsOneWidget);
+
+      await drain(tester);
+      await settleSensorWarmup(tester);
+      // 연출이 끝나면 스스로 사라진다. 남으면 지도 위에 흰 막이 굳는다.
+      expect(find.textContaining('들어가는 중'), findsNothing);
+    });
+
+    testWidgets('GPS 이탈에서는 나가는 문구가 뜬다', (WidgetTester tester) async {
+      final positions = StreamController<Position>.broadcast();
+      await enterIndoorByGps(tester, positions);
+      await settleSensorWarmup(tester);
+
+      positions.add(fix(wellOutside, 8));
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.pump(
+        indoorTransitionSwapDelay(IndoorTransitionDirection.exit),
+      );
+      expect(find.textContaining('나가는 중'), findsOneWidget);
+      await drain(tester);
+      await settleSensorWarmup(tester);
+    });
+
+    testWidgets('홈으로 도면을 접는 것은 이탈이 아니라 연출이 없다', (
+      WidgetTester tester,
+    ) async {
+      // 도면만 접는 조작이다. 사용자는 여전히 건물 안에 서 있을 수 있으므로
+      // "밖으로 나가는 중"은 거짓말이 된다.
+      final positions = StreamController<Position>.broadcast();
+      await enterIndoorByGps(tester, positions);
+      await settleSensorWarmup(tester);
+
+      final state = tester.state<OutdoorMapBodyState>(
+        find.byType(OutdoorMapBody),
+      );
+      await state.returnToOutdoorView();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.textContaining('나가는 중'), findsNothing);
+      await drain(tester);
+    });
+
+    testWidgets('건물 밖 탭으로 나오는 것도 연출이 없다', (WidgetTester tester) async {
+      final positions = StreamController<Position>.broadcast();
+      await enterIndoorByGps(tester, positions);
+      await settleSensorWarmup(tester);
+
+      final state = tester.state<OutdoorMapBodyState>(
+        find.byType(OutdoorMapBody),
+      );
+      // ignore: invalid_use_of_visible_for_testing_member
+      await state.handleMapClickForTest(const LatLng(37.5680, 126.9800));
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.textContaining('나가는 중'), findsNothing);
+      await drain(tester);
+    });
   });
 
   testWidgets('건물 밖을 탭해 나오면 안에 서 있어도 다시 끌려 들어가지 않는다', (

@@ -256,13 +256,19 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     switch (judgement.verdict) {
       case GpsBuildingVerdict.inside:
         if (_indoorEntered || !_gpsEntryArmed) return;
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('건물 감지 중...')));
-        // _setIndoorEntered가 이 표식을 보므로 **먼저** 세운다.
+        // **스낵바를 띄우지 않는다.** 전환 연출의 문구가 같은 말을 더 크게 하고,
+        // 둘이 함께 뜨면 하단에서 스낵이 올라오며 덮개와 겹친다.
+        //
+        // _setIndoorEntered가 이 표식을 보므로 **먼저** 세운다. 연출을 기다리는
+        // 동안 좌표가 또 들어와도 위 `_indoorEntered` 검사에 걸리지 않으므로,
+        // 겹침 방지는 [_runIndoorTransition]이 맡는다.
         _indoorEnteredByGps = true;
-        _setIndoorEntered(true);
-        unawaited(_startTrackingFromGpsFix(position));
+        unawaited(
+          _runIndoorTransition(IndoorTransitionDirection.enter, () {
+            _setIndoorEntered(true);
+            unawaited(_startTrackingFromGpsFix(position));
+          }),
+        );
       case GpsBuildingVerdict.outside:
         // 재무장은 위에서 이미 했다(이 판정은 거리 조건을 반드시 만족한다).
         if (!_indoorEntered) return;
@@ -272,17 +278,56 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
         // **이 자리가 유일하게 "정말로 나갔다"고 말할 수 있는 곳이다.**
         // 실내 위치를 버리는 것도, 실내→야외 안내의 야외 구간을 올리는 것도
         // 여기서만 일어난다([_setIndoorEntered]의 leftBuilding).
-        _setIndoorEntered(false, leftBuilding: true);
-        // 위치의 주인이 GPS로 돌아온 순간이다. 마커는 [_setIndoorEntered] 안의
-        // [_syncCurrentLayer]가 이미 켰지만, 카메라는 아직 건물을 보고 있다.
-        // 실내에서 도면에 맞춰 확대해 둔 화면 그대로라 방금 켠 GPS 마커가 화면
-        // 밖일 수 있다 — 사용자 눈에는 "나왔는데 내 위치가 없다"로 보인다.
         //
-        // 들어올 때 카메라가 건물로 붙는 것과 대칭이다. 나가면 나를 따라온다.
-        unawaited(_moveCameraToUser(position));
+        // 카메라 이동을 덮개 **안에** 넣는다. 위치의 주인이 GPS로 돌아오는 순간
+        // 카메라는 아직 건물을 확대해 보고 있어서, 방금 켠 GPS 마커가 화면 밖일
+        // 수 있다 — 그 되돌아오는 움직임을 덮개가 가린다.
+        unawaited(
+          _runIndoorTransition(IndoorTransitionDirection.exit, () {
+            _setIndoorEntered(false, leftBuilding: true);
+            unawaited(_moveCameraToUser(position));
+          }),
+        );
       case GpsBuildingVerdict.unclear:
         break;
     }
+  }
+
+  /// 전환 연출을 덮고, **덮개 뒤에서** [apply]를 실행한 뒤 걷어낸다.
+  ///
+  /// 요점은 순서다. 상태를 먼저 바꾸고 연출을 얹으면 도면·마커가 갈리는 순간이
+  /// 그대로 보여서, 이 연출이 없애려는 깜빡임이 남는다. 그래서 덮개가 다 덮일
+  /// 때까지([indoorTransitionSwapDelay]) 기다린 다음에 바꾼다.
+  ///
+  /// **물리적인 진입·이탈에서만 부른다.** 건물 탭·홈 버튼·축소처럼 사용자가 도면을
+  /// 여닫는 조작에는 붙이지 않는다 — 2 km 밖에서 건물을 눌러 본 사람에게
+  /// "들어가는 중"이라고 말하게 된다.
+  ///
+  /// 연출 중에 또 불리면 **연출은 겹치지 않게 버리고 [apply]는 그대로 실행한다.**
+  ///
+  /// 버리는 것이 연출뿐이라는 점이 중요하다. 한때 둘 다 버렸는데, 그러면 문을
+  /// 통과했다 곧바로 돌아 나가는 사용자의 이탈이 통째로 삼켜졌다 — 상태는 실내인데
+  /// 사람은 밖이고, 다음 좌표가 올 때까지 그대로다. 연출이 어긋나 보이는 것보다
+  /// 상태가 틀린 것이 나쁘다.
+  Future<void> _runIndoorTransition(
+    IndoorTransitionDirection direction,
+    VoidCallback apply,
+  ) async {
+    if (_indoorTransition.isAnimating) {
+      apply();
+      return;
+    }
+    setState(() => _indoorTransitionDirection = direction);
+    _indoorTransition.duration = indoorTransitionDuration(direction);
+    final playing = _indoorTransition.forward(from: 0);
+    await Future<void>.delayed(indoorTransitionSwapDelay(direction));
+    // 기다리는 동안 화면이 사라졌으면 상태를 바꿀 대상이 없다. 컨트롤러는
+    // dispose가 정리한다.
+    if (!mounted) return;
+    apply();
+    await playing;
+    if (!mounted) return;
+    _indoorTransition.value = 0;
   }
 
   /// 지금 층의 지상 출입구들을 "안 → 밖" 축으로 만든다.
@@ -354,23 +399,36 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     // 도로 끌고 들어간다. 다시 켜는 곳은 좌표가 건물 밖 거리 문턱을 넘을 때
     // 한 곳뿐이다([shouldRearmGpsEntry]).
     _gpsEntryArmed = false;
-    _setIndoorEntered(false, leftBuilding: true);
     // 위치의 주인이 GPS로 돌아왔다. 실내에서 도면에 맞춰 확대해 둔 화면 그대로
-    // 두면 방금 켠 GPS 마커가 화면 밖일 수 있다.
+    // 두면 방금 켠 GPS 마커가 화면 밖일 수 있다. 상태 교체와 카메라 되돌리기를
+    // 둘 다 덮개 안에 넣는다.
     final position = _position;
     final target = position != null
         ? ll.LatLng(position.latitude, position.longitude)
         : entrance?.point;
-    if (target != null) unawaited(_moveCameraToPoint(target));
+    unawaited(
+      _runIndoorTransition(IndoorTransitionDirection.exit, () {
+        _setIndoorEntered(false, leftBuilding: true);
+        if (target != null) unawaited(_moveCameraToPoint(target));
+      }),
+    );
     // 되돌릴 손잡이를 함께 띄운다. PDR heading이 180도 어긋난 기기에서는 건물
     // 안으로 걸어 들어가는 것이 "나가는 것"으로 읽힐 수 있는데, 그 오판을
     // 사용자가 한 번에 되돌릴 수 있어야 한다.
-    showDebugToast(
-      context,
-      message: '출입구를 지나 밖으로 나온 것으로 보고 야외 지도로 돌아갑니다.',
-      bottomOffset: mapShellBottomChromePx + 12,
-      actionLabel: '실내로 되돌리기',
-      onAction: _returnIndoorAfterWalkout,
+    //
+    // **연출이 끝난 뒤에 띄운다.** 덮개 위로 토스트가 올라오면 문구가 둘이 되고,
+    // 손잡이는 사용자가 "어, 잘못 나왔다"고 느낀 다음에 필요한 것이다.
+    unawaited(
+      Future<void>.delayed(indoorExitTransitionDuration, () {
+        if (!mounted) return;
+        showDebugToast(
+          context,
+          message: '출입구를 지나 밖으로 나온 것으로 보고 야외 지도로 돌아갑니다.',
+          bottomOffset: mapShellBottomChromePx + 12,
+          actionLabel: '실내로 되돌리기',
+          onAction: _returnIndoorAfterWalkout,
+        );
+      }),
     );
     return true;
   }
