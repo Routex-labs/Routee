@@ -50,6 +50,7 @@ class IndoorDirectionsCandidates {
     required this.buildingRowNames,
     required this.buildingNames,
     required this.buildingName,
+    this.closed = false,
   });
 
   /// 바로 화면에 붙일 줄들(매장 다음 건물).
@@ -67,8 +68,12 @@ class IndoorDirectionsCandidates {
   /// 지금 보고 있는 건물의 이름. 매장 줄 부제에 함께 적는다.
   final String? buildingName;
 
-  /// 바깥 조회를 이어 붙일 필요조차 없는 상태(빈 검색어 등).
-  bool get closed => buildingNames.isEmpty && rows.isEmpty && stores.isEmpty;
+  /// 바깥 조회를 이어 붙일 필요조차 없는 상태(빈 검색어).
+  ///
+  /// **비어 있는 것으로 대신 판정하지 않는다.** 실내 조회가 실패해도 결과는
+  /// 비는데, 그때야말로 바깥 조회가 유일한 답이다 — 비었다는 이유로 건너뛰면
+  /// 백엔드가 느린 순간 야외 목적지 검색이 통째로 죽는다.
+  final bool closed;
 }
 
 /// 1단계(경량 검색)의 실내 몫 — 실내 매장 → 건물 순.
@@ -87,12 +92,13 @@ Future<IndoorDirectionsCandidates> searchDirectionsCandidates(
   // 매장 검색은 **항상 건물 전체**를 뒤진다 — 길찾기를 여는 이유 자체가 대개
   // "지금 층에 없는 곳으로 가려고"라, 층으로 좁히면 기본값이 의도의 반대가 된다.
   // [floorId]는 후보를 콕 집은 행동에만 값이 있어 이 규칙을 깨지 않는다.
-  final results = await destinationRepository.searchDestinations(
-    buildingId,
-    query,
-    currentFloorId: floorId,
-  );
-  final buildings = await buildingRepository.getAllBuildings();
+  //
+  // **두 조회의 실패를 각각 삼킨다.** "한강공원"처럼 건물 밖을 찾는 검색은 실내
+  // 조회가 어차피 빈손인데, 그 조회가 느려서 터졌다고 바깥 결과까지 잃으면
+  // 사용자에게는 야외 목적지 검색이 통째로 죽은 것으로 보인다. 실제로 백엔드가
+  // 8초를 못 지켜 그렇게 됐다(상단 검색창은 처음부터 둘을 따로 다뤘다).
+  final results = await _indoorStores(buildingId, query, floorId);
+  final buildings = await _allBuildings();
   // 매장 줄에 함께 적을 건물 이름. 상단 검색 패널과 같은 규칙이다.
   final buildingName = buildings
       .where((b) => b.id == buildingId)
@@ -106,6 +112,7 @@ Future<IndoorDirectionsCandidates> searchDirectionsCandidates(
         buildingRowNames: const {},
         buildingNames: const [],
         buildingName: buildingName,
+        closed: true,
       );
 
   // 건물 안에서 **아무것도 안 친** 경우만 여기서 끝낸다. 그때 빈 검색어는
@@ -163,44 +170,97 @@ Future<IndoorDirectionsCandidates> searchDirectionsCandidates(
   );
 }
 
-/// 1단계의 **바깥 몫**. [indoor]가 이미 화면에 붙어 있다는 전제로, 그 뒤에 이어
-/// 붙일 줄만 돌려준다. 겹치는 POI는 여기서 빠진다([mergeOutdoorResults]).
+/// 1단계의 **바깥 몫**. [indoor]가 붙는 자리 뒤에 이어 붙일 줄만 돌려준다.
+/// 겹치는 POI는 여기서 빠진다([mergeOutdoorResults]).
+///
+/// **[indoor]를 Future로 받는 것이 핵심이다.** TMAP 조회를 먼저 띄우고 실내
+/// 결과는 **합칠 때만** 기다리므로, 두 조회가 나란히 돈다. 실내를 먼저 await하면
+/// 백엔드가 느린 순간 그 시간만큼 바깥 조회가 통째로 밀리고, 야외 목적지 검색은
+/// 답이 바깥에만 있어서 그 대기가 그대로 빈 화면이 된다.
 ///
 /// 실내 매장 목록이 되묻기로 **늘어날 수 있다**("더현대 스타벅스" → 브랜드
 /// 재조회). 늘어난 매장 줄도 함께 돌려주므로 호출자가 실내 줄을 갈아 끼운다.
 ///
-/// 실패·기준점 없음·TMAP 키 없음은 전부 빈 결과다 — 곁들이는 정보라, 이쪽이
-/// 안 돌아도 실내 후보는 이미 화면에 있다.
+/// 실패·기준점 없음·TMAP 키 없음은 전부 빈 결과다.
 Future<({List<DirectionsCandidate> stores, List<DirectionsCandidate> outdoor})>
 outdoorDirectionsCandidates(
   String query, {
-  required IndoorDirectionsCandidates indoor,
+  required Future<IndoorDirectionsCandidates> indoor,
   required String buildingId,
   required OutdoorSearchContext outdoor,
 }) async {
-  if (indoor.closed || query.trim().isEmpty) {
-    return (
-      stores: const <DirectionsCandidate>[],
-      outdoor: const <DirectionsCandidate>[],
-    );
+  const empty = (
+    stores: <DirectionsCandidate>[],
+    outdoor: <DirectionsCandidate>[],
+  );
+  final center = outdoor.searchCenter;
+  if (query.trim().isEmpty ||
+      !outdoorPoiRepository.isAvailable ||
+      center == null) {
+    return empty;
   }
-  final merged = await _mergeWithOutdoor(
+
+  final List<OutdoorPoi> pois;
+  try {
+    pois = await outdoorPoiRepository.searchNearby(query, center: center);
+  } on Object catch (error) {
+    debugPrint('[route-search] "$query" 바깥 조회 실패: $error');
+    return empty;
+  }
+
+  // 여기서야 실내를 기다린다. 위 TMAP 왕복과 겹쳐 돌았으므로 둘 중 느린 쪽의
+  // 시간만 든다.
+  final resolved = await indoor;
+  if (resolved.closed) return empty;
+
+  final merged = await _mergeOutdoor(
     query,
-    indoor.stores,
-    indoor.buildingNames,
+    pois,
+    resolved.stores,
+    resolved.buildingNames,
     buildingId: buildingId,
     outdoor: outdoor,
   );
   return (
     stores: merged.indoorStores
-        .map((s) => _storeCandidate(s, indoor.buildingName))
+        .map((s) => _storeCandidate(s, resolved.buildingName))
         .toList(),
     outdoor: [
       for (final row in merged.outdoorRows)
-        if (!indoor.buildingRowNames.contains(collapseName(row.poi.name)))
+        if (!resolved.buildingRowNames.contains(collapseName(row.poi.name)))
           _outdoorRowCandidate(row),
     ],
   );
+}
+
+/// 실내 매장 조회. 실패는 **빈 목록**이다 — 부르는 쪽이 바깥 조회를 계속할 수
+/// 있어야 한다. 조용히 삼키지 않고 이유를 남긴다: 화면에서는 "그런 매장이 없다"와
+/// "못 물어봤다"가 똑같이 보인다.
+Future<List<PoiSearchResult>> _indoorStores(
+  String buildingId,
+  String query,
+  String? floorId,
+) async {
+  try {
+    return await destinationRepository.searchDestinations(
+      buildingId,
+      query,
+      currentFloorId: floorId,
+    );
+  } on Object catch (error) {
+    debugPrint('[route-search] "$query" 실내 매장 조회 실패(바깥은 계속한다): $error');
+    return const [];
+  }
+}
+
+/// 건물 목록. 실패하면 빈 목록이라 건물 줄과 겹침 판정만 빠진다.
+Future<List<Building>> _allBuildings() async {
+  try {
+    return await buildingRepository.getAllBuildings();
+  } on Object catch (error) {
+    debugPrint('[route-search] 건물 목록 조회 실패(바깥은 계속한다): $error');
+    return const [];
+  }
 }
 
 /// 2단계(의미 검색). 경량이 빈손일 때만 부르고, 층은 넘기지 않는다(백엔드도
@@ -271,28 +331,18 @@ DirectionsCandidate _outdoorRowCandidate(OutdoorSearchRow row) =>
       point: row.poi.point,
     );
 
-/// 바깥 조회를 돌리고 우리 실내 결과와 합친다. 기준점을 못 구했거나 TMAP을
-/// 쓸 수 없으면 바깥 줄 없이 실내 결과만 돌려준다.
-Future<MergedOutdoorResults> _mergeWithOutdoor(
+/// 이미 받아 둔 바깥 [pois]를 우리 실내 결과와 합친다.
+///
+/// **조회는 여기서 하지 않는다** — 부르는 쪽이 실내 조회와 나란히 먼저 띄운다
+/// ([outdoorDirectionsCandidates]).
+Future<MergedOutdoorResults> _mergeOutdoor(
   String query,
+  List<OutdoorPoi> pois,
   List<PoiSearchResult> indoorStores,
   List<String> buildingNames, {
   required String buildingId,
   required OutdoorSearchContext outdoor,
 }) async {
-  final center = outdoor.searchCenter;
-  if (!outdoorPoiRepository.isAvailable || center == null) {
-    return MergedOutdoorResults(const [], indoorStores);
-  }
-
-  final List<OutdoorPoi> pois;
-  try {
-    pois = await outdoorPoiRepository.searchNearby(query, center: center);
-  } on Object {
-    // 바깥 조회 실패로 후보가 통째로 비면 안 된다. 매장·건물은 이미 손에 있다.
-    return MergedOutdoorResults(const [], indoorStores);
-  }
-
   // 규칙은 도메인 함수가 갖고 있다(`domain/outdoor_poi_ranking.dart`).
   // 상단 검색 패널도 같은 함수를 부른다 — 여기서 다시 구현하면 또 갈린다.
   final relevant = filterByNameRelevance(query, pois);
@@ -307,6 +357,8 @@ Future<MergedOutdoorResults> _mergeWithOutdoor(
     indoorStores: indoorStores,
     isAtBuilding: isAtBuilding,
     buildingNames: buildingNames,
+    // 되묻기 실패는 그 브랜드만 건너뛴다([lookUpIndoorStoresByBrand]). 백엔드가
+    // 느려 터지는 상황에서도 바깥 줄은 그대로 남아야 한다.
     search: (brand) =>
         destinationRepository.searchDestinations(buildingId, brand),
   );

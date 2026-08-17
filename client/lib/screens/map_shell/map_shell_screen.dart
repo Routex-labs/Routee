@@ -1290,20 +1290,27 @@ class _MapShellScreenState extends State<MapShellScreen> {
         );
     _routeFloorScopeOnce = null;
 
+    // **두 조회를 같은 순간에 띄운다.** 바깥 조회는 실내 결과를 합칠 때만
+    // 기다리므로(`outdoorDirectionsCandidates`), 백엔드가 느려도 TMAP 왕복이
+    // 그만큼 밀리지 않는다. 실내를 먼저 await하던 동안 "한강공원"처럼 답이
+    // 바깥에만 있는 검색이 백엔드 대기 시간만큼 빈 화면이었다.
+    final indoorFuture = searchDirectionsCandidates(
+      query,
+      floorId: floorId,
+      buildingId: _buildingId,
+      indoorContextActive: _indoorContextActive,
+      outdoor: _outdoorSearchContext,
+    );
+    unawaited(_appendOutdoorRouteCandidates(query, indoorFuture, seq));
+
     final IndoorDirectionsCandidates indoor;
     try {
-      indoor = await searchDirectionsCandidates(
-        query,
-        floorId: floorId,
-        buildingId: _buildingId,
-        indoorContextActive: _indoorContextActive,
-        outdoor: _outdoorSearchContext,
-      );
+      indoor = await indoorFuture;
     } on Object catch (error) {
-      // **실패해도 스피너는 반드시 내린다.** 예전에는 try/catch가 아예 없어,
-      // 백엔드 5xx나 네트워크 끊김 한 번이면 후보 목록이 영원히 「찾는 중」에
-      // 남았다. 상단 검색창은 같은 실패를 잡아 안내 문구로 바꾼다.
-      debugPrint('[route-search] "$query" 실내 후보 조회 실패: $error');
+      // 여기까지 오는 실패는 조회 하나가 터진 것이 아니라 조립 자체가 깨진
+      // 경우다(개별 조회 실패는 [searchDirectionsCandidates] 안에서 빈 목록으로
+      // 흡수된다). 그때도 스피너는 반드시 내린다.
+      debugPrint('[route-search] "$query" 후보 조립 실패: $error');
       if (!mounted || seq != _routeSearchSeq) return;
       setState(() {
         _clearRouteResults();
@@ -1318,10 +1325,12 @@ class _MapShellScreenState extends State<MapShellScreen> {
       _routeIndoorRows = indoor.rows;
       _routeSemanticRows = const [];
       _routeOutdoorRows = const [];
-      _routeSearching = false;
+      // **실내가 빈손이면 아직 「찾는 중」이다.** 야외 목적지 검색은 답이 바깥
+      // 조회에만 있어서, 여기서 스피너를 내리면 "결과 없음"을 잠깐 보여 준 뒤
+      // 목록이 뒤늦게 튀어나온다. 실내 줄이 있으면 이미 볼 것이 생겼으므로
+      // 그 자리에서 끝낸다.
+      _routeSearching = indoor.rows.isEmpty && !indoor.closed;
     });
-
-    unawaited(_appendOutdoorRouteCandidates(query, indoor, seq));
 
     // 경량이 빈손이면 **의미 검색까지 이어 간다.** 건물 안을 보고 있을 때만 부른다 —
     // `/query/ai`는 건물 안 매장을 찾는 계약이다.
@@ -1339,7 +1348,7 @@ class _MapShellScreenState extends State<MapShellScreen> {
   /// 실내 줄도 함께 갈아 끼운다([outdoorDirectionsCandidates]).
   Future<void> _appendOutdoorRouteCandidates(
     String query,
-    IndoorDirectionsCandidates indoor,
+    Future<IndoorDirectionsCandidates> indoor,
     int seq,
   ) async {
     final ({List<DirectionsCandidate> stores, List<DirectionsCandidate> outdoor})
@@ -1352,19 +1361,27 @@ class _MapShellScreenState extends State<MapShellScreen> {
         outdoor: _outdoorSearchContext,
       );
     } on Object catch (error) {
-      // 곁들이는 정보다. 실내 후보는 이미 화면에 있으므로 조용히 빠진다.
       debugPrint('[route-search] "$query" 바깥 후보 조회 실패: $error');
+      // **여기서도 스피너는 내린다.** 바깥이 마지막 갈래라, 안 내리면 실내까지
+      // 빈손인 검색이 영원히 「찾는 중」에 남는다.
+      if (mounted && seq == _routeSearchSeq) {
+        setState(() => _routeSearching = false);
+      }
       return;
     }
     if (!mounted || seq != _routeSearchSeq) return;
-    if (found.stores.isEmpty && found.outdoor.isEmpty) return;
+    if (found.stores.isEmpty && found.outdoor.isEmpty) {
+      setState(() => _routeSearching = false);
+      return;
+    }
     setState(() {
+      _routeSearching = false;
       if (found.stores.isNotEmpty) {
         // 되묻기 결과는 건물 줄 **앞**에 온다. 실내 줄과 건물 줄의 순서는
         // [searchDirectionsCandidates]가 정한 그대로 유지한다.
         _routeIndoorRows = [
           ...found.stores,
-          ...indoor.rows.where((c) => c.buildingId != null),
+          ..._routeIndoorRows.where((c) => c.buildingId != null),
         ];
       }
       _routeOutdoorRows = found.outdoor;
