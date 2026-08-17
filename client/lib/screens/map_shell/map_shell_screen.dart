@@ -1467,18 +1467,34 @@ class _MapShellScreenState extends State<MapShellScreen> {
   ///
   /// **무시한 사실을 로그로 남긴다.** 조용히 삼키면 중복을 만드는 조작이
   /// 무엇인지 영영 안 보이고, 가드가 원인을 덮은 채로 남는다.
-  Future<void> _startTransitRoute(DirectionsCandidate destination) {
+  Future<void> _startTransitRoute(
+    DirectionsCandidate? origin,
+    DirectionsCandidate destination,
+  ) {
     return _transitRequest.run(
-      () => _requestTransitRoute(destination),
+      () => _requestTransitRoute(origin, destination),
       onDuplicate: () =>
           debugPrint('[transit] 조회 중이라 중복 요청 무시: ${destination.title}'),
     );
   }
 
-  Future<void> _requestTransitRoute(DirectionsCandidate destination) async {
+  Future<void> _requestTransitRoute(
+    DirectionsCandidate? routeOrigin,
+    DirectionsCandidate destination,
+  ) async {
     debugPrint('[transit] 조회 시작: ${destination.title}');
     final outdoor = _outdoorKey.currentState;
-    final origin = _transitOriginPoint(outdoor);
+    final startsIndoors = transitStartsIndoors(
+      origin: routeOrigin,
+      indoorContextActive: _indoorContextActive,
+      indoorStartReady:
+          indoorNavigationDriver.currentCalibration.canRenderPosition,
+    );
+    final origin = _transitOriginPoint(
+      outdoor,
+      destination,
+      startsIndoors: startsIndoors,
+    );
     if (outdoor == null || origin == null) {
       _showSnack('현재 위치를 아직 못 잡았습니다. GPS 신호를 확인하거나 출발지를 직접 지정해주세요.');
       return;
@@ -1525,13 +1541,44 @@ class _MapShellScreenState extends State<MapShellScreen> {
       '${walkTarget.longitude.toStringAsFixed(5)})',
     );
 
-    // **카카오가 마지막 도보를 줬어도 우리가 다시 그린다.**
+    // **건물 안에서 출발하면 첫 도보도 문에서 시작한다.** 하차 쪽의 거울상이다.
     //
-    // 그 구간은 카카오가 정한 끝점(우리가 보낸 목적지 좌표)으로 가는데, 우리는
-    // 방금 하차 지점 기준으로 문을 다시 골랐다. 그대로 두면 지도에 그려진 도보는
+    // 안 고치면 앞쪽 도보가 건물 안 GPS 좌표에서 시작해 TMAP이 그 좌표에서 가장
+    // 가까운 도로로 스냅한다 — 출구가 아닌 자리가 도보 시작점으로 잡히고, 실내
+    // 구간은 아예 그려지지 않는다(실기기 확인).
+    var walkOrigin = origin;
+    var walkStartsAtDoor = false;
+    if (startsIndoors) {
+      final boardingPoint = transitBoardPoint(picked, fallback: origin);
+      final exit = await outdoor.showIndoorLegToTransitBoarding(
+        boardingPoint,
+        // origin이 없으면 "지금 있는 곳"이라 PDR 앵커에서 출발한다.
+        origin: routeOrigin == null ? null : _indoorStoreOf(routeOrigin),
+      );
+      if (!mounted) return;
+      if (exit != null) {
+        walkOrigin = exit;
+        walkStartsAtDoor = true;
+      }
+      debugPrint(
+        '[transit] 승차 지점 기준 문 선택: '
+        '승차=(${boardingPoint.latitude.toStringAsFixed(5)}, '
+        '${boardingPoint.longitude.toStringAsFixed(5)}) '
+        '도보 출발=(${walkOrigin.latitude.toStringAsFixed(5)}, '
+        '${walkOrigin.longitude.toStringAsFixed(5)})',
+      );
+    }
+
+    // **카카오가 붙여 준 양 끝 도보는 우리가 다시 그린다.**
+    //
+    // 그 구간은 카카오가 정한 끝점(우리가 보낸 좌표)을 쓰는데, 우리는 방금
+    // 하차·승차 지점 기준으로 문을 다시 골랐다. 그대로 두면 지도에 그려진 도보는
     // 옛 끝점으로 가고 실내 구간만 새 문에서 시작해, 두 선이 서로 다른 곳을
     // 가리킨다. 자세한 근거는 [trimTrailingWalkLeg]에 있다.
-    final trimmed = trimTrailingWalkLeg(picked);
+    var trimmed = trimTrailingWalkLeg(picked);
+    // 문을 못 골랐으면(문 데이터 없음·실내 경로 실패) 자르지 않는다 — 자르고
+    // 나면 시작점이 여전히 건물 안 좌표라 더 짧은 직선만 남는다.
+    if (walkStartsAtDoor) trimmed = trimLeadingWalkLeg(trimmed);
 
     // 고른 **뒤에** 앞뒤 도보를 채운다. 후보는 최대 15개까지 오는데, 목록을
     // 만들자고 후보마다 두 번씩 보행자 API를 부르면 30번이 나가고 사용자는
@@ -1539,7 +1586,7 @@ class _MapShellScreenState extends State<MapShellScreen> {
     // 카카오 totalTime에 이미 포함돼 있다([fillTransitWalkLegs] 주석).
     final completed = await _withTransitWalkLegs(
       trimmed,
-      origin: origin,
+      origin: walkOrigin,
       destination: walkTarget,
     );
     if (!mounted) return;
@@ -1548,7 +1595,7 @@ class _MapShellScreenState extends State<MapShellScreen> {
       completed,
       destination: walkTarget,
       label: '${destination.title}까지',
-      origin: origin,
+      origin: walkOrigin,
     );
     if (!mounted || indoorStore == null) return;
 
@@ -1559,10 +1606,23 @@ class _MapShellScreenState extends State<MapShellScreen> {
 
   /// 대중교통 조회를 보낼 출발 좌표.
   ///
-  /// 명시적으로 고른 출발지라도 **실내 지점이면 쓰지 않는다.** 건물 안 좌표를
-  /// 보내면 카카오가 그 좌표에서 가장 가까운 정류장을 찾는데, 건물이 크면 실제로
-  /// 나가야 하는 문의 반대편이 잡힌다. 그때는 GPS로 떨어뜨린다.
-  LatLng? _transitOriginPoint(OutdoorMapBodyState? outdoor) {
+  /// **건물 안 좌표는 절대 보내지 않는다.** 카카오가 그 좌표에서 가장 가까운
+  /// 정류장을 찾는데, 건물이 크면 실제로 나가야 하는 문의 반대편이 잡힌다.
+  ///
+  /// [startsIndoors]면 목적지 쪽 문을 씨앗으로 쓴다 — 어느 정류장에서 탈지는
+  /// 아직 모르므로 방향만이라도 맞는 값을 보내고, 후보를 고른 **뒤에** 승차
+  /// 지점 기준으로 문을 다시 잡는다([transitBoardPoint]). 문 데이터가 없으면
+  /// 예전처럼 GPS로 떨어진다.
+  LatLng? _transitOriginPoint(
+    OutdoorMapBodyState? outdoor,
+    DirectionsCandidate destination, {
+    required bool startsIndoors,
+  }) {
+    if (startsIndoors) {
+      final door = outdoor?.entranceNearestTo(destination.point);
+      if (door != null) return door;
+      return outdoor?.routeOriginPoint;
+    }
     final selected = _selectedOrigin;
     final outdoorOrigin =
         (selected != null && selected.floor == null && selected.nodeId == null)
@@ -1929,7 +1989,7 @@ class _MapShellScreenState extends State<MapShellScreen> {
     }
     switch (_travelMode) {
       case RoutePlanMode.transit:
-        await _startTransitRoute(destination);
+        await _startTransitRoute(origin, destination);
         return;
       case RoutePlanMode.car:
         await _startCarRoute(origin, destination);

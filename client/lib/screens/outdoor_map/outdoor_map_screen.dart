@@ -1347,6 +1347,43 @@ class OutdoorMapBodyState extends State<OutdoorMapBody> {
     _showSnack('$exitLabel로 안내합니다. 건물을 나가면 바깥 경로가 이어집니다.');
   }
 
+  /// 건물 안에서 **타러 나가는** 대중교통 여정의 실내 구간을 그리고, 고른 문
+  /// 좌표를 돌려준다. 실내 구간을 못 그렸으면 null이라 호출부가 예전처럼 야외
+  /// 좌표를 그대로 쓴다([prepareIndoorLegFromDrop]의 거울상).
+  ///
+  /// **문은 [boardingPoint](처음 타는 정류장) 기준으로 고른다.** 목적지 기준으로
+  /// 고르면 정류장이 건물 반대편일 때 실내에서 아낀 거리를 바깥에서 갚는다.
+  ///
+  /// 대중교통 경로를 그리기 **전에** 불러야 한다 — [showIndoorRouteTo]가
+  /// `_userDestination`을 비우므로, 뒤에 부르면 방금 세운 도착 핀이 지워진다.
+  Future<ll.LatLng?> showIndoorLegToTransitBoarding(
+    ll.LatLng boardingPoint, {
+    PoiSearchResult? origin,
+  }) async {
+    final exitFloor = _groundEntranceFloor;
+    final exit = exitFloor == null
+        ? null
+        : nearestEntrance(_groundEntrances, boardingPoint);
+    if (exitFloor == null || exit == null) return null;
+
+    await showIndoorRouteTo(
+      PoiSearchResult(
+        name: entranceDirectionLabel(
+          exit,
+          _buildingCenter(_buildingFootprint ?? const []),
+        ),
+        floor: exitFloor,
+        point: exit.point,
+        nodeId: exit.nodeId,
+      ),
+      origin: origin,
+    );
+    if (!mounted) return null;
+    // 위 호출은 실패해도 스낵바만 띄우고 조용히 돌아온다. 성공 여부는 결과
+    // 상태로 확인한다 — 실내 구간이 없으면 문을 출발점으로 삼을 근거도 없다.
+    return _indoorRouteDestination == null ? null : exit.point;
+  }
+
   /// 이 화면에 그려진 안내를 **전부** 지운다 — 야외 도보 구간과 실내 구간까지.
   ///
   /// 상단 길찾기 바의 X처럼 "길찾기 자체를 끝낸다"는 뜻일 때 쓴다. 재계산 직전에
