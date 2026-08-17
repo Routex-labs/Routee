@@ -223,6 +223,13 @@ extension OutdoorMapUi on OutdoorMapBodyState {
                     valueListenable: _escalatorDebugText,
                     builder: (_, text, _) => MapDebugChip(text: text),
                   ),
+                  const SizedBox(height: 6),
+                  // heading 칩은 맨 아래다 — 위 둘과 같은 순서 규칙이다(건물에
+                  // 들어가야 층이 돌고, 층 도면이 있어야 실내 마커가 뜬다).
+                  ValueListenableBuilder<String?>(
+                    valueListenable: _headingDebugText,
+                    builder: (_, text, _) => MapDebugChip(text: text),
+                  ),
                 ],
               ),
             ),

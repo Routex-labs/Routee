@@ -75,6 +75,7 @@ import '../../map/icon/icon_cache.dart';
 import '../../map/icon/place_pin.dart';
 import 'widgets/map_overlay_tap_guard.dart';
 import 'entry/floor_outline.dart';
+import 'entry/heading_debug.dart';
 import 'gps/gps_session.dart';
 import 'entry/indoor_entry_gps.dart';
 import 'entry/initial_camera.dart';
@@ -950,6 +951,7 @@ class OutdoorMapBodyState extends State<OutdoorMapBody> {
     _debugModeController.removeListener(_onDebugModeChanged);
     _gpsVerdictDebugText.dispose();
     _escalatorDebugText.dispose();
+    _headingDebugText.dispose();
     super.dispose();
   }
 
@@ -967,6 +969,7 @@ class OutdoorMapBodyState extends State<OutdoorMapBody> {
     if (!_debugModeController.enabled) {
       _gpsVerdictDebugText.value = null;
       _escalatorDebugText.value = null;
+      _headingDebugText.value = null;
     }
     if (mounted) setState(() {});
   }
@@ -999,6 +1002,11 @@ class OutdoorMapBodyState extends State<OutdoorMapBody> {
   final ValueNotifier<String?> _escalatorDebugText = ValueNotifier<String?>(
     null,
   );
+
+  /// 위치 마커 heading이 도는 네 토막의 값. 마커를 그리는 자리에서 채운다
+  /// ([_publishHeadingDebug]). 갱신이 걸음마다라 위 둘과 같은 이유로
+  /// [ValueNotifier]다.
+  final ValueNotifier<String?> _headingDebugText = ValueNotifier<String?>(null);
 
   /// 마지막으로 나온 층 전환 진단 이벤트.
   ///

@@ -187,6 +187,7 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     final location = _indoorLocationVisible ? _pdrCurrentWgs84() : null;
     final heading = location == null ? null : _pdrCurrentHeadingDeg;
     final data = pdrLocationData(location, headingDeg: heading);
+    _publishHeadingDebug(heading);
 
     final previous = _pdrMarkerWriteQueue;
     _pdrMarkerWriteQueue = () async {
@@ -210,6 +211,27 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
       }
     }();
     return _pdrMarkerWriteQueue;
+  }
+
+  /// heading이 도는 네 토막의 값을 칩 한 줄로 내보낸다.
+  ///
+  /// **마커를 그리는 그 자리에서 찍는다.** 따로 계산하면 칩과 화면이 다른 값을
+  /// 보게 되고, 그러면 현장에서 "칩은 맞는데 마커는 틀렸다"를 어느 쪽도 못 믿는다
+  /// (GPS 진입 판정 칩과 같은 규칙 — `indoor-entry-rules.md`).
+  void _publishHeadingDebug(double? markerHeadingDeg) {
+    if (!_debugModeController.enabled) {
+      _headingDebugText.value = null;
+      return;
+    }
+    _headingDebugText.value = describeMarkerHeading(
+      deviceBearingDeg: _pdrTrailState.snapshot?.orientationHeadingDeg,
+      markerBearingDeg: markerHeadingDeg,
+      cameraBearingDeg: _mapController?.cameraPosition?.bearing ?? 0,
+      anchorRotationDeg: _pdrTrailState.anchor?.rotationDeg,
+      // 자북 기준이면 앵커가 rot 0을 쓴다. 이 값이 arbitrary면 rot이 수동 보정
+      // 으로 정해진 것이라, 방위가 통째로 어긋나는 원인이 될 수 있다.
+      headingSource: _pdrTrailState.anchor?.headingReference.name,
+    );
   }
 
   ll.LatLng? _pdrCurrentWgs84() {
