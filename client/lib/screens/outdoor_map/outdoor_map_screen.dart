@@ -1097,9 +1097,7 @@ class OutdoorMapBodyState extends State<OutdoorMapBody> {
       return;
     }
     try {
-      final position = await Geolocator.getCurrentPosition(
-        locationSettings: oneShotFixSettings(),
-      );
+      final position = await currentPosition();
       _handlePosition(position);
       final controller = _mapController;
       if (controller != null && _styleReady) {
