@@ -1,12 +1,12 @@
 /// 위치 스트림의 **수명**.
 ///
-/// `GpsSession`의 문서는 스트림이 죽는 방식이 셋이고 셋 다 다르게 죽는다고
-/// 적는다 — 에러로 닫힘, 에러 없이 닫힘, 열린 채 벙어리. 그리고 **2번과 3번이
-/// 차례로 빠져 있던 적이 있고**, 실기기에서 "위치 갱신 버튼은 되는데 화면은
-/// 안 움직인다"로 나타났다.
+/// `GpsSession`의 문서는 스트림이 죽는 방식이 넷이라고 적는다 — 에러로 닫힘,
+/// 에러 없이 닫힘, 처음부터 벙어리, 한 건 주고 침묵. **2·3·4번이 차례로 빠져
+/// 있던 적이 있고**, 실기기에서 "위치 갱신 버튼은 되는데 화면은 안 움직인다"로
+/// 나타났다.
 ///
-/// 셋 다 화면에는 오류를 남기지 않는다. 좌표가 그냥 안 올 뿐이다. 그래서
-/// 여기서 셋을 각각 못 박는다.
+/// 넷 다 화면에는 오류를 남기지 않는다. 좌표가 그냥 안 올 뿐이다. 그래서
+/// 여기서 넷을 각각 못 박는다.
 library;
 
 import 'dart:async';
@@ -54,6 +54,19 @@ class _FakeStreams {
   }
 }
 
+/// `fakeAsync`의 시계. `elapse`는 `DateTime.now`를 밀지 않으므로, 좌표의 낡음을
+/// 재는 갈래가 도는 테스트는 이 시계를 세션에 넣어야 한다.
+DateTime Function() _clock(FakeAsync async) =>
+    () => DateTime(2024, 1, 1).add(async.elapsed);
+
+/// 일회성 조회가 좌표를 주는 상태 / 못 주는 상태.
+///
+/// **이 둘이 침묵의 원인을 가른다.** 스트림이 조용할 때 일회성 조회가 되면
+/// 스트림이 깨진 것이고, 둘 다 안 되면 신호가 없는 것이다(실내·터널).
+void _oneShotSucceeds() => currentPosition = () async => _fix();
+void _oneShotFails() =>
+    currentPosition = () async => throw Exception('no fix');
+
 /// 세션 하나와 그 관찰값을 한 묶음으로 만든다.
 ({
   GpsSession session,
@@ -61,7 +74,7 @@ class _FakeStreams {
   List<bool> deliveries,
   List<String> events,
 })
-_harness({bool Function()? isActive}) {
+_harness({bool Function()? isActive, DateTime Function()? now}) {
   final streams = _FakeStreams();
   final deliveries = <bool>[];
   final events = <String>[];
@@ -70,6 +83,7 @@ _harness({bool Function()? isActive}) {
     onFix: (_, {bool fromStream = false}) => deliveries.add(fromStream),
     isActive: isActive ?? () => true,
     onStreamError: () => events.add('error'),
+    now: now ?? DateTime.now,
   );
   return (
     session: session,
@@ -81,7 +95,12 @@ _harness({bool Function()? isActive}) {
 
 void main() {
   final original = watchPosition;
-  tearDown(() => watchPosition = original);
+  final originalCurrentPosition = currentPosition;
+  setUp(_oneShotFails);
+  tearDown(() {
+    watchPosition = original;
+    currentPosition = originalCurrentPosition;
+  });
 
   group('열고 닫기', () {
     test('start를 두 번 불러도 스트림은 하나만 연다', () {
@@ -171,7 +190,7 @@ void main() {
         h.session.start();
 
         // 감시 시간 직전까지는 아직 살아 있다고 본다.
-        async.elapse(streamFirstFixTimeout - const Duration(seconds: 1));
+        async.elapse(streamSilenceTimeout - const Duration(seconds: 1));
         expect(h.streams.openCount, 1);
 
         async.elapse(const Duration(seconds: 1) + streamRetryMinDelay);
@@ -180,17 +199,63 @@ void main() {
       });
     });
 
-    test('좌표가 한 건이라도 오면 벙어리 감시를 걷는다', () {
+    test('좌표가 오면 감시 시간을 처음부터 다시 잰다', () {
+      // 느릴 뿐 살아 있는 스트림을 끊으면 재등록이 겹쳐 오히려 더 느려진다.
       fakeAsync((async) {
         final h = _harness();
+        h.session.start();
+
+        // 감시가 터지기 직전에 좌표가 한 건 온다.
+        async.elapse(streamSilenceTimeout - const Duration(seconds: 1));
+        h.streams.latest.add(_fix());
+        async.flushMicrotasks();
+
+        // 다시 재지 않았다면 여기서 이미 끊겼을 시각이다.
+        async.elapse(const Duration(seconds: 2) + streamRetryMinDelay);
+        expect(h.streams.openCount, 1, reason: '살아 있는 스트림을 끊었다');
+        expect(h.deliveries, [true]);
+        h.session.stop();
+      });
+    });
+
+    test('3-b) 한 건만 주고 조용해지면, 기기가 좌표를 만드는 동안 다시 연다', () {
+      // **한때 빠져 있던 경로다.** 첫 좌표에서 감시를 영구히 걷어 버려, 그 뒤로
+      // 조용해진 스트림은 onDone·onError·감시 어디에도 안 걸렸다. 실기기에서
+      // 진단 칩이 `재시작1`인 채 좌표가 전부 `직접`으로만 찍힌 것이 이 상태이고,
+      // 그동안 좌표는 일회성 조회가 3~9초에 한 건씩 떠받쳤다.
+      fakeAsync((async) {
+        _oneShotSucceeds();
+        final h = _harness(now: _clock(async));
         h.session.start();
         h.streams.latest.add(_fix());
         async.flushMicrotasks();
 
-        async.elapse(streamFirstFixTimeout * 2);
-        // 살아 있는 스트림을 벙어리로 오인해 끊으면 안 된다.
-        expect(h.streams.openCount, 1);
-        expect(h.deliveries, [true]);
+        async.elapse(streamSilenceTimeout + streamRetryMinDelay);
+        expect(
+          h.streams.openCount,
+          2,
+          reason: '한 건 뒤 조용해진 스트림을 아무도 못 잡는다',
+        );
+        h.session.stop();
+      });
+    });
+
+    test('3-c) 기기도 좌표를 못 만들면(실내·터널) 다시 열지 않는다', () {
+      // 스트림도 일회성 조회도 조용하면 **신호가 없는 것이지 스트림이 깨진 것이
+      // 아니다.** 안 가르면 실내에 서 있는 내내 구독을 여닫는다 — 실내에서
+      // 구독을 유지한다는 약속(`outdoor_indoor_gps_test.dart`)이 여기서 깨진다.
+      fakeAsync((async) {
+        final h = _harness(now: _clock(async));
+        h.session.start();
+        h.streams.latest.add(_fix());
+        async.flushMicrotasks();
+
+        async.elapse((streamSilenceTimeout + streamRetryMinDelay) * 3);
+        expect(
+          h.streams.openCount,
+          1,
+          reason: '신호가 없을 뿐인데 채널을 계속 두드린다',
+        );
         h.session.stop();
       });
     });
@@ -257,9 +322,9 @@ void main() {
       fakeAsync((async) {
         final h = _harness();
         h.session.start();
-        async.elapse(streamFirstFixTimeout + streamRetryMinDelay);
+        async.elapse(streamSilenceTimeout + streamRetryMinDelay);
         expect(h.streams.openCount, 2);
-        async.elapse(streamFirstFixTimeout + streamRetryMinDelay * 2);
+        async.elapse(streamSilenceTimeout + streamRetryMinDelay * 2);
         expect(h.streams.openCount, 3);
         h.session.stop();
       });

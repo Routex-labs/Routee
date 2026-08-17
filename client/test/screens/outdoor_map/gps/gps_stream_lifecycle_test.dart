@@ -114,7 +114,7 @@ void main() {
     // 감시 타이머가 터져도 곧바로 다시 열지는 않는다. 닫힌 스트림과 **같은
     // 재시도 경로**를 태우기 때문이다(_handlePositionStreamClosed) — 벙어리
     // 스트림이 영구 실패인 경우까지 감안한 설계다.
-    await tester.pump(streamFirstFixTimeout + const Duration(milliseconds: 100));
+    await tester.pump(streamSilenceTimeout + const Duration(milliseconds: 100));
     expect(
       subscribeCount,
       1,

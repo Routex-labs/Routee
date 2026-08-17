@@ -36,12 +36,15 @@ const streamRetryMinDelay = Duration(seconds: 2);
 /// 재연결 간격의 상한.
 const streamRetryMaxDelay = Duration(seconds: 30);
 
-/// 스트림을 연 뒤 이 시간 안에 좌표가 한 건도 안 오면 **죽은 것으로 본다.**
+/// 스트림이 이 시간 동안 좌표를 한 건도 안 주면 **죽은 것으로 본다.**
 ///
 /// geolocator 안드로이드는 포그라운드 서비스 바인딩 전에 구독하면 위치 요청을
 /// 걸지 않고 그냥 돌아선다 — 에러도 종료도 가지 않아 `onDone`으로는 못 잡는다.
 /// 이 감시가 **유일한 탈출구**다.
-const streamFirstFixTimeout = Duration(seconds: 12);
+///
+/// **첫 좌표가 아니라 마지막 좌표에서 다시 잰다.** 한 건만 주고 조용해지는
+/// 스트림이 실기기에서 나왔는데, 첫 좌표에서 감시를 걷으면 아무도 못 잡는다.
+const streamSilenceTimeout = Duration(seconds: 12);
 
 /// 다음 재연결까지 기다릴 시간. 실패가 이어지면 배로 늘리고 [streamRetryMaxDelay]
 /// 에서 멈춘다.

@@ -1,11 +1,11 @@
-/// 위치 스트림의 **수명**을 소유한다 — 구독, 재연결, 벙어리 감시, 조용한
+/// 위치 스트림의 **수명**을 소유한다 — 구독, 재연결, 침묵 감시, 조용한
 /// 구간을 메우는 일회성 조회.
 ///
 /// 좌표를 **어떻게 쓸지는 화면이 정한다** — 여기는 "좌표가 왔다"를 끊기지 않게
 /// 배달하는 것까지다.
 ///
-/// 한 곳에 모은 이유는 스트림이 **세 가지로 다르게 죽기** 때문이다(에러 닫힘·조용한
-/// 닫힘·열린 채 벙어리). 근거와 실기기 로그는 `docs/client/gps-stream-policy.md`.
+/// 한 곳에 모은 이유는 스트림이 **네 가지로 다르게 죽기** 때문이다(에러 닫힘·조용한
+/// 닫힘·처음부터 벙어리·한 건 뒤 침묵). 근거와 실기기 로그는 `docs/client/gps-stream-policy.md`.
 library;
 
 import 'dart:async';
@@ -25,6 +25,7 @@ class GpsSession {
     required this.onFix,
     required this.isActive,
     required this.onStreamError,
+    this.now = DateTime.now,
   });
 
   /// 좌표 배달구. 스트림으로 온 것과 일회성 조회로 끌어온 것이 **같은 문**을
@@ -40,18 +41,28 @@ class GpsSession {
   /// 옛 좌표를 계속 그려 두면 사용자가 그 자리에 있다고 읽는다.
   final VoidCallback onStreamError;
 
+  /// 지금 시각. **테스트만 갈아끼운다** — `fakeAsync`의 `elapse`는 `DateTime.now`
+  /// 를 밀지 않아, 실제 시계를 그대로 쓰면 좌표의 낡음을 재는 갈래
+  /// ([shouldRequestFreshFix])를 테스트에서 한 번도 돌릴 수 없다.
+  final DateTime Function() now;
+
   StreamSubscription<Position>? _subscription;
 
   /// 닫힌 스트림을 다시 열기까지 기다리는 시간. 계산은 [nextStreamRetryDelay]가 한다.
   Duration _retryDelay = streamRetryMinDelay;
   Timer? _retryTimer;
 
-  /// 지금 열어 둔 스트림이 좌표를 한 건이라도 줬는지. 구독을 새로 열 때마다
-  /// false로 되돌린다.
+  /// 스트림이 조용한지 지켜보는 타이머([streamSilenceTimeout]).
+  Timer? _silenceTimer;
+
+  /// 지금 열어 둔 구독이 좌표를 한 건이라도 줬는지. 구독을 새로 열 때 되돌린다.
   bool _deliveredFix = false;
 
-  /// 새로 연 스트림이 벙어리인지 지켜보는 타이머([streamFirstFixTimeout]).
-  Timer? _firstFixTimer;
+  /// 마지막 스트림 좌표 **뒤에** 일회성 조회가 좌표를 받아 왔는지.
+  ///
+  /// 스트림 침묵의 원인을 가르는 값이다 — 기기는 좌표를 만드는데 스트림만
+  /// 조용하다면 스트림이 깨진 것이고, 둘 다 조용하면 신호가 없는 것이다.
+  bool _oneShotSinceStreamFix = false;
 
   /// 스트림이 조용한지 주기적으로 확인하는 타이머.
   Timer? _freshFixTimer;
@@ -92,8 +103,8 @@ class GpsSession {
     _syncFreshFixTimer(wanted: false);
     _retryTimer?.cancel();
     _retryTimer = null;
-    _firstFixTimer?.cancel();
-    _firstFixTimer = null;
+    _silenceTimer?.cancel();
+    _silenceTimer = null;
     _retryDelay = streamRetryMinDelay;
     final subscription = _subscription;
     if (subscription == null) return;
@@ -108,6 +119,7 @@ class GpsSession {
   void _subscribe() {
     _restartCount++;
     _deliveredFix = false;
+    _oneShotSinceStreamFix = false;
     _subscription = watchPosition().listen(
       (position) => _deliver(position, fromStream: true),
       onError: (Object _) {
@@ -119,40 +131,66 @@ class GpsSession {
       onDone: _handleClosed,
     );
     // **닫히지 않고 벙어리가 되는 경우**를 잡는다. 위 onDone/onError는 둘 다
-    // 걸리지 않는다 — 자세한 사정은 [streamFirstFixTimeout] 주석에 있다.
-    _firstFixTimer?.cancel();
-    _firstFixTimer = Timer(streamFirstFixTimeout, () {
-      _firstFixTimer = null;
-      if (!isActive() || _deliveredFix) return;
+    // 걸리지 않는다 — 자세한 사정은 [streamSilenceTimeout] 주석에 있다.
+    _armSilenceWatchdog();
+  }
+
+  /// 침묵 감시를 새로 건다. 구독을 열 때와 **스트림 좌표가 올 때마다** 부른다.
+  ///
+  /// 터졌을 때 다시 여는 조건은 [_shouldReopenOnSilence]가 정한다. 조건이 아니면
+  /// 감시만 다시 걸어, 신호가 없는 구간에서 채널을 두드리지 않는다.
+  void _armSilenceWatchdog() {
+    _silenceTimer?.cancel();
+    _silenceTimer = Timer(streamSilenceTimeout, () {
+      _silenceTimer = null;
+      if (!isActive()) return;
+      if (!_shouldReopenOnSilence()) {
+        _armSilenceWatchdog();
+        return;
+      }
+      // 진단 칩은 화면에만 뜨고 로그에는 안 남는다. 사후에 "스트림이 조용했다"를
+      // 확인할 수 있는 유일한 단서라, 재구독이 드문 만큼 남겨 둔다.
+      debugPrint('[gps] 스트림이 ${streamSilenceTimeout.inSeconds}초 조용해 다시 연다');
       _handleClosed();
     });
   }
 
+  /// 조용한 스트림을 끊고 다시 열지. **침묵의 원인이 스트림일 때만 참이다.**
+  ///
+  /// 한 건도 못 준 구독은 포그라운드 서비스 바인딩 경합에 진 것이라 무조건 다시
+  /// 연다. 주다가 조용해진 구독은 같은 시간에 **일회성 조회가 좌표를 받아 왔을
+  /// 때만** 끊는다 — 그때만 "기기는 만드는데 스트림만 조용하다"가 성립한다.
+  /// 둘 다 조용하면 신호가 없는 것이고(실내·터널), 다시 열어도 얻는 것이 없다.
+  bool _shouldReopenOnSilence() => !_deliveredFix || _oneShotSinceStreamFix;
+
   void _deliver(Position position, {required bool fromStream}) {
     _lastFixFromStream = fromStream;
-    // 좌표가 한 건이라도 들어오면 스트림은 살아 있다. 벙어리 감시를 걷고,
-    // 재연결 간격도 되돌려 다음에 끊겼을 때 30초를 기다리지 않게 한다.
+    // 좌표가 들어오면 스트림은 살아 있다. 침묵 감시를 **다시 걸고**(걷어 버리면
+    // 한 건만 주고 조용해지는 스트림을 못 잡는다), 재연결 간격도 되돌려 다음에
+    // 끊겼을 때 30초를 기다리지 않게 한다.
     if (fromStream) {
       _deliveredFix = true;
-      _firstFixTimer?.cancel();
-      _firstFixTimer = null;
+      _oneShotSinceStreamFix = false;
+      _armSilenceWatchdog();
       _retryDelay = streamRetryMinDelay;
+    } else {
+      _oneShotSinceStreamFix = true;
     }
     // 추적이 꺼지기 직전에 이미 큐에 들어간 이벤트가 뒤늦게 도착할 수 있다.
     // 구독은 끊겼어도 이 한 건이 새어들어오면 위치 마커가 다시 켜지므로 막는다.
     if (!isActive()) return;
     // 낡음 판정은 **받은 시각** 기준이다. 기기가 찍은 시각을 쓰면, 같은 좌표를
     // 반복해서 받는 동안에도 계속 낡은 것으로 보여 요청이 멈추지 않는다.
-    _lastFixReceivedAt = DateTime.now();
+    _lastFixReceivedAt = now();
     onFix(position, fromStream: fromStream);
   }
 
-  /// 스트림이 어떤 방식으로든 끝났을 때. 세 갈래(에러·정상 종료·벙어리)가 전부
+  /// 스트림이 어떤 방식으로든 끝났을 때. 세 갈래(에러·정상 종료·침묵)가 전부
   /// 여기로 모여 **같은 재시도 경로**를 탄다.
   void _handleClosed() {
     if (_subscription == null) return;
-    _firstFixTimer?.cancel();
-    _firstFixTimer = null;
+    _silenceTimer?.cancel();
+    _silenceTimer = null;
     unawaited(_subscription!.cancel());
     _subscription = null;
     if (!isActive()) return;
@@ -187,16 +225,14 @@ class GpsSession {
     if (!isActive()) return;
     if (!shouldRequestFreshFix(
       lastFixReceivedAt: _lastFixReceivedAt,
-      now: DateTime.now(),
+      now: now(),
       requestInFlight: _freshFixInFlight,
     )) {
       return;
     }
     _freshFixInFlight = true;
     try {
-      final position = await Geolocator.getCurrentPosition(
-        locationSettings: oneShotFixSettings(),
-      );
+      final position = await currentPosition();
       _deliver(position, fromStream: false);
     } catch (error) {
       // 조용히 넘긴다. 다음 주기에 다시 시도하고, 실패해도 스트림은 그대로다.
