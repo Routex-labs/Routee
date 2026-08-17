@@ -4,23 +4,18 @@
 /// 거리로 만들고([indoorEnterInsetMeters]·[outdoorExitMarginMeters]), 판정과 함께
 /// 그 판정을 만든 숫자를 돌려준다([GpsBuildingJudgement]).
 ///
-/// 임계값의 근거, 버린 규칙("신호가 무너짐"), 진단 칩의 각 항목이 왜 필요한지는
-/// `docs/client/indoor-entry-rules.md`.
+/// 임계값의 근거, 버린 규칙("신호가 무너짐"·"진입 오차 문턱"), 진단 칩의 각 항목이
+/// 왜 필요한지는 `docs/client/indoor-entry-rules.md`.
 library;
 
 import 'package:latlong2/latlong.dart' as ll;
 
 import 'indoor_entry_proximity.dart';
 
-/// **진입** 판정에 쓸 수 있는 좌표의 최대 오차(m). 넘으면 진입 근거로 안 쓴다.
-const decisiveAccuracyMeters = 20.0;
-
-/// **이탈** 판정에 쓸 수 있는 좌표의 최대 오차(m). 진입보다 느슨하다.
+/// **이탈** 판정에 쓸 수 있는 좌표의 최대 오차(m).
 ///
-/// 건물에서 막 나온 순간이 정확히 오차가 큰 구간이라, 진입과 같은 20 m를
-/// 요구하면 그 구간이 통째로 `unclear`가 돼 전환이 늦는다. 이탈은 벽 **밖으로
-/// 8 m**를 요구하므로 30 m 오차로도 그만큼 나갔다면 근거로 쓸 만하다. 진입은
-/// 안쪽 5 m뿐이라 같이 풀면 안 된다.
+/// 이탈은 벽 **밖으로 8 m**를 요구하므로 30 m 오차로도 그만큼 나갔다면 근거로
+/// 쓸 만하다. 이보다 나쁜 좌표는 건물 폭과 오차가 맞먹어 안팎을 못 가른다.
 const outdoorExitAccuracyMeters = 30.0;
 
 /// 외곽선에서 이만큼 안쪽에 찍혀야 "들어왔다"고 본다(m).
@@ -83,8 +78,8 @@ class GpsBuildingJudgement {
   /// 이 좌표가 말하는 건물 안팎.
   final GpsBuildingVerdict verdict;
 
-  /// 이 좌표의 오차 반경(m). [decisiveAccuracyMeters]를 넘으면 나머지 거리가
-  /// 어떻든 [GpsBuildingVerdict.unclear]다.
+  /// 이 좌표의 오차 반경(m). **이탈 갈래만** 이 값을 본다
+  /// ([outdoorExitAccuracyMeters]) — 진입은 오차를 따지지 않는다.
   final double accuracyMeters;
 
   /// 외곽선 **안쪽**으로 들어와 있는 거리(m). 밖이면 0.
@@ -144,16 +139,16 @@ GpsBuildingJudgement judgeBuildingFromGps({
 
 /// 잰 거리로 결론을 내리는 사다리. 순서가 곧 정책이다.
 ///
-/// **오차 문턱을 두 갈래가 각자 본다.** 예전에는 맨 위에서 한 번만 걸렀는데,
-/// 그 값이 진입 기준(엄격)이라 이탈까지 같이 막혔다 — 건물에서 막 나온 순간이
-/// 정확히 오차가 큰 구간이라 그 구간이 통째로 `unclear`가 됐다.
+/// **진입은 오차를 보지 않는다.** 좌표가 외곽선 안쪽 문턱을 넘었으면 그것으로
+/// 끝이다 — 오차 문턱을 두면 실내에서 신호가 무너진 구간이 통째로 `unclear`가
+/// 되어, 이미 건물 안인 사용자가 한참 뒤에야 들어간다. 대신 잘못 들어간 화면은
+/// 건물 밖을 한 번 탭하면 닫힌다.
 GpsBuildingVerdict _verdictFrom({
   required double accuracyMeters,
   required double metersInside,
   required double metersOutside,
 }) {
-  if (accuracyMeters <= decisiveAccuracyMeters &&
-      metersInside >= indoorEnterInsetMeters) {
+  if (metersInside >= indoorEnterInsetMeters) {
     return GpsBuildingVerdict.inside;
   }
   if (accuracyMeters <= outdoorExitAccuracyMeters &&
