@@ -1,11 +1,12 @@
 {
-  "exported_at": "2026-07-25T11:20:00.000Z",
-  "source_tool": "OSM Overpass API (way 874639191, 더현대 서울 building=retail)",
+  "exported_at": "2026-08-17T12:40:00.000Z",
+  "source_tool": "VWorld data API (LT_C_SPBD, bd_mgt_sn 1156011000100220000000002, 파크원/더현대 서울)",
   "building_id": "thehyundai-seoul",
   "notes": [
-    "OSM way 874639191의 12 vertex 중 4개 극점(N/W/S/E)을 GCP로 채택. 클라이언트가 base 지도로 OSM 타일을 쓰는 한 GCP도 OSM 좌표계로 잡아야 폴리곤/실내 오버레이가 base 타일 상 건물 외곽과 정확히 정렬된다.",
-    "이전엔 VWorld 위성 클릭 좌표를 썼는데(2026-07-25 03:43 export), VWorld ↔ OSM 사이 위성 정렬 차이(더현대 기준 S/E 코너 4~5m offset) 때문에 야외 폴리곤과 base 타일 건물 외곽이 미세하게 어긋나 보였다.",
-    "VWorld 배경(vworldApiKey 설정 시)으로 배포한다면 이 파일을 VWorld 위성 클릭 좌표 결과로 다시 갱신해야 한다.",
+    "클라이언트가 VWORLD_API_KEY로 VWorld Base 타일을 배경으로 쓰므로 GCP도 VWorld 좌표계여야 실내 오버레이가 base 타일 건물 외곽과 정렬된다. 165점 폴리곤에서 위/경도 극점 4개(N/W/S/E)를 뽑았다.",
+    "이전 값은 OSM way 874639191(building=retail) 꼭지점이었다. 두 좌표계 차이가 N 1.95m · W 3.98m · S 5.21m · E 2.97m였고, 실기기에서 건물 남동 코너의 도면 외곽선이 base 타일 밖으로 삐져나와 보였다.",
+    "OSM 타일로 되돌린다면(VWORLD_API_KEY 미설정 시 폴백) 이 파일도 OSM 꼭지점으로 되돌려야 한다. 옛 값: N 37.5268241/126.9282939 · W 37.5262864/126.9274028 · S 37.5251019/126.9285444 · E 37.5256412/126.9294340.",
+    "LT_C_SPBD 폴리곤은 커튼월 때문에 1m 남짓의 톱니가 있어 극점이 진짜 꼭지점에서 최대 1m 어긋날 수 있다. 최소자승 4점 피팅이라 그 잡음은 대부분 상쇄된다.",
     "compass 필드는 실제 방위 (N=북, W=서, S=남, E=동). 대칭 사각형 건물에서 180° 뒤집힘을 GCP 잔차로 판별할 수 없어 명시적 방위 힌트로 확정한다.",
     "재정합 스크립트: python -m scripts.transform.refit_building_wgs84 --studio resources/studio/thehyundai-seoul-dabeeo --gcps resources/calibration/thehyundai-seoul-gcps.json"
   ],
@@ -15,8 +16,8 @@
       "label": "1",
       "compass": "N",
       "outdoor": {
-        "lat": 37.5268241,
-        "lng": 126.9282939
+        "lat": 37.5268115,
+        "lng": 126.9282786
       },
       "indoor_px": null,
       "complete": false
@@ -25,8 +26,8 @@
       "label": "2",
       "compass": "W",
       "outdoor": {
-        "lat": 37.5262864,
-        "lng": 126.9274028
+        "lat": 37.5262518,
+        "lng": 126.9273913
       },
       "indoor_px": null,
       "complete": false
@@ -35,8 +36,8 @@
       "label": "3",
       "compass": "S",
       "outdoor": {
-        "lat": 37.5251019,
-        "lng": 126.9285444
+        "lat": 37.5250606,
+        "lng": 126.9285722
       },
       "indoor_px": null,
       "complete": false
@@ -45,8 +46,8 @@
       "label": "4",
       "compass": "E",
       "outdoor": {
-        "lat": 37.5256412,
-        "lng": 126.9294340
+        "lat": 37.5256207,
+        "lng": 126.9294555
       },
       "indoor_px": null,
       "complete": false
