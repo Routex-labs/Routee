@@ -74,6 +74,7 @@
 | [전역 테마 넘기기](client/theme-handover.md) | Runtime Kit 전환의 조건·재 본 값·남은 순서 |
 | [실내 진입·이탈 판정 규칙](client/indoor-entry-rules.md) | GPS·zoom·근접 세 축의 임계값 근거 |
 | [GPS 스트림 정책](client/gps-stream-policy.md) | 스트림 수명·신선도·경로 재계산 주기 |
+| [안드로이드 heading 드리프트](client/android-heading-drift.md) | gyro hold가 영구 래치가 되던 구조와 그 수정 |
 | [에스컬레이터 층 판정 임계값](client/escalator-thresholds.md) | 상수마다의 실측 근거와 실측에서 나온 함정 |
 | [현장 검증 체크리스트](client/field-verification-thehyundai.md) | 더현대 서울에서만 확인되는 항목과 기록 방법 |
 | [클라이언트 구조 개편 계획](client/structure-plan.md) | `lib/` 전체 — 디렉터리 성격, 쪼갤 함수, 테스트 규칙 |

@@ -10,6 +10,9 @@
 | `screens/outdoor_map/gps/gps_freshness_policy.dart` | 언제 일회성 조회를 쏠지, 재연결 간격은 얼마인지 |
 | `screens/outdoor_map/route_recompute_policy.dart` | 그 좌표로 도보 경로를 **언제 다시 계산할지** |
 
+방향(heading)은 여기 없다 — 그건 센서 브리지 몫이고
+[안드로이드 heading 드리프트](android-heading-drift.md)가 단일 출처다.
+
 ---
 
 ## 1. 스트림이 죽는 방식이 넷이다
