@@ -218,8 +218,10 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
   /// [judgeBuildingFromGps]가 하고 여기서는 **그 판정으로 무엇을 할지**만 정한다.
   ///
   ///   - 안 + 야외 상태 + 자동 진입 무장 → 실내로 들어가고 위치를 잡는다.
-  ///   - 밖 + 실내 위치가 잡혀 있던 사람 → 야외로 되돌리고 자동 진입을 재무장한다.
+  ///   - 밖 + 실내 위치가 잡혀 있던 사람 → 야외로 되돌린다.
   ///   - 모름 → 아무것도 하지 않는다.
+  ///
+  /// **재무장은 이 셋과 별개 갈래다**([shouldRearmGpsEntry]).
   ///
   /// 이탈 기준이 [_indoorEnteredByGps]가 아니라 [_indoorPositionPlaced]인 이유는
   /// **걸어서 들어온 사람을 놓치기 때문**이다. 앵커가 있다는 건 앱이 이 사람을
@@ -244,6 +246,13 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
             streamRestarts: _gps.restartCount,
           )
         : null;
+    // **재무장은 이 한 줄뿐이다.** 예전에는 아래 outside 갈래 안에 있었는데,
+    // 그러면 오차가 커서 `unclear`로 떨어진 좌표는 아무리 건물 밖을 가리켜도
+    // 빗장을 못 풀었다 — 유리 외벽 앞처럼 오차가 30 m 아래로 안 내려오는
+    // 자리에서 걸어 나감이 끈 빗장이 **영구히** 걸린 채로 남는다.
+    //
+    // 진단 칩 **뒤에** 둔다. 칩의 무장 표시는 이 판정을 내릴 때의 값이어야 한다.
+    if (shouldRearmGpsEntry(judgement)) _gpsEntryArmed = true;
     switch (judgement.verdict) {
       case GpsBuildingVerdict.inside:
         if (_indoorEntered || !_gpsEntryArmed) return;
@@ -255,8 +264,7 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
         _setIndoorEntered(true);
         unawaited(_startTrackingFromGpsFix(position));
       case GpsBuildingVerdict.outside:
-        // 건물을 확실히 벗어났다. 다음 진입을 다시 자동으로 잡을 수 있게 한다.
-        _gpsEntryArmed = true;
+        // 재무장은 위에서 이미 했다(이 판정은 거리 조건을 반드시 만족한다).
         if (!_indoorEntered) return;
         if (!_indoorEnteredByGps && !_indoorPositionPlaced) return;
         // 앵커 배치 대기 중이었다면 함께 종료해 하단 바 버튼 톤도 되돌린다.
@@ -343,8 +351,8 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     if (_placingPdrAnchor) _setPlacingAnchor(false);
     // **GPS 자동 진입을 끈다.** 문 앞에서는 건물 Wi-Fi가 아직 잡혀 좌표가 건물
     // 안을 가리키는데, 켜 둔 채 나가면 다음 좌표 한 건이 방금 나온 사용자를
-    // 도로 끌고 들어간다. 다시 켜는 곳은 GPS가 스스로 `outside`를 말할 때다
-    // (위 [_applyBuildingVerdict]의 outside 갈래).
+    // 도로 끌고 들어간다. 다시 켜는 곳은 좌표가 건물 밖 거리 문턱을 넘을 때
+    // 한 곳뿐이다([shouldRearmGpsEntry]).
     _gpsEntryArmed = false;
     _setIndoorEntered(false, leftBuilding: true);
     // 위치의 주인이 GPS로 돌아왔다. 실내에서 도면에 맞춰 확대해 둔 화면 그대로

@@ -175,6 +175,67 @@ void main() {
     });
   });
 
+  group('shouldRearmGpsEntry', () {
+    test('바깥 문턱을 넘으면 오차가 아무리 나빠도 빗장을 푼다', () {
+      // 이 케이스가 이 함수의 존재 이유다. 유리 외벽 건물 앞은 오차가 30 m
+      // 아래로 안 내려오는 일이 흔한데, 이탈 문턱을 그대로 쓰면 걸어 나감이
+      // 끈 빗장을 아무도 못 풀어 자동 진입이 영구히 죽는다.
+      final judgement = _judge(
+        point: _offset(north: _halfWidthMeters + 30),
+        accuracy: outdoorExitAccuracyMeters + 20,
+      );
+      expect(judgement.verdict, GpsBuildingVerdict.unclear);
+      expect(shouldRearmGpsEntry(judgement), isTrue);
+    });
+
+    test('이탈 판정은 여전히 오차를 본다', () {
+      // 재무장을 느슨하게 한 것이 이탈까지 느슨하게 만들면 안 된다 — 실내에서
+      // 튄 좌표 한 건이 건물 안에 있는 사용자의 도면과 위치를 지운다.
+      final judgement = _judge(
+        point: _offset(north: _halfWidthMeters + 30),
+        accuracy: outdoorExitAccuracyMeters + 20,
+      );
+      expect(judgement.verdict, isNot(GpsBuildingVerdict.outside));
+    });
+
+    test('문 앞 완충 구간에서는 빗장을 풀지 않는다', () {
+      // 여기서 풀면 걸어 나간 직후의 옛 좌표가 사용자를 도로 끌고 들어간다.
+      final judgement = _judge(
+        point: _offset(north: _halfWidthMeters + outdoorExitMarginMeters - 3),
+        accuracy: 5,
+      );
+      expect(shouldRearmGpsEntry(judgement), isFalse);
+    });
+
+    test('건물 안 좌표로는 빗장을 풀지 않는다', () {
+      final judgement = _judge(point: _center, accuracy: 5);
+      expect(shouldRearmGpsEntry(judgement), isFalse);
+    });
+
+    test('외곽선을 모르면 빗장을 풀지 않는다', () {
+      // 거리가 0이라 "바깥 0 m"로 읽히는데, 그건 밖이라는 근거가 아니라
+      // 잴 외곽선이 없다는 뜻이다.
+      final judgement = _judge(
+        point: _center,
+        accuracy: 5,
+        footprint: const [],
+      );
+      expect(judgement.metersOutside, 0);
+      expect(shouldRearmGpsEntry(judgement), isFalse);
+    });
+
+    test('이탈 판정이면 재무장도 반드시 성립한다', () {
+      // 두 조건이 어긋나면 "나갔다고 판정했는데 자동 진입은 여전히 꺼진" 상태가
+      // 생긴다. 재무장을 switch 밖으로 뺀 근거가 이 포함 관계다.
+      final judgement = _judge(
+        point: _offset(north: _halfWidthMeters + 30),
+        accuracy: 5,
+      );
+      expect(judgement.verdict, GpsBuildingVerdict.outside);
+      expect(shouldRearmGpsEntry(judgement), isTrue);
+    });
+  });
+
   group('judgeBuildingFromGps — 근거', () {
     test('결론을 못 낸 좌표도 거리를 그대로 남긴다', () {
       // 이 케이스가 이 기능의 존재 이유다. 거리를 안 재고 0으로 두면 "벽 근처
