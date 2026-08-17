@@ -9,13 +9,40 @@ part of '../outdoor_map_screen.dart';
 extension OutdoorMapMap on OutdoorMapBodyState {
   /// 카메라를 [position]으로 옮긴다. [zoom]을 주면 그 값으로 확대하고, 없으면
   /// 지금 배율을 유지한다 — 따라가는 동안 사용자가 맞춘 배율을 빼앗지 않는다.
-  Future<void> _moveCameraToUser(Position position, {double? zoom}) async {
+  Future<void> _moveCameraToUser(Position position, {double? zoom}) =>
+      _moveCameraToPoint(
+        ll.LatLng(position.latitude, position.longitude),
+        zoom: zoom,
+      );
+
+  /// [_moveCameraToUser]와 같은 동작을 좌표 하나로 부른다. GPS 좌표가 없는
+  /// 이탈 경로(걸어 나감)가 문 좌표로 화면을 되돌릴 때 쓴다.
+  Future<void> _moveCameraToPoint(ll.LatLng point, {double? zoom}) async {
     final controller = _mapController;
     if (controller == null || !_styleReady) return;
-    await animateCameraToPoint(
-      controller,
-      ll.LatLng(position.latitude, position.longitude),
-      zoom: zoom,
+    await animateCameraToPoint(controller, point, zoom: zoom);
+  }
+
+  /// 실내 위치 마커를 화면 정중앙에 놓고, **바라보는 방향이 화면 위쪽**이 되게
+  /// 돌린다. 실내로 들어온 순간과 "보정" 버튼이 같은 연출을 쓴다.
+  ///
+  /// 위치를 아직 모르면 아무것도 하지 않는다 — 중앙에 놓을 자리가 없다. 방향만
+  /// 모르면 지금 방위를 유지한 채 중앙 정렬까지만 한다(모르는 방향으로 지도를
+  /// 돌리면 화면 위쪽이 갈 방향과 어긋난다).
+  Future<void> _centerOnIndoorMarker({double? zoom}) async {
+    final controller = _mapController;
+    final here = _pdrCurrentWgs84();
+    if (controller == null || !_styleReady || here == null) return;
+    final camera = controller.cameraPosition;
+    await controller.animateCamera(
+      CameraUpdate.newCameraPosition(
+        CameraPosition(
+          target: _toGl(here),
+          zoom: zoom ?? camera?.zoom ?? indoorEntryZoomThreshold,
+          bearing: _pdrCurrentHeadingDeg ?? camera?.bearing ?? 0,
+          tilt: camera?.tilt ?? 0,
+        ),
+      ),
     );
   }
 

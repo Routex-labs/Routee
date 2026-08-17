@@ -218,6 +218,10 @@ extension OutdoorMapGps on OutdoorMapBodyState {
 
     _syncPdrCurrentLayer();
     unawaited(_syncDebugPdrLayers());
+    // 이제 실내 마커가 있다. 진입 순간에는 위치를 몰라 건너뛴 연출
+    // ([_setIndoorEntered])을 여기서 한다 — 카메라는 아직 진입 직전의 야외
+    // 화면이라, 방금 찍은 마커가 화면 밖일 수 있다.
+    unawaited(_centerOnIndoorMarker());
     // 입구에서 위치를 새로 잡았으므로, 건물에 들어오기 전에 골라둔 출발지 매장은
     // 더 이상 "지금 내가 있는 곳"이 아니다. 상위가 그 값을 버리게 알린다.
     widget.onLocationAnchored?.call();

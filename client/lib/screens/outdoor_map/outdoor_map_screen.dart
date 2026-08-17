@@ -82,6 +82,7 @@ import 'entry/initial_camera.dart';
 import 'camera/building_orientation.dart';
 import 'entry/indoor_entry_proximity.dart';
 import 'entry/indoor_entry_zoom.dart';
+import 'entry/indoor_exit_walkout.dart';
 import 'outdoor_map_tuning.dart';
 import 'widgets/placing_anchor_hint.dart';
 import 'route_recompute_policy.dart';
@@ -383,6 +384,10 @@ class OutdoorMapBodyState extends State<OutdoorMapBody> {
   ///
   /// **건물 밖 탭만으로는 켜지 않는다** — 화면 조작이지 "내가 밖에 있다"가 아니다.
   bool _gpsEntryArmed = true;
+
+  /// 걸어서 출입구를 통과했는지 따라가는 상태기. GPS가 늦은 구간을 메우는
+  /// 두 번째 이탈 입력이다([_exitIndoorIfWalkedOut]).
+  final EntranceWalkoutDetector _walkoutDetector = EntranceWalkoutDetector();
 
   Position? _position;
 
@@ -843,6 +848,11 @@ class OutdoorMapBodyState extends State<OutdoorMapBody> {
         _pdrTrailState.recordSnapshot(snapshot);
         _syncCorridorTracking(snapshot);
       });
+      // 걸어서 문을 통과했으면 GPS를 기다리지 않고 여기서 나간다. setState
+      // **바깥**에 두는 것이 중요하다 — 이 판정은 화면을 실내에서 야외로 통째로
+      // 바꾸므로, 안에서 부르면 setState가 중첩된다. 나갔으면 아래 갱신은
+      // [_setIndoorEntered]가 이미 야외 기준으로 다시 돌렸다.
+      if (_exitIndoorIfWalkedOut()) return;
       _syncPdrCurrentLayer();
       // 사용자 회색선은 실제 PDR 궤적이 아니라 현재 계획 경로의 완료 구간이다.
       // 진행률이 바뀐 같은 틱에 경로 source도 갱신해야 파란 잔여선과 회색 완료선이

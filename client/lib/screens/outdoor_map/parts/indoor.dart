@@ -277,6 +277,108 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     }
   }
 
+  /// 지금 층의 지상 출입구들을 "안 → 밖" 축으로 만든다.
+  ///
+  /// 문 목록은 출입구 층 것이고([_groundEntranceFloor]) 축의 두 점은 **그 층의**
+  /// 층 좌표라, 다른 층을 보고 있으면 빈 목록이다 — 같은 local m 숫자가 층마다
+  /// 다른 자리를 가리키므로 그대로 쓰면 엉뚱한 곳에서 이탈이 발화한다.
+  List<EntranceAxis> get _walkoutEntranceAxes {
+    final graph = _floorGraph;
+    final floor = _activeFloor;
+    if (graph == null ||
+        graph.nodes.isEmpty ||
+        floor == null ||
+        floor != _groundEntranceFloor ||
+        _groundEntrances.isEmpty) {
+      return const [];
+    }
+    final transform = fitFloorGeoTransform(graph.nodes);
+    final axes = <EntranceAxis>[];
+    for (final entrance in _groundEntrances) {
+      final node = graph.nodes
+          .where((n) => n.id == entrance.nodeId)
+          .firstOrNull;
+      if (node == null) continue;
+      final door = transform.invert(
+        entrance.point.latitude,
+        entrance.point.longitude,
+      );
+      if (door == null) continue;
+      final axis = entranceAxisFrom(
+        nodeId: entrance.nodeId,
+        nodeM: PdrLocalPoint(node.xM, node.yM),
+        doorM: PdrLocalPoint(door.$1, door.$2),
+      );
+      if (axis != null) axes.add(axis);
+    }
+    return axes;
+  }
+
+  /// 걸어서 출입구를 통과했으면 **GPS를 기다리지 않고** 야외로 되돌린다.
+  ///
+  /// 나갔으면 true — 호출자는 그 뒤의 실내 갱신을 건너뛴다. 판정에 쓰는 좌표는
+  /// 복도 보정 **전** 값이다([EntranceWalkoutDetector.update]).
+  ///
+  /// 앵커가 다른 층에 있으면 판정하지 않는다. 그때의 층 좌표는 남의 층 숫자다.
+  bool _exitIndoorIfWalkedOut() {
+    if (!_indoorEntered) return false;
+    final anchor = _pdrTrailState.anchor;
+    final tracking = _guidance.trackingResult;
+    if (anchor == null ||
+        tracking == null ||
+        anchor.floorId != _activeFloor) {
+      return false;
+    }
+    final axes = _walkoutEntranceAxes;
+    if (axes.isEmpty) return false;
+    final nodeId = _walkoutDetector.update(
+      axes: axes,
+      positionM: tracking.rawPreviewPosition,
+    );
+    if (nodeId == null) return false;
+
+    final entrance = _groundEntrances
+        .where((candidate) => candidate.nodeId == nodeId)
+        .firstOrNull;
+    if (_placingPdrAnchor) _setPlacingAnchor(false);
+    // **GPS 자동 진입을 끈다.** 문 앞에서는 건물 Wi-Fi가 아직 잡혀 좌표가 건물
+    // 안을 가리키는데, 켜 둔 채 나가면 다음 좌표 한 건이 방금 나온 사용자를
+    // 도로 끌고 들어간다. 다시 켜는 곳은 GPS가 스스로 `outside`를 말할 때다
+    // (위 [_applyBuildingVerdict]의 outside 갈래).
+    _gpsEntryArmed = false;
+    _setIndoorEntered(false, leftBuilding: true);
+    // 위치의 주인이 GPS로 돌아왔다. 실내에서 도면에 맞춰 확대해 둔 화면 그대로
+    // 두면 방금 켠 GPS 마커가 화면 밖일 수 있다.
+    final position = _position;
+    final target = position != null
+        ? ll.LatLng(position.latitude, position.longitude)
+        : entrance?.point;
+    if (target != null) unawaited(_moveCameraToPoint(target));
+    // 되돌릴 손잡이를 함께 띄운다. PDR heading이 180도 어긋난 기기에서는 건물
+    // 안으로 걸어 들어가는 것이 "나가는 것"으로 읽힐 수 있는데, 그 오판을
+    // 사용자가 한 번에 되돌릴 수 있어야 한다.
+    showDebugToast(
+      context,
+      message: '출입구를 지나 밖으로 나온 것으로 보고 야외 지도로 돌아갑니다.',
+      bottomOffset: mapShellBottomChromePx + 12,
+      actionLabel: '실내로 되돌리기',
+      onAction: _returnIndoorAfterWalkout,
+    );
+    return true;
+  }
+
+  /// 걸어 나감 판정이 틀렸을 때 사용자가 되돌리는 길.
+  ///
+  /// 실내 위치는 [_dropIndoorPosition]이 이미 버렸으므로 되살릴 수 없다 —
+  /// 도면만 다시 펴고 위치는 사용자가 다시 지정한다. **GPS 자동 진입은 계속
+  /// 꺼 둔다**: 방금 그 판정이 틀렸다는 뜻이지 GPS가 맞다는 뜻이 아니다.
+  void _returnIndoorAfterWalkout() {
+    if (_indoorEntered) return;
+    _walkoutDetector.reset();
+    _setIndoorEntered(true);
+    unawaited(_recenterOnBuildingIfNeeded());
+  }
+
   /// arbitrary reference 기기에서 쓸 "진입 방향"을 층 좌표 벡터로 만든다.
   /// 층 좌표계는 데이터셋마다 축이 뒤집혀 있을 수 있어, 나침반 각도는 반드시
   /// [axes]를 거쳐 층 벡터로 바꾼다.
@@ -704,6 +806,9 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
   /// 갈린다 — 접은 사용자는 다시 펼 수 있으니 앵커를 남기고 예약도 소비하지 않는다.
   void _setIndoorEntered(bool value, {bool leftBuilding = false}) {
     if (_indoorEntered == value) return;
+    // 걸어 나감 무장은 **이 세션의 층 좌표**로 쌓은 근거다. 오갈 때마다 버려야
+    // 다음 진입이 지난번 문 앞에 서 있던 상태로 시작하지 않는다.
+    _walkoutDetector.reset();
     // 상태를 내리기 **전에** 버린다. 아래 [_syncPdrCurrentLayer]가 이 값을 보고
     // 그릴지 말지를 정하므로, 뒤에 버리면 그 한 프레임 동안 옛 위치가 남는다.
     if (!value && leftBuilding) _dropIndoorPosition();
@@ -757,6 +862,10 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     // 지정하는 순간 heading이 이미 수렴해 있다. **야외로 나갈 때는 끄지 않는다** —
     // 오갈 때마다 껐다 켜지면 앵커와 걸음 누적이 매번 초기화된다.
     if (value) unawaited(_startPdrIfIdle());
+    // 실내로 들어오면 화면의 주인은 실내 마커다. 위치를 이미 알고 있으면 그
+    // 자리로 옮기고 바라보는 방향으로 돌린다. 아직 모르면 아무것도 하지 않고,
+    // 앵커가 잡히는 자리에서 같은 연출을 한다([_startTrackingFromGpsFix]).
+    if (value) unawaited(_centerOnIndoorMarker());
     // 문 경유 안내의 구간 승격은 여기 한 곳에만 둔다 — 진입도 이탈도 어느 경로로
     // 판정되든 이 함수를 지난다. 나가는 쪽만 [leftBuilding]으로 한 번 더 좁힌다.
     if (value) {
