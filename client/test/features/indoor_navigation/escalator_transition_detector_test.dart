@@ -69,10 +69,21 @@ class _Fixture {
     );
   }
 
-  /// 에스컬레이터에서 멀리 떨어진 복도에 있다고 알린다.
+  /// 에스컬레이터에서 멀리 떨어진 복도에 있다고 알린다. 어느 허가 반경에도
+  /// 안 들어가는 거리다(근접 6m·경로 16m·기압 16m 전부 밖).
   void standFarAway() {
     detector.onPosition(
       positionM: const PdrLocalPoint(60, 60),
+      steps: steps,
+      timestampMs: nowMs,
+    );
+  }
+
+  /// 층 로컬 좌표 한 점에 서 있다고 알린다. 랜딩에서 보정 위치가 어긋난 상황을
+  /// 만들 때 쓴다.
+  void standAt(double x, double y) {
+    detector.onPosition(
+      positionM: PdrLocalPoint(x, y),
       steps: steps,
       timestampMs: nowMs,
     );
@@ -810,9 +821,10 @@ void main() {
   });
 
   group('2차 감지 — 누적 고도로 올라가는 갈래', () {
-    // 실측에서 랜딩 보정 위치가 12m까지 어긋나 허가가 안 걸리는 일이 흔했다.
-    // 그 구간에서도 걸음은 멈춰야 한다 — 몸이 수직으로 실려 가는 중이라는
-    // 근거는 기압이 이미 주고 있다. 대신 층은 바꾸지 않는다.
+    // 탑승 노드를 아무 반경으로도 못 고르는 구간(여기 테스트들은 60m 밖에 선다)
+    // 에서도 걸음은 멈춰야 한다 — 몸이 수직으로 실려 가는 중이라는 근거는 기압이
+    // 이미 주고 있다. 대신 층은 바꾸지 않는다. 노드를 고를 수 있는 거리면 그때는
+    // 층까지 바꾼다(아래 「기압 근거 허가」).
 
     test('허가가 없어도 누적 고도가 문턱을 넘으면 걸음을 멈춘다', () {
       final fixture = _Fixture();
@@ -891,6 +903,88 @@ void main() {
       fixture.hold(atM: -3, seconds: 5);
 
       expect(fixture.phasesOf(), contains(EscalatorPhase.cancelled));
+    });
+  });
+
+  group('기압 근거 허가', () {
+    // 2026-08-17 현장: "1F → B1 이동 중" 배너는 뜨는데 층이 끝내 안 바뀌었다.
+    // 근접 허가(6m)가 랜딩에서 안 걸리면 후보 자체가 안 열려, 화면은 이동을
+    // 말하면서 아무 일도 일어나지 않는 상태로 남는다.
+
+    test('보정 위치가 탑승 노드에서 12m 어긋나도 층을 바꾼다', () {
+      final fixture = _Fixture();
+      fixture.hold(atM: 0, seconds: 5);
+      // 근접 허가 반경(6m) 밖이고 기압 허가 반경(16m) 안이다.
+      fixture.standAt(12, 0);
+      fixture.ramp(fromM: 0, toM: 4.5, seconds: 20, rawPeaksPerSample: 2);
+      fixture.hold(atM: 4.5, seconds: 5);
+
+      expect(fixture.confirmed, hasLength(1));
+      final transition = fixture.confirmed.single;
+      expect(transition.toFloorLabel, '3F');
+      expect(transition.boardingNodeId, 'n-up-to3f');
+      // 근거를 따로 적어 둔다 — 현장 로그에서 "근접으로 걸린 것"과 구분해야
+      // 이 갈래가 실제로 얼마나 쓰이는지 셀 수 있다.
+      expect(transition.boardingEvidence, 'altitudeArmed');
+    });
+
+    test('기압 부호와 반대인 탑승 노드는 고르지 않는다', () {
+      // 위치만 보면 하행 노드가 더 가깝다(9m vs 12m). 올라가는 중이므로
+      // 상행 노드가 아니면 아무것도 고르지 않아야 한다.
+      final fixture = _Fixture();
+      fixture.hold(atM: 0, seconds: 5);
+      fixture.standAt(12, 0);
+      fixture.ramp(fromM: 0, toM: 4.5, seconds: 20, rawPeaksPerSample: 2);
+      fixture.hold(atM: 4.5, seconds: 5);
+
+      expect(fixture.confirmed.single.direction, EscalatorDirection.up);
+      expect(fixture.confirmed.single.boardingNodeId, 'n-up-to3f');
+    });
+
+    test('두 뱅크가 함께 잡히면 아무것도 허가하지 않는다', () {
+      // 어느 것을 탔는지 가릴 근거가 없다. 층을 잘못 바꾸는 비용이 못 바꾸는
+      // 비용보다 크므로 여기서는 판정하지 않는다.
+      final fixture = _Fixture(
+        graph: FloorGraph(
+          nodes: [
+            _escalator('a-up-to3f', 'ES1-UP(TO3F)', 0, 0),
+            _escalator('b-up-to3f', 'ES2-UP(TO3F)', 28, 0),
+          ],
+          edges: const [],
+        ),
+      );
+      fixture.hold(atM: 0, seconds: 5);
+      // 두 뱅크에서 각각 14m — 근접 허가 밖이고 기압 허가 안이다.
+      fixture.standAt(14, 0);
+      fixture.ramp(fromM: 0, toM: 4.5, seconds: 20, rawPeaksPerSample: 2);
+      fixture.hold(atM: 4.5, seconds: 5);
+
+      expect(fixture.started, isEmpty);
+      expect(fixture.confirmed, isEmpty);
+    });
+
+    test('기압 허가 반경 밖이면 예전처럼 층을 바꾸지 않는다', () {
+      final fixture = _Fixture();
+      fixture.hold(atM: 0, seconds: 5);
+      fixture.standAt(20, 0);
+      fixture.ramp(fromM: 0, toM: 4.5, seconds: 20, rawPeaksPerSample: 2);
+      fixture.hold(atM: 4.5, seconds: 5);
+
+      expect(fixture.started, isEmpty);
+      expect(fixture.confirmed, isEmpty);
+    });
+
+    test('기기가 멈춰 있으면 기압만으로 허가하지 않는다', () {
+      // 책상 위 폰의 기압 드리프트가 층을 바꾸면 안 된다. rawPeaks 없이 같은
+      // 고도 변화를 준다.
+      final fixture = _Fixture();
+      fixture.hold(atM: 0, seconds: 5);
+      fixture.standAt(12, 0);
+      fixture.ramp(fromM: 0, toM: 4.5, seconds: 20);
+      fixture.hold(atM: 4.5, seconds: 5);
+
+      expect(fixture.started, isEmpty);
+      expect(fixture.confirmed, isEmpty);
     });
   });
 
