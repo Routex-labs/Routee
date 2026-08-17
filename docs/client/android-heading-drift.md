@@ -215,24 +215,78 @@ iOS와도 문자 그대로 같은 식이다(축 이름만 ENU ↔ NWU로 다르�
 아니라 입력이 틀렸다** — 철골 건물 안에서 자력계가 끌려가 rotation vector의 절대
 yaw가 통째로 돌아간 것이다. 백화점 실내에서 90° 단위 오차는 흔하다.
 
-## 6. 진짜 고칠 것 — 틀린 줄 알면서 고칠 수단이 없었다
+## 6. 진짜 원인 — 한 줄짜리 회귀였다
 
-여기가 이 문제의 핵심이고, 위 P1~P5와 완전히 별개다.
+### 범인
+
+**`81b4d570 fix: retain Android absolute heading during gyro hold` (2026-07-17)**
+
+```diff
+   if (source != null &&
+       source.contains('rotation_vector') &&
+-      !source.contains('game_rotation_vector') &&
+-      !source.contains('gyro_hold')) {
++      !source.contains('game_rotation_vector')) {
+     return HeadingReference.magneticNorth;
+   }
+```
+
+같은 커밋이 Kotlin 쪽 문자열도 `"sensor_manager/gyro_hold"`에서
+`"sensor_manager/rotation_vector+gyro_hold"`로 바꿨다.
+
+### 왜 이게 방향을 90° 틀어 놓나
+
+앵커를 확정할 때 갈래가 하나뿐이다.
 
 ```
-if (_session.headingReference == HeadingReference.magneticNorth) {
-  _finalizeAnchor(rotationDeg: 0, ...);   // ← 보정 없음으로 확정
-} else {
-  _updateCalibration(CalibrationPhase.awaitingHeading);  // ← 방향을 묻는다
-}
+if (headingReference == magneticNorth) → rotationDeg = 0 (보정 없음)
+else                                   → awaitingHeading (방향을 받는다)
 ```
 
-**`headingReference`는 "이 값이 자북 frame인가"라는 성질이지 "그 frame이 지금
-맞는가"라는 상태가 아니다.** Android는 rotation vector가 있다는 이유만으로 늘
-`magneticNorth`라, 자력계가 90° 끌려가 있어도 이 분기는 위쪽으로 가고 rotation은
-0으로 못 박힌다. 그리고 방향을 물어보는 경로는 아래쪽에만 있다 — **틀렸다는 것을
-알아도 사용자가 고칠 방법이 화면에 없었다.** 칩의 `rot 0° · magneticNorth`가
-정확히 그 상태를 찍은 것이다.
+**철골 건물 안에서는 gyro hold가 사실상 상시 걸린다** — `poorMagnetic`,
+`fieldDeviation > 0.35`, `innovation > 35°` 중 하나는 늘 성립한다.
+
+| | 실내에서의 `headingSource` | 분류 | 앵커 | 결과 |
+|---|---|---|---|---|
+| 회귀 전 | `sensor_manager/gyro_hold` | arbitrary | `awaitingHeading` | GPS course나 화면 방향으로 **보정각을 받아** 확정 → 방향이 맞았다 |
+| 회귀 후 | `sensor_manager/rotation_vector+gyro_hold` | magneticNorth | `rot = 0` | **교란된 자기 방위를 보정 없이 그대로** 씀 → 90° 틀어짐 |
+
+즉 예전에 잘 됐던 이유는 자력계가 정확해서가 아니라, **실내에 들어가면 앱이
+스스로 "이 방위는 못 믿는다"고 분류해 다른 근거(GPS course)로 갈아탔기**
+때문이다. 그 분류가 사라지면서 갈아탈 기회 자체가 없어졌다.
+
+칩의 `rot 0° · magneticNorth`가 정확히 회귀 후 상태를 찍은 것이다.
+
+### 그 커밋이 틀렸던 것은 아니다 — 절반만 맞았다
+
+frame 판정은 그 커밋 말이 맞다. hold 중에도 마지막 rotation-vector frame에서
+적분을 이어가므로 **기준 frame은 여전히 자북**이고, 서버 자북 정렬각은 그대로
+유효하다. 커밋 메시지도 "품질 저하는 `headingStable`로 별도 전달된다"고 적었다.
+
+문제는 **그 품질 신호를 아무도 읽지 않았다는 것**이다. 앵커 확정은 frame 판정
+하나만 봤다. 그래서 "frame은 맞다"가 곧 "보정 불필요"로 읽혔다.
+
+### 고침 — 판정을 둘로 가른다
+
+| 함수 | 묻는 것 | hold 중 답 |
+|---|---|---|
+| `headingReferenceFromSource` | 이 값이 자북 frame인가 | **자북이다**(81b4d570 유지) |
+| `isTrustedHeading` | 그 frame을 지금 맡겨도 되는가 | **아니다** |
+
+앵커 확정은 이제 뒤엣것을 본다. 실내에서는 다시 `awaitingHeading`으로 가고,
+**자동 진입 경로가 GPS course로 스스로 보정한다** — 사용자에게 묻지 않는다
+(`_entryFloorDirection`). 회귀 전에 실제로 돌던 경로가 이것이고, 회귀 이후로는
+Android에서 한 번도 도달하지 못한 죽은 코드였다.
+
+두 판정을 다시 한 함수로 합치면 같은 회귀가 난다. 그래서 회귀 방지 테스트를
+`heading_reference_test.dart`에 못 박아 뒀다 — "frame은 자북이라고 답한다"와
+"그래도 그 방위를 믿어서는 안 된다"가 **함께** 성립해야 한다.
+
+### 사용자에게 묻는 창은 마지막 수단이다
+
+GPS course는 **건물에 걸어 들어가는 순간**에만 있다. 지도를 눌러 위치를 직접
+찍거나 길찾기 출발지를 고른 경우에는 그 근거가 없어서, 그때만 방향을 묻는다.
+자동 진입으로 들어온 사용자는 이 창을 보지 않는다.
 
 ### 고침 셋
 

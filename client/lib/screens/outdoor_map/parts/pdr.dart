@@ -228,9 +228,12 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
       markerBearingDeg: markerHeadingDeg,
       cameraBearingDeg: _mapController?.cameraPosition?.bearing ?? 0,
       anchorRotationDeg: _pdrTrailState.anchor?.rotationDeg,
-      // 자북 기준이면 앵커가 rot 0을 쓴다. 이 값이 arbitrary면 rot이 수동 보정
-      // 으로 정해진 것이라, 방위가 통째로 어긋나는 원인이 될 수 있다.
-      headingSource: _pdrTrailState.anchor?.headingReference.name,
+      // **파생값이 아니라 센서가 준 원문을 띄운다.** `headingReference`만 보면
+      // 실내에서 자력계가 교란돼 gyro hold에 들어간 상태도 그냥 `magneticNorth`
+      // 로 보인다 — 그 구분이 안 보여서 회귀를 한참 못 찾았다.
+      headingSource: _pdrTrailState.snapshot?.quality.features.headingSource,
+      magneticAccuracy:
+          _pdrTrailState.snapshot?.quality.features.magneticAccuracy,
     );
   }
 

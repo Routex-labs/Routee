@@ -38,3 +38,21 @@ HeadingReference headingReferenceFromSource(String? source) {
 /// 언제든 고칠 수 있다(`confirmAnchorByPin`의 requireDirection).
 bool isTrustedMagneticAccuracy(String accuracy) =>
     accuracy != 'low' && accuracy != 'uncalibrated';
+
+/// 지금 heading의 **절대 방위를 앵커 확정에 맡겨도 되는가.**
+///
+/// [headingReferenceFromSource]와 **반드시 갈라 둔다.** 저쪽은 "이 값이 자북
+/// frame인가"라는 성질이고, 이쪽은 "그 frame이 지금 맞는가"라는 상태다.
+///
+/// 둘을 한 함수로 합쳤던 적이 있고, 그것이 실내 방향을 90° 틀어 놓은 회귀였다 —
+/// `gyro_hold`를 frame 판정에서 뺐더니(맞는 변경이다) 품질 판정까지 함께
+/// 사라져, 자력계가 교란된 실내에서 보정 없이 방위가 확정됐다. 근거와 경위는
+/// `docs/client/android-heading-drift.md` 6절.
+bool isTrustedHeading({
+  required String source,
+  required String magneticAccuracy,
+}) =>
+    headingReferenceFromSource(source) == HeadingReference.magneticNorth &&
+    isTrustedMagneticAccuracy(magneticAccuracy) &&
+    // hold가 걸렸다는 것 자체가 "자력계를 지금 못 믿는다"는 판정 결과다.
+    !source.contains('gyro_hold');

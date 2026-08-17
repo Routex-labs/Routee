@@ -5,22 +5,23 @@
 /// 값을 나란히 놓아야만 갈린다. 읽는 법은 `docs/client/android-heading-drift.md`.
 library;
 
-/// 마커 heading 한 줄. 예) `기기 271° · 마커 271° · 카메라 180° · 화면 91° · rot 0° · rotation_vector`
+/// 마커 heading 한 줄.
+/// 예) `기기 271° · 마커 271° · 카메라 180° · 화면 91° · rot 0° · rotation_vector · 자력계 high`
 ///
 /// [deviceBearingDeg]는 센서가 준 나침반 방위, [markerBearingDeg]는 마커에 실제로
-/// 넘긴 값, [cameraBearingDeg]는 지도가 돌아간 각도다. [anchorRotationDeg]는 앵커가
-/// 더하는 보정각이고, [headingSource]는 그 방위의 출처다.
+/// 넘긴 값, [cameraBearingDeg]는 지도가 돌아간 각도, [anchorRotationDeg]는 앵커가
+/// 더하는 보정각이다.
 ///
-/// **화면 각도(`markerBearing − cameraBearing`)를 함께 적는 것이 핵심이다.** 지도가
-/// 돌아가 있으면 마커가 화면에서 어디를 가리켜야 하는지는 이 뺄셈의 결과이고,
-/// 눈으로 보이는 것도 그 값이다. 둘이 다르면 회전 규약이, 같은데도 실제와 다르면
-/// 방위 자체가 틀린 것이다.
+/// **[headingSource]는 파생값이 아니라 센서 원문이어야 한다** —
+/// `rotation_vector+gyro_hold`가 그냥 `rotation_vector`와 갈리는 것이 이 줄의 핵심
+/// 정보다. 각 자리를 읽는 법은 `docs/client/android-heading-drift.md` 5절.
 String describeMarkerHeading({
   required double? deviceBearingDeg,
   required double? markerBearingDeg,
   required double cameraBearingDeg,
   required double? anchorRotationDeg,
   required String? headingSource,
+  String? magneticAccuracy,
 }) {
   String deg(double? value) =>
       value == null ? '—' : '${_normalize(value).toStringAsFixed(0)}°';
@@ -35,6 +36,7 @@ String describeMarkerHeading({
     '화면 ${deg(screen)}',
     'rot ${deg(anchorRotationDeg)}',
     headingSource ?? '출처 없음',
+    if (magneticAccuracy != null) '자력계 $magneticAccuracy',
   ].join(' · ');
 }
 
