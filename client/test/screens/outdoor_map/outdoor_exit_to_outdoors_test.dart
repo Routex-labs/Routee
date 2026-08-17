@@ -15,6 +15,7 @@ import 'package:navigation_client/models/route/indoor_route.dart';
 import 'package:navigation_client/repositories/building/building_repository.dart';
 import 'package:navigation_client/repositories/place/destination_repository.dart';
 import 'package:navigation_client/repositories/place/mock_destination_repository.dart';
+import 'package:navigation_client/screens/outdoor_map/entry/indoor_entry_gps.dart';
 import 'package:navigation_client/screens/outdoor_map/outdoor_map_screen.dart';
 import 'package:navigation_client/screens/outdoor_map/widgets/floor_selector.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -41,12 +42,17 @@ void main() {
   /// 들어와 있어, 진입 기준(안쪽 5 m)을 넉넉히 넘는다.
   const entrance = LatLng(37.5665, 126.9779);
 
-  /// 건물 밖. 북쪽 변에서 약 33 m 떨어져 이탈 기준(바깥 20 m)을 넘는다.
+  /// 건물 밖. 북쪽 변에서 약 33 m 떨어져 이탈 기준([outdoorExitMarginMeters])을
+  /// 넉넉히 넘는다.
   const wellOutside = LatLng(37.5670, 126.9780);
 
-  /// 벽 바로 밖(북쪽 변에서 약 11 m). 완충 구간이라 어느 쪽으로도 판정하지
-  /// 않는다 — 실내에서 켠 GPS가 흔히 주는, 조금 튄 좌표다.
-  const justOutside = LatLng(37.5668, 126.9780);
+  /// 벽 바로 밖 — 완충 구간 **한가운데**라 어느 쪽으로도 판정하지 않는다. 실내에서
+  /// 켠 GPS가 흔히 주는, 조금 튄 좌표다. 숫자를 박지 않고 이탈 기준에서 잡는 이유는
+  /// 그 상수를 조였을 때 이 좌표만 조용히 완충 밖으로 밀려나기 때문이다.
+  const justOutside = LatLng(
+    37.5667 + outdoorExitMarginMeters / 2 / metersPerDegreeLat,
+    126.9780,
+  );
 
   Map<String, dynamic> node(String id, double xM, double yM) => {
     'id': id,

@@ -79,29 +79,29 @@ void main() {
     });
 
     test('안쪽 문턱을 못 넘으면 아직 진입이 아니다', () {
-      // 문턱은 부풀린 외곽선 기준이다. 벽 바깥 3m면 tolerance(6m) 덕에 안쪽
-      // 3m로 읽히고, 그건 아직 inset(5m)에 못 미친다.
       final judgement = _judge(
-        point: _offset(north: _halfWidthMeters + 3),
+        point: _offset(north: _halfWidthMeters - 3),
         accuracy: 5,
       );
       expect(judgement.verdict, GpsBuildingVerdict.unclear);
     });
 
-    test('우리 외곽선 바깥이어도 tolerance 안이면 진입으로 본다', () {
-      // 백엔드 footprint가 실제 건물보다 작아서 생긴 지연을 여기서 흡수한다
-      // ([footprintOutwardToleranceMeters]). 벽 바로 바깥에 선 사용자는 실제로는
-      // 이미 건물 안이다.
+    test('외곽선 바로 바깥은 진입이 아니다', () {
+      // 정합을 배경 지도 건물 꼭지점으로 다시 잡은 뒤 부풀리기가 0이 됐다
+      // ([footprintOutwardToleranceMeters]). 6 m를 그대로 뒀다면 이 좌표가
+      // "안쪽 6 m"로 읽혀 벽 밖에 선 사람에게 도면이 떴다.
       final judgement = _judge(
-        point: _offset(north: _halfWidthMeters),
+        point: _offset(north: _halfWidthMeters + 1),
         accuracy: 5,
       );
-      expect(judgement.verdict, GpsBuildingVerdict.inside);
+      expect(judgement.verdict, GpsBuildingVerdict.unclear);
     });
 
     test('벽 바깥 완충 구간에서는 이탈로 보지 않는다', () {
       final judgement = _judge(
-        point: _offset(north: _halfWidthMeters + 10),
+        point: _offset(
+          north: _halfWidthMeters + outdoorExitMarginMeters - 3,
+        ),
         accuracy: 5,
       );
       expect(judgement.verdict, GpsBuildingVerdict.unclear);
@@ -219,7 +219,7 @@ void main() {
   group('describeGpsBuildingJudgement', () {
     test('안쪽이면 안쪽 거리로 읽힌다', () {
       final judgement = _judge(
-        point: _offset(north: _halfWidthMeters + 3),
+        point: _offset(north: _halfWidthMeters - 3),
         accuracy: 5,
       );
       expect(
@@ -235,7 +235,7 @@ void main() {
       );
       expect(
         describeGpsBuildingJudgement(judgement, armed: true),
-        '정확도 5m · 바깥 24.0m · outside · 무장O',
+        '정확도 5m · 바깥 30.0m · outside · 무장O',
       );
     });
 
@@ -275,7 +275,7 @@ void main() {
     test('자동 진입이 꺼져 있으면 무장X로 보인다', () {
       // "안이라고 판정했는데 왜 안 들어가지"의 흔한 원인이라 한 줄에 함께 둔다.
       final judgement = _judge(
-        point: _offset(north: _halfWidthMeters),
+        point: _offset(north: _halfWidthMeters - 6),
         accuracy: 12,
       );
       expect(
