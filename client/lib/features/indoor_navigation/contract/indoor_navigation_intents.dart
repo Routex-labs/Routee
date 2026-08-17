@@ -17,17 +17,28 @@ abstract interface class IndoorNavigationIntents {
   /// 걸음·경로·preview는 버리고 새 pin을 센서 세션의 원점으로 삼는다.
   /// [floorPointM]은 사용자가 지목한 floor local_m 좌표이고, [axes]는 PDR의
   /// east/north를 이 floor의 축 규약으로 바꾸는 변환이다.
+  ///
+  /// [requireDirection]이 참이면 자북을 믿을 만해도 방향 확정을 기다린다. 사용자가
+  /// **직접 지도를 찍어** 위치를 다시 잡는 경우가 그렇다 — 그건 "지금 이게 틀렸다"는
+  /// 뜻이라, 방향도 함께 고칠 길이 있어야 한다. 자동 판정만으로는 자력계가 스스로
+  /// "정확도 높음"이라고 보고하면서 국소적으로 틀어진 경우를 잡지 못한다.
   Future<void> confirmAnchorByPin({
     required PdrLocalPoint floorPointM,
     PdrToFloorAxes axes = const PdrToFloorAxes.identity(),
     String? floorId,
+    bool requireDirection = false,
   });
 
   /// 사용자가 현재 진행 방향을 floor local_m 방향으로 맞춰 rotation을 확정한다.
   /// [floorDirection]은 위치가 아닌 단위와 무관한 방향 벡터다. 컨트롤러가 anchor
   /// 확정 때 받은 axes로 PDR 동·북 방향에 역변환한다.
+  ///
+  /// [describesFacing]은 그 방향이 **무엇을 가리키는지**다. 화면 방향 질문처럼
+  /// "지금 바라보는 쪽"이면 true, GPS course처럼 "지금 움직이는 쪽"이면 false.
+  /// 둘을 안 가르면 폰을 든 각도(walkOffset)가 보정각에 그대로 섞여 들어간다.
   Future<void> confirmAnchorByFloorDirection({
     required PdrLocalPoint floorDirection,
+    bool describesFacing = false,
   });
 
   /// 층 변경. PDR 세션을 reset하고 새 층 anchor 확정을 다시 요구한다.

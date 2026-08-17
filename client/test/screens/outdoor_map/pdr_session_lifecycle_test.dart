@@ -227,11 +227,13 @@ class _FakeDriver implements IndoorNavigationController {
     required PdrLocalPoint floorPointM,
     PdrToFloorAxes axes = const PdrToFloorAxes.identity(),
     String? floorId,
+    bool requireDirection = false,
   }) async {}
 
   @override
   Future<void> confirmAnchorByFloorDirection({
     required PdrLocalPoint floorDirection,
+    bool describesFacing = false,
   }) async {}
 
   @override

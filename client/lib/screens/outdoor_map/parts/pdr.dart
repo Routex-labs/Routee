@@ -558,7 +558,11 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
       _showSnack('가장 가까운 통로에서 약 ${gapM}m 떨어져 있습니다. 건물 안쪽 복도를 탭해주세요.');
       return;
     }
-    await _confirmPdrAnchor(snapped.point);
+    // **지도를 직접 찍은 경우는 방향도 함께 묻는다.** 사용자가 「위치 지정」으로
+    // 여기까지 온 것은 "지금 잡힌 게 틀렸다"는 뜻이고, 방향이 그 절반이다.
+    // 자동 판정만으로는 자력계가 "정확도 높음"을 보고하면서 건물 철골 때문에
+    // 국소적으로 90° 틀어진 경우를 잡지 못한다 — 그때 이 창이 유일한 출구다.
+    await _confirmPdrAnchor(snapped.point, askDirection: true);
   }
 
   /// [notifyLocationChanged]는 "사용자의 현재 위치가 새로 잡혔다"를 상위에
@@ -566,9 +570,13 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
   /// 경우이기 때문이다. 출발지 매장을 따라 찍는 경우([_anchorAtStoreOrigin])만
   /// 끈다. 그쪽은 상위가 방금 정한 출발지를 되짚어 찍는 것이라, 다시 알리면
   /// 상위가 그 출발지를 스스로 버리게 된다.
+  ///
+  /// [askDirection]은 자북을 믿을 만해도 방향을 묻게 한다. 사용자가 지도를 직접
+  /// 찍은 경우에만 참이다(그 자리 주석 참고).
   Future<void> _confirmPdrAnchor(
     PdrLocalPoint floorPoint, {
     bool notifyLocationChanged = true,
+    bool askDirection = false,
   }) async {
     final graph = _floorGraph;
     final axes = graph == null
@@ -577,6 +585,7 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     await indoorNavigationDriver.confirmAnchorByPin(
       floorPointM: floorPoint,
       axes: axes,
+      requireDirection: askDirection,
     );
     if (!mounted) return;
     if (indoorNavigationDriver.currentCalibration.phase ==
@@ -591,6 +600,8 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
       );
       await indoorNavigationDriver.confirmAnchorByFloorDirection(
         floorDirection: floorDirection,
+        // 「위쪽/오른쪽/…」은 **바라보는 쪽**을 물은 것이다.
+        describesFacing: true,
       );
     }
     if (!mounted) return;
@@ -626,9 +637,13 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     return showDialog<double>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('진행 방향 보정'),
+        title: const Text('바라보는 방향 맞추기'),
+        // 예전 문구는 "이 기기는 절대 북쪽 기준 heading을 얻지 못했습니다"였다.
+        // 이제 자북을 얻고도 **믿을 수 없는 경우**(건물 철골에 자력계가 끌려간
+        // 경우)에도 이 창이 뜨므로, 기기 탓으로 읽히는 문장을 쓰지 않는다.
         content: const Text(
-          '이 기기는 절대 북쪽 기준 heading을 얻지 못했습니다. 현재 휴대폰이 향한 지도 방향을 선택해주세요.',
+          '건물 안에서는 나침반이 철골에 끌려 방향이 크게 어긋날 수 있습니다.\n'
+          '지금 화면에서 어느 쪽을 보고 계신지 골라 주세요.',
         ),
         actions: [
           for (final entry in const [

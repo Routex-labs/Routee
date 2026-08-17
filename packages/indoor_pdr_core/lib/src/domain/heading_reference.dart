@@ -26,3 +26,15 @@ HeadingReference headingReferenceFromSource(String? source) {
   // 아직 heading을 못 받았거나 알 수 없으면 보수적으로 자북으로 가정하지 않는다.
   return HeadingReference.arbitraryCorrected;
 }
+
+/// 자력계 정확도가 **절대 방위를 맡길 만한가**.
+///
+/// native가 주는 문자열은 high·medium·low·uncalibrated·unknown이다.
+///
+/// **"나쁘다는 증거"가 있을 때만 거부한다.** `unknown`(아직 정확도 콜백이 안 옴)
+/// 까지 거부하면 세션 초반마다 방향 질문이 뜨고, iOS는 사용자가 폰을 흔들기 전까지
+/// `uncalibrated`에 머무는 일이 잦아 정상 기기에서도 창이 반복된다. 잘못 걸리는
+/// 비용(매번 모달)이 놓치는 비용보다 크고, 놓치는 쪽은 사용자가 지도를 직접 찍어
+/// 언제든 고칠 수 있다(`confirmAnchorByPin`의 requireDirection).
+bool isTrustedMagneticAccuracy(String accuracy) =>
+    accuracy != 'low' && accuracy != 'uncalibrated';

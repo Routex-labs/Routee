@@ -145,6 +145,18 @@ class PdrSession {
   HeadingReference get headingReference =>
       headingReferenceFromSource(headingSource);
 
+  /// 지금 heading의 **절대 방위를 믿어도 되는가.**
+  ///
+  /// [headingReference]와 반드시 구분한다. 저쪽은 "이 값이 자북 frame인가"라는
+  /// 성질이고, 이쪽은 "그 frame이 지금 맞는가"라는 상태다. 둘을 겸하면
+  /// **철골 건물 안에서 자력계가 통째로 틀어져도 "자북 기준이니 보정 불필요"로
+  /// 읽힌다** — 실기기에서 실내 방위가 90° 넘게 어긋난 채 고칠 수단이 없던
+  /// 원인이 정확히 이것이다(`docs/client/android-heading-drift.md` 6절).
+  bool get headingTrustworthy =>
+      headingReference == HeadingReference.magneticNorth &&
+      isTrustedMagneticAccuracy(magneticAccuracy) &&
+      !headingSource.contains('gyro_hold');
+
   PdrLocalPoint get position => _paths.correctedPosition;
   List<PdrLocalPoint> get path => List.unmodifiable(_paths.corrected);
   int get steps => iosTrackedSteps;
