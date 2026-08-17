@@ -74,6 +74,10 @@ class GpsSession {
   /// 낡음의 기준은 "화면이 얼마나 오래 옛 위치를 보여주고 있는가"다.
   DateTime? _lastFixReceivedAt;
 
+  /// 마지막으로 배달한 좌표를 **기기가 찍은** 시각. 위 값과 짝을 이루지만 하는
+  /// 일이 다르다 — 이쪽은 "같은 좌표를 또 받았는가"를 가린다([_deliver]).
+  DateTime? _lastFixTakenAt;
+
   /// 위치 스트림을 지금까지 몇 번 열었는지. **진단 전용이다.**
   ///
   /// 정상이라면 화면이 사는 동안 1이어야 한다. 이 값이 올라간다면 스트림이 죽고
@@ -163,7 +167,30 @@ class GpsSession {
   /// 둘 다 조용하면 신호가 없는 것이고(실내·터널), 다시 열어도 얻는 것이 없다.
   bool _shouldReopenOnSilence() => !_deliveredFix || _oneShotSinceStreamFix;
 
+  /// 일회성 조회가 **이미 배달한 좌표를 또 준 것**인지.
+  ///
+  /// 안드로이드 fused provider는 새 측위를 못 하면 마지막으로 알던 위치를 그대로
+  /// 돌려준다. 그 한 건을 "지금 위치"로 받아들이면 두 가지가 동시에 망가진다 —
+  /// 마커가 걸어온 만큼 뒤처진 자리에 그대로 서 있고, [_lastFixReceivedAt]이
+  /// 갱신돼 **새 좌표를 요청할 이유가 사라진다.** 걷는 동안 매초 같은 좌표가
+  /// 도착하면서 앱은 위치가 신선하다고 믿는다.
+  ///
+  /// 스트림 좌표에는 적용하지 않는다. 스트림은 기기의 현재 의견을 실시간으로
+  /// 밀어 주는 쪽이고, 여기서까지 걸렀다가 시각이 한 번 튀는 기기를 만나면
+  /// 그 뒤로 모든 좌표를 버려 위치가 통째로 죽는다.
+  bool _isStaleEcho(Position position, {required bool fromStream}) {
+    if (fromStream) return false;
+    final lastTakenAt = _lastFixTakenAt;
+    if (lastTakenAt == null) return false;
+    return !position.timestamp.isAfter(lastTakenAt);
+  }
+
   void _deliver(Position position, {required bool fromStream}) {
+    if (_isStaleEcho(position, fromStream: fromStream)) {
+      // **받은 시각을 갱신하지 않고 끝낸다.** 갱신하면 다음 주기가 조용해져,
+      // 정작 새 좌표가 필요한 구간에서 조회가 멎는다.
+      return;
+    }
     _lastFixFromStream = fromStream;
     // 좌표가 들어오면 스트림은 살아 있다. 침묵 감시를 **다시 걸고**(걷어 버리면
     // 한 건만 주고 조용해지는 스트림을 못 잡는다), 재연결 간격도 되돌려 다음에
@@ -179,9 +206,11 @@ class GpsSession {
     // 추적이 꺼지기 직전에 이미 큐에 들어간 이벤트가 뒤늦게 도착할 수 있다.
     // 구독은 끊겼어도 이 한 건이 새어들어오면 위치 마커가 다시 켜지므로 막는다.
     if (!isActive()) return;
-    // 낡음 판정은 **받은 시각** 기준이다. 기기가 찍은 시각을 쓰면, 같은 좌표를
-    // 반복해서 받는 동안에도 계속 낡은 것으로 보여 요청이 멈추지 않는다.
+    // 낡음 판정은 **받은 시각** 기준이다. 기기가 찍은 시각을 쓰면, 기기 시계가
+    // 앱 시계와 다른 기준일 때 좌표가 늘 낡은 것으로 보여 요청이 멈추지 않는다.
+    // 같은 좌표를 되받는 경우는 위 [_isStaleEcho]가 이미 걸렀다.
     _lastFixReceivedAt = now();
+    _lastFixTakenAt = position.timestamp;
     onFix(position, fromStream: fromStream);
   }
 

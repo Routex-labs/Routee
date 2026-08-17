@@ -18,10 +18,17 @@ import 'package:navigation_client/service_locator.dart';
 import 'package:navigation_client/screens/outdoor_map/gps/gps_freshness_policy.dart';
 import 'package:navigation_client/screens/outdoor_map/gps/gps_session.dart';
 
-Position _fix({double lat = 37.5665, double lng = 126.98}) => Position(
+/// 한 건의 좌표. [takenAt]은 **기기가 찍은 시각**이고, 이 값이 좌표의 신원이다 —
+/// 안드로이드 fused provider는 새 측위를 못 하면 마지막으로 알던 위치를 그대로
+/// 돌려주므로, 시각이 안 움직이면 그건 새 좌표가 아니라 같은 좌표의 메아리다.
+Position _fix({
+  double lat = 37.5665,
+  double lng = 126.98,
+  DateTime? takenAt,
+}) => Position(
   latitude: lat,
   longitude: lng,
-  timestamp: DateTime(2024, 1, 1),
+  timestamp: takenAt ?? DateTime(2024, 1, 1),
   accuracy: 5,
   altitude: 0,
   altitudeAccuracy: 0,
@@ -59,13 +66,27 @@ class _FakeStreams {
 DateTime Function() _clock(FakeAsync async) =>
     () => DateTime(2024, 1, 1).add(async.elapsed);
 
-/// 일회성 조회가 좌표를 주는 상태 / 못 주는 상태.
+/// 일회성 조회가 좌표를 주는 상태 / 못 주는 상태 / **같은 좌표만 되돌려주는** 상태.
 ///
-/// **이 둘이 침묵의 원인을 가른다.** 스트림이 조용할 때 일회성 조회가 되면
-/// 스트림이 깨진 것이고, 둘 다 안 되면 신호가 없는 것이다(실내·터널).
-void _oneShotSucceeds() => currentPosition = () async => _fix();
+/// **이 셋이 침묵의 원인을 가른다.** 스트림이 조용할 때 일회성 조회가 새 좌표를
+/// 주면 스트림이 깨진 것이고, 아무것도 못 주면 신호가 없는 것이고(실내·터널),
+/// 같은 좌표만 되돌려주면 기기가 캐시를 읽어 준 것이라 둘째와 같은 상태다.
+///
+/// 새 좌표는 **시각이 움직인다.** 호출마다 1초씩 민다.
+void _oneShotSucceeds() {
+  var takenAt = DateTime(2024, 1, 1);
+  currentPosition = () async {
+    takenAt = takenAt.add(const Duration(seconds: 1));
+    return _fix(takenAt: takenAt);
+  };
+}
+
 void _oneShotFails() =>
     currentPosition = () async => throw Exception('no fix');
+
+/// 새 측위에 실패해 **마지막으로 알던 좌표**를 그대로 돌려주는 기기.
+void _oneShotEchoes(DateTime takenAt) =>
+    currentPosition = () async => _fix(takenAt: takenAt);
 
 /// 세션 하나와 그 관찰값을 한 묶음으로 만든다.
 ({
@@ -256,6 +277,86 @@ void main() {
           1,
           reason: '신호가 없을 뿐인데 채널을 계속 두드린다',
         );
+        h.session.stop();
+      });
+    });
+  });
+
+  group('같은 좌표를 되받는 경우 — 캐시 메아리', () {
+    test('일회성 조회가 같은 좌표를 되돌려주면 배달하지 않는다', () {
+      // **이게 "마커가 실제 위치와 안 맞는다"의 정체였다.** 걷는 동안 스트림이
+      // 조용해지면 매초 일회성 조회가 나가는데, 기기가 새 측위를 못 하면
+      // 마지막으로 알던 좌표를 그대로 돌려준다. 그 한 건을 "지금 위치"로 받으면
+      // 마커는 걸어온 만큼 뒤처진 자리에 그대로 서 있게 된다.
+      fakeAsync((async) {
+        final takenAt = DateTime(2024, 1, 1);
+        _oneShotEchoes(takenAt);
+        final h = _harness(now: _clock(async));
+        h.session.start();
+        h.streams.latest.add(_fix(takenAt: takenAt));
+        async.flushMicrotasks();
+        expect(h.deliveries, [true]);
+
+        // 메아리가 여러 번 와도 배달은 늘지 않는다.
+        async.elapse(gpsFixMaxAge * 4);
+        expect(h.deliveries, [true], reason: '같은 좌표를 새 위치로 배달했다');
+        h.session.stop();
+      });
+    });
+
+    test('메아리는 신선도 시계를 되감지 않는다', () {
+      // 배달만 막고 받은 시각을 갱신해 버리면 더 나쁘다 — 다음 주기가 조용해져
+      // **정작 새 좌표가 필요한 구간에서 조회가 멎는다.** 조회가 계속 나가는지로
+      // 확인한다.
+      fakeAsync((async) {
+        final takenAt = DateTime(2024, 1, 1);
+        var lookups = 0;
+        currentPosition = () async {
+          lookups++;
+          return _fix(takenAt: takenAt);
+        };
+        final h = _harness(now: _clock(async));
+        h.session.start();
+        h.streams.latest.add(_fix(takenAt: takenAt));
+        async.flushMicrotasks();
+
+        async.elapse(gpsFixMaxAge * 3);
+        expect(lookups, greaterThan(1), reason: '메아리 한 건에 조회가 멎었다');
+        h.session.stop();
+      });
+    });
+
+    test('메아리만 오는 것은 "기기가 좌표를 만든다"는 근거가 아니다', () {
+      // 스트림을 다시 여는 조건은 "기기는 만드는데 스트림만 조용하다"이다.
+      // 메아리를 성공으로 세면 신호가 없는 실내에서도 그 조건이 서서, 서 있는
+      // 내내 구독을 여닫게 된다.
+      fakeAsync((async) {
+        final takenAt = DateTime(2024, 1, 1);
+        _oneShotEchoes(takenAt);
+        final h = _harness(now: _clock(async));
+        h.session.start();
+        h.streams.latest.add(_fix(takenAt: takenAt));
+        async.flushMicrotasks();
+
+        async.elapse((streamSilenceTimeout + streamRetryMinDelay) * 2);
+        expect(h.streams.openCount, 1, reason: '메아리를 새 좌표로 착각했다');
+        h.session.stop();
+      });
+    });
+
+    test('스트림 좌표는 시각이 안 움직여도 그대로 배달한다', () {
+      // 스트림은 기기의 현재 의견을 실시간으로 밀어 주는 쪽이다. 여기서까지
+      // 걸렀다가 시각이 한 번 튀는 기기를 만나면 그 뒤로 모든 좌표를 버려
+      // **위치가 통째로 죽는다.** 그 실패는 되돌릴 방법이 화면에 없다.
+      fakeAsync((async) {
+        final takenAt = DateTime(2024, 1, 1);
+        final h = _harness(now: _clock(async));
+        h.session.start();
+        h.streams.latest.add(_fix(takenAt: takenAt));
+        h.streams.latest.add(_fix(takenAt: takenAt));
+        h.streams.latest.add(_fix(takenAt: takenAt.subtract(const Duration(minutes: 5))));
+        async.flushMicrotasks();
+        expect(h.deliveries, [true, true, true]);
         h.session.stop();
       });
     });
