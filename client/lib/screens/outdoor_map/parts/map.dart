@@ -346,8 +346,20 @@ extension OutdoorMapMap on OutdoorMapBodyState {
       entryZoom: _entryZoomThreshold(),
     )) {
       case IndoorEntryTransition.enter:
+        // 건물 배율로 돌아왔다 — 개요 붙들기는 여기서 끝난다. 다음 축소는
+        // 사용자가 한 것이므로 그때는 접혀야 한다.
+        _routeOverviewHoldsIndoor = false;
         _triggerIndoorEntry();
       case IndoorEntryTransition.exit:
+        // **경로 개요가 물러선 축소면 접지 않는다.** 이유는 [zoomOutKeepsIndoor]에
+        // 있다. 무장도 하지 않는다 — 접지 않았으니 다시 켤 것이 없고, 무장해 두면
+        // 개요에서 돌아오는 확대가 진입 연출을 한 번 더 태운다.
+        if (zoomOutKeepsIndoor(
+          overviewHold: _routeOverviewHoldsIndoor,
+          hasRouteToShow: _hasAnyRouteVisible,
+        )) {
+          break;
+        }
         // 사용자가 건물을 벗어날 만큼 축소했으므로 오버레이를 접고 다음 확대에서
         // 재발화할 수 있게 무장한다. 배치 대기 중이면 종료해 하단 바 표시도 함께
         // 초기화한다.

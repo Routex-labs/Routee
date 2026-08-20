@@ -631,6 +631,14 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   // 임계값 아래로 다시 내려오기 전까지는 재발화하지 않는다.
   bool _autoIndoorEntryArmed = true;
 
+  /// 경로 개요가 카메라를 물러서게 했는가. 참이면 그 축소로는 도면을 접지
+  /// 않는다 — 왜 그러는지는 [zoomOutKeepsIndoor]에 있다.
+  ///
+  /// 개요를 맞추는 자리([_fitCameraToPoints])가 세우고, 건물 배율로 돌아온
+  /// 카메라([_handleCameraIdle])와 실내 진입 상태가 바뀌는 자리
+  /// ([_setIndoorEntered])가 내린다.
+  bool _routeOverviewHoldsIndoor = false;
+
   // POI/시설 아이콘 비트맵을 스타일당 한 번만 addImage로 등록하기 위한 게이팅.
   // 층 전환마다 소스/레이어는 다시 붙지만 이미지는 그대로 재사용된다.
   bool _facilityIconImagesRegistered = false;

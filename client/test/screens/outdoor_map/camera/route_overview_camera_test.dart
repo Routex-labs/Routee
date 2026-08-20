@@ -1,20 +1,39 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:navigation_client/screens/outdoor_map/camera/route_overview_camera.dart';
 
-/// 야외 경로 전체를 담아도 되는지와, 안 될 때 카메라가 어디로 가는지의 기준표.
+/// 개요로 물러선 카메라가 실내 상태를 붙드는 기준과, 안내를 끈 카메라가 갈 곳.
 ///
-/// 실기기 증상: 실내→야외 안내를 시작한 뒤 뒤로가기를 누르면 카메라가 야외 구간
-/// 전체로 물러서면서 도면이 접혔고, 그 뒤로는 길찾기가 실내 갈래로 들어가지 못해
-/// **두 번째 길찾기부터 실내 구간이 안 그려졌다.**
+/// 실기기 증상 둘이 여기서 갈린다.
+/// - 건물 안에서 대중교통을 고르면 시작을 누르기 전에 여정 전체가 안 보였다.
+///   도면을 편 동안에는 아예 물러서지 않았기 때문이다.
+/// - 그렇다고 그냥 물러서면 카메라가 멈추는 순간 도면이 접히고, 접힌 뒤로는
+///   길찾기가 실내 갈래로 못 들어가 **실내 구간이 통째로 안 그려졌다.**
 void main() {
-  test('도면을 편 상태에서는 경로 전체를 담지 않는다', () {
-    // 경로 전체를 담는 맞추기에는 줌 하한이 없다. 물러선 카메라가 멈추는 순간
-    // 실내 오버레이가 접히고, 접힌 뒤로는 실내 갈래로 들어가지 못한다.
-    expect(canFitWholeRouteOverIndoor(indoorEntered: true), isFalse);
-    expect(canFitWholeRouteOverIndoor(indoorEntered: false), isTrue);
+  test('개요가 물러선 축소는 도면을 접지 않는다', () {
+    expect(
+      zoomOutKeepsIndoor(overviewHold: true, hasRouteToShow: true),
+      isTrue,
+    );
   });
 
-  test('도면을 편 상태에서는 야외 경로 전체로 물러서지 않는다', () {
+  test('사용자가 직접 축소한 것이면 접는다', () {
+    // 개요가 세운 붙들기가 없다 = 이 축소의 뜻은 "건물에서 나가겠다"다.
+    expect(
+      zoomOutKeepsIndoor(overviewHold: false, hasRouteToShow: true),
+      isFalse,
+    );
+  });
+
+  test('경로가 사라지면 붙들기도 끝난다', () {
+    // 없으면 개요에서 경로를 지운 사용자가 도시 배율에 실내 상태로 갇힌다.
+    expect(
+      zoomOutKeepsIndoor(overviewHold: true, hasRouteToShow: false),
+      isFalse,
+    );
+  });
+
+  test('안내를 끌 때 도면을 편 상태면 실내 구간에 맞춘다', () {
+    // 여정 전체로 물러서면 방금까지 따라가던 실내 선이 배율에 지워진다.
     expect(
       guidanceStopCameraTarget(
         indoorEntered: true,
@@ -25,7 +44,7 @@ void main() {
     );
   });
 
-  test('도면을 편 상태에 담을 실내 구간이 없으면 카메라를 건드리지 않는다', () {
+  test('안내를 끌 때 담을 실내 구간이 없으면 카메라를 건드리지 않는다', () {
     // 맞출 대상 없이 배율만 되돌리면 방금 보던 화면을 이유 없이 잃는다.
     expect(
       guidanceStopCameraTarget(
@@ -37,7 +56,7 @@ void main() {
     );
   });
 
-  test('야외에서는 경로 전체를 담는다', () {
+  test('안내를 야외에서 끄면 경로 전체를 담는다', () {
     // 계획 화면의 약속이다 — 어느 후보가 어느 선인지 대조할 수 있어야 한다.
     expect(
       guidanceStopCameraTarget(
