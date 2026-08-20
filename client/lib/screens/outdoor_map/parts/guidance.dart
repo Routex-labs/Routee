@@ -326,6 +326,38 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
     await _moveCameraToUser(position, zoom: walkingViewZoom);
   }
 
+  /// 걷는 안내 중 실내 마커를 화면 가운데 언저리에 붙들어 둔다.
+  ///
+  /// **시작할 때 한 번 가운데로 옮기는 것만으로는 부족하다.** 걸으면 마커가
+  /// 그만큼 화면 위쪽으로 밀려나고, 몇 걸음이면 가장자리에 닿는다 — 정작
+  /// 사용자는 자기가 어디로 가고 있는지 보려고 그 화면을 보고 있다.
+  ///
+  /// **매 걸음 따라가지는 않는다.** PDR은 한 걸음마다 값을 내놓으므로 그대로
+  /// 따라가면 지도가 걷는 내내 끌려다니고 도면을 읽을 수 없다. 화면 절반의
+  /// [guidanceFollowDeadbandRatio]만큼 벗어났을 때만 다시 가운데로 부른다
+  /// (근거: `docs/client/camera-choreography-plan.md` 4.3 「추적 데드밴드」).
+  void _followIndoorMarkerDuringGuidance() {
+    if (!_guidanceStarted || !_indoorEntered) return;
+    final controller = _mapController;
+    final here = _pdrCurrentWgs84();
+    if (controller == null || !_styleReady || here == null) return;
+    final camera = controller.cameraPosition;
+    if (camera == null) return;
+    final viewport = MediaQuery.sizeOf(context);
+    if (viewport.height <= 0) return;
+    if (!isBeyondFollowDeadband(
+      camera: ll.LatLng(camera.target.latitude, camera.target.longitude),
+      marker: here,
+      zoom: camera.zoom,
+      viewport: viewport,
+    )) {
+      return;
+    }
+    // 배율은 건드리지 않는다 — 사용자가 도면을 들여다보려 당겨 둔 값을 걸음마다
+    // 되돌리면, 따라가기가 배율 조작을 통째로 막는 것이 된다.
+    unawaited(_centerOnIndoorMarker());
+  }
+
   /// 안내만 끈다 — 경로선·후보·목적지는 남는다. **뒤로가기가 부른다.**
   ///
   /// `_dismissUserDestinationFromEtaCard`(parts/route.dart)와 다르다. 그쪽은

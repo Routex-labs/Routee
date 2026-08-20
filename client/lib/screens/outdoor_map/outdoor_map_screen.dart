@@ -97,6 +97,7 @@ import 'outdoor_map_tuning.dart';
 import 'widgets/placing_anchor_hint.dart';
 import 'route_recompute_policy.dart';
 import 'layers/indoor_overlay_layers.dart';
+import 'camera/guidance_follow.dart';
 import 'camera/map_camera_commands.dart';
 import 'layers/marker_map_layers.dart';
 import 'layers/shape_map_layers.dart';
@@ -910,6 +911,9 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
       // [_setIndoorEntered]가 이미 야외 기준으로 다시 돌렸다.
       if (_exitIndoorIfWalkedOut()) return;
       _syncPdrCurrentLayer();
+      // 마커를 그린 **직후**에 카메라를 본다. 걷는 안내 중 마커가 화면 가운데를
+      // 크게 벗어났을 때만 다시 부른다([_followIndoorMarkerDuringGuidance]).
+      _followIndoorMarkerDuringGuidance();
       // 사용자 회색선은 실제 PDR 궤적이 아니라 현재 계획 경로의 완료 구간이다.
       // 진행률이 바뀐 같은 틱에 경로 source도 갱신해야 파란 잔여선과 회색 완료선이
       // 같은 투영점을 공유한다. GuidanceTrailSession은 별도 진단 궤적으로만 남긴다.
