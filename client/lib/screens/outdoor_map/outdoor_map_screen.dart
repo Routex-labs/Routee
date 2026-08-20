@@ -391,6 +391,8 @@ class OutdoorMapBodyState extends State<OutdoorMapBody> {
   /// **건물 밖 탭만으로는 켜지 않는다** — 화면 조작이지 "내가 밖에 있다"가 아니다.
   bool _gpsEntryArmed = true;
 
+  final GpsEntryEvidenceTracker _gpsEntryEvidence = GpsEntryEvidenceTracker();
+
   Position? _position;
 
   ll.LatLng? _entrance;

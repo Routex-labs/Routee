@@ -233,12 +233,23 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
       ),
       footprint: _buildingFootprint,
     );
+    final GpsEntryConfirmation entryConfirmation;
+    if (!_indoorEntered && _gpsEntryArmed) {
+      entryConfirmation = _gpsEntryEvidence.observe(
+        judgement,
+        observedAt: position.timestamp,
+      );
+    } else {
+      _gpsEntryEvidence.reset();
+      entryConfirmation = GpsEntryConfirmation.none;
+    }
     // 진단 칩은 아래 switch가 상태를 바꾸기 **전에** 채운다. 무장 여부는 이 판정을
     // 내릴 때의 값이어야 하는데, switch가 그 값을 갱신하기 때문이다.
     _gpsVerdictDebugText.value = _debugModeController.enabled
         ? describeGpsBuildingJudgement(
             judgement,
             armed: _gpsEntryArmed,
+            entryConfirmation: entryConfirmation,
             sinceLastFix: sinceLastFix,
             fromStream: _gps.lastFixFromStream,
             streamRestarts: _gps.restartCount,
@@ -247,6 +258,10 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     switch (judgement.verdict) {
       case GpsBuildingVerdict.inside:
         if (_indoorEntered || !_gpsEntryArmed) return;
+        if (entryConfirmation != GpsEntryConfirmation.immediate &&
+            entryConfirmation != GpsEntryConfirmation.confirmed) {
+          return;
+        }
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('건물 감지 중...')));

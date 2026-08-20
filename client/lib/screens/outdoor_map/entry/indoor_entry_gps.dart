@@ -38,6 +38,13 @@ const outdoorExitMarginMeters = 8.0;
 /// **이탈도 늦춰야** 벽 근처에서 화면이 깜빡이지 않는다([judgeBuildingFromGps]).
 const footprintOutwardToleranceMeters = 6.0;
 
+/// 한 건만으로 진입을 확정해도 되는 최대 오차. 이보다 큰 inside는 다음 표본을
+/// 한 번 더 확인한다.
+const immediateEntryAccuracyMeters = 10.0;
+
+/// 보통 inside 두 건을 같은 진입 시도로 묶는 최대 간격.
+const entryConfirmationMaxGap = Duration(seconds: 3);
+
 /// 판정에 쓰는 위치 한 건.
 class GpsFix {
   const GpsFix({required this.point, required this.accuracyMeters});
@@ -59,6 +66,62 @@ enum GpsBuildingVerdict {
 
   /// 판단하지 않는다 — 오차가 크거나, 외곽선을 모르거나, 벽 주변 완충 구간.
   unclear,
+}
+
+/// 한 건의 건물 판정을 시간축 증거와 합친 결과.
+enum GpsEntryConfirmation {
+  /// 진입 증거가 아니거나 기존 후보가 취소됐다.
+  none,
+
+  /// 보통 inside 한 건을 받았고 다음 정상 표본을 기다린다.
+  pending,
+
+  /// 오차가 작은 강한 inside라 추가 대기 없이 확정했다.
+  immediate,
+
+  /// 제한 시간 안에 서로 다른 보통 inside 두 건이 이어져 확정했다.
+  confirmed,
+}
+
+/// 단일 GPS 튐은 막되 좋은 좌표에는 지연을 더하지 않는 진입 증거 누적기.
+///
+/// 좌표를 평활하거나 경로에 붙이지 않는다. 원본 표본이 만든 [GpsBuildingJudgement]
+/// 만 시간순으로 읽으므로 화면용 위치 보정이 판정 사실을 바꾸지 않는다.
+class GpsEntryEvidenceTracker {
+  DateTime? _pendingAt;
+
+  void reset() => _pendingAt = null;
+
+  GpsEntryConfirmation observe(
+    GpsBuildingJudgement judgement, {
+    required DateTime observedAt,
+  }) {
+    if (judgement.verdict != GpsBuildingVerdict.inside) {
+      reset();
+      return GpsEntryConfirmation.none;
+    }
+    if (judgement.accuracyMeters <= immediateEntryAccuracyMeters) {
+      reset();
+      return GpsEntryConfirmation.immediate;
+    }
+
+    final previous = _pendingAt;
+    if (previous == null) {
+      _pendingAt = observedAt;
+      return GpsEntryConfirmation.pending;
+    }
+    final gap = observedAt.difference(previous);
+    if (gap == Duration.zero) {
+      // 같은 OS fix를 스트림과 일회성 조회가 중복 배달해도 두 표본으로 세지 않는다.
+      return GpsEntryConfirmation.pending;
+    }
+    if (gap.isNegative || gap > entryConfirmationMaxGap) {
+      _pendingAt = observedAt;
+      return GpsEntryConfirmation.pending;
+    }
+    reset();
+    return GpsEntryConfirmation.confirmed;
+  }
 }
 
 /// 판정 한 건과, 그 판정을 만든 숫자들.
@@ -117,7 +180,10 @@ GpsBuildingJudgement judgeBuildingFromGps({
   final rawInside = metersInsidePolygon(fix.point, footprint);
   final rawOutside = metersToPolygon(fix.point, footprint);
   final metersInside = rawOutside > 0
-      ? (footprintOutwardToleranceMeters - rawOutside).clamp(0.0, double.infinity)
+      ? (footprintOutwardToleranceMeters - rawOutside).clamp(
+          0.0,
+          double.infinity,
+        )
       : rawInside + footprintOutwardToleranceMeters;
   final metersOutside = (rawOutside - footprintOutwardToleranceMeters).clamp(
     0.0,
@@ -167,6 +233,7 @@ GpsBuildingVerdict _verdictFrom({
 String describeGpsBuildingJudgement(
   GpsBuildingJudgement judgement, {
   required bool armed,
+  GpsEntryConfirmation? entryConfirmation,
   Duration? sinceLastFix,
   bool? fromStream,
   int? streamRestarts,
@@ -179,6 +246,13 @@ String describeGpsBuildingJudgement(
       : '바깥 ${judgement.metersOutside.toStringAsFixed(1)}m';
   final verdict = judgement.verdict.name;
   var line = '$accuracy · $place · $verdict · 무장${armed ? 'O' : 'X'}';
+  if (entryConfirmation == GpsEntryConfirmation.pending) {
+    line = '$line · 확인1/2';
+  } else if (entryConfirmation == GpsEntryConfirmation.immediate) {
+    line = '$line · 즉시확정';
+  } else if (entryConfirmation == GpsEntryConfirmation.confirmed) {
+    line = '$line · 확인2/2';
+  }
   if (sinceLastFix != null) {
     final seconds = (sinceLastFix.inMilliseconds / 1000).toStringAsFixed(1);
     line = '$line · +${seconds}s';

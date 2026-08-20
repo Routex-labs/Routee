@@ -59,7 +59,10 @@ void main() {
       final judgement = _judge(
         point: _center,
         accuracy: 5,
-        footprint: [_offset(north: -_halfWidthMeters), _offset(north: _halfWidthMeters)],
+        footprint: [
+          _offset(north: -_halfWidthMeters),
+          _offset(north: _halfWidthMeters),
+        ],
       );
       expect(judgement.verdict, GpsBuildingVerdict.unclear);
       expect(judgement.hasFootprint, isFalse);
@@ -123,7 +126,11 @@ void main() {
       expect(outdoorExitMarginMeters, greaterThan(indoorEnterInsetMeters));
       // 거리는 전부 **부풀린** 외곽선 기준이라, 실제 벽에서 잰 값으로 옮기려면
       // tolerance만큼 바깥으로 밀어야 한다.
-      for (var m = -outdoorExitMarginMeters + 1; m < indoorEnterInsetMeters; m += 1) {
+      for (
+        var m = -outdoorExitMarginMeters + 1;
+        m < indoorEnterInsetMeters;
+        m += 1
+      ) {
         // m > 0이면 부풀린 선 안쪽, m < 0이면 바깥쪽이다.
         final judgement = _judge(
           point: _offset(
@@ -194,7 +201,10 @@ void main() {
       expect(judgement.verdict, GpsBuildingVerdict.unclear);
       // 판정이 실제로 쓴 값을 그대로 돌려준다 — 벽 안쪽 30m는 부풀린 선
       // 기준으로 36m다.
-      expect(judgement.metersInside, closeTo(30 + footprintOutwardToleranceMeters, 0.5));
+      expect(
+        judgement.metersInside,
+        closeTo(30 + footprintOutwardToleranceMeters, 0.5),
+      );
       expect(judgement.metersOutside, 0);
     });
 
@@ -213,6 +223,116 @@ void main() {
     test('오차는 판정과 무관하게 그대로 실린다', () {
       final judgement = _judge(point: _center, accuracy: 7.4);
       expect(judgement.accuracyMeters, 7.4);
+    });
+  });
+
+  group('GpsEntryEvidenceTracker', () {
+    final start = DateTime.utc(2026, 8, 20, 6);
+
+    test('오차 10m 이하 inside는 한 건으로 즉시 확정한다', () {
+      final tracker = GpsEntryEvidenceTracker();
+      final result = tracker.observe(
+        _judge(
+          point: _offset(north: _halfWidthMeters - 6),
+          accuracy: immediateEntryAccuracyMeters,
+        ),
+        observedAt: start,
+      );
+
+      expect(result, GpsEntryConfirmation.immediate);
+    });
+
+    test('오차 10~20m inside는 3초 안의 두 표본으로 확정한다', () {
+      final tracker = GpsEntryEvidenceTracker();
+      final judgement = _judge(
+        point: _offset(north: _halfWidthMeters - 6),
+        accuracy: 15,
+      );
+
+      expect(
+        tracker.observe(judgement, observedAt: start),
+        GpsEntryConfirmation.pending,
+      );
+      expect(
+        tracker.observe(
+          judgement,
+          observedAt: start.add(const Duration(seconds: 1)),
+        ),
+        GpsEntryConfirmation.confirmed,
+      );
+    });
+
+    test('같은 timestamp의 중복 fix는 두 표본으로 세지 않는다', () {
+      final tracker = GpsEntryEvidenceTracker();
+      final judgement = _judge(point: _center, accuracy: 15);
+
+      expect(
+        tracker.observe(judgement, observedAt: start),
+        GpsEntryConfirmation.pending,
+      );
+      expect(
+        tracker.observe(judgement, observedAt: start),
+        GpsEntryConfirmation.pending,
+      );
+    });
+
+    test('3초를 넘겨 뒤늦게 온 inside는 새 후보가 된다', () {
+      final tracker = GpsEntryEvidenceTracker();
+      final judgement = _judge(point: _center, accuracy: 15);
+
+      tracker.observe(judgement, observedAt: start);
+      expect(
+        tracker.observe(
+          judgement,
+          observedAt: start.add(
+            entryConfirmationMaxGap + const Duration(milliseconds: 1),
+          ),
+        ),
+        GpsEntryConfirmation.pending,
+      );
+    });
+
+    test('timestamp가 뒤로 가면 기존 후보를 버린다', () {
+      final tracker = GpsEntryEvidenceTracker();
+      final judgement = _judge(point: _center, accuracy: 15);
+
+      tracker.observe(
+        judgement,
+        observedAt: start.add(const Duration(seconds: 1)),
+      );
+      expect(
+        tracker.observe(judgement, observedAt: start),
+        GpsEntryConfirmation.pending,
+      );
+      expect(
+        tracker.observe(
+          judgement,
+          observedAt: start.add(const Duration(seconds: 1)),
+        ),
+        GpsEntryConfirmation.confirmed,
+      );
+    });
+
+    test('unclear가 끼면 기존 inside 후보를 버린다', () {
+      final tracker = GpsEntryEvidenceTracker();
+      final inside = _judge(point: _center, accuracy: 15);
+      final unclear = _judge(point: _center, accuracy: 40);
+
+      tracker.observe(inside, observedAt: start);
+      expect(
+        tracker.observe(
+          unclear,
+          observedAt: start.add(const Duration(seconds: 1)),
+        ),
+        GpsEntryConfirmation.none,
+      );
+      expect(
+        tracker.observe(
+          inside,
+          observedAt: start.add(const Duration(seconds: 2)),
+        ),
+        GpsEntryConfirmation.pending,
+      );
     });
   });
 
@@ -297,6 +417,18 @@ void main() {
           streamRestarts: 4,
         ),
         endsWith('· +36.0s · 직접 · 재시작4'),
+      );
+    });
+
+    test('보통 inside의 확인 대기 상태를 뒤에 붙인다', () {
+      final judgement = _judge(point: _center, accuracy: 15);
+      expect(
+        describeGpsBuildingJudgement(
+          judgement,
+          armed: true,
+          entryConfirmation: GpsEntryConfirmation.pending,
+        ),
+        endsWith('· 확인1/2'),
       );
     });
 

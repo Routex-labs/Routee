@@ -81,7 +81,9 @@ void main() {
 
     // 자동 진입 안내가 스낵바라 ScaffoldMessenger의 Scaffold 조상이 필요하다.
     await tester.pumpWidget(
-      MaterialApp(theme: AppTheme.light, home: Scaffold(body: OutdoorMapBody(key: key)),
+      MaterialApp(
+        theme: AppTheme.light,
+        home: Scaffold(body: OutdoorMapBody(key: key)),
       ),
     );
     await drain(tester);
@@ -127,6 +129,43 @@ void main() {
     expect(find.byType(FloorSelector), findsOneWidget);
   });
 
+  testWidgets('보통 정확도 inside는 서로 다른 두 표본에서 진입한다', (WidgetTester tester) async {
+    final positions = StreamController<Position>.broadcast();
+    addTearDown(positions.close);
+    watchPosition = () => positions.stream;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light,
+        home: const Scaffold(body: OutdoorMapBody()),
+      ),
+    );
+    await drain(tester);
+
+    Position at(DateTime timestamp) => Position(
+      latitude: entrance.latitude,
+      longitude: entrance.longitude,
+      timestamp: timestamp,
+      accuracy: 15,
+      altitude: 0,
+      altitudeAccuracy: 0,
+      heading: 0,
+      headingAccuracy: 0,
+      speed: 0,
+      speedAccuracy: 0,
+    );
+
+    final firstAt = DateTime.utc(2026, 8, 20, 6);
+    positions.add(at(firstAt));
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.byType(FloorSelector), findsNothing);
+
+    positions.add(at(firstAt.add(const Duration(seconds: 1))));
+    await tester.pump(const Duration(milliseconds: 50));
+    await drain(tester);
+    expect(find.byType(FloorSelector), findsOneWidget);
+  });
+
   testWidgets('입구 근처에서 잡힌 신뢰 좌표로는 재활성화하지 않는다', (WidgetTester tester) async {
     final positions = StreamController<Position>.broadcast();
     watchPosition = () => positions.stream;
@@ -134,7 +173,9 @@ void main() {
 
     // 자동 진입 안내가 스낵바라 ScaffoldMessenger의 Scaffold 조상이 필요하다.
     await tester.pumpWidget(
-      MaterialApp(theme: AppTheme.light, home: Scaffold(body: OutdoorMapBody(key: key)),
+      MaterialApp(
+        theme: AppTheme.light,
+        home: Scaffold(body: OutdoorMapBody(key: key)),
       ),
     );
     await drain(tester);
