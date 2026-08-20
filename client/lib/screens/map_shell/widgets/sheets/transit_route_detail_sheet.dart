@@ -139,48 +139,53 @@ class _TransitRouteDetailSheetState extends State<TransitRouteDetailSheet> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // 손잡이부터 요약까지가 **끌 수 있는 머리**다. 시간표는 스크롤
-                // 뷰가 알아서 시트에 넘기므로 여기 묶지 않는다.
+                // 손잡이만 스크롤 밖에 둔다. **머리말과 요약까지 고정하면
+                // 시트를 끝까지 줄였을 때 고정분이 시트보다 커져 Column이
+                // 넘친다**(실기기에서 21px 넘침으로 나타났다). 스크롤 안에
+                // 있으면 줄인 만큼 자연스럽게 가려질 뿐이다.
                 GestureDetector(
                   onVerticalDragUpdate: _dragSheet,
                   behavior: HitTestBehavior.opaque,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const RoutexSheetHandle(),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: RoutexSpacing.contentGap,
-                        ),
-                        child: RoutexSheetHeader(
-                          title: '${widget.destinationLabel}까지',
-                          // 뒤로는 이 화면만 닫는다. 목록이 그대로 남아 다른
-                          // 경로를 눌러 보는 것이 이 화면의 존재 이유다.
-                          onBack: () => Navigator.of(context).pop(),
-                        ),
-                      ),
-                      _Summary(
-                        itinerary: itinerary,
-                        arrival: transitArrivalTime(_departure, itinerary),
-                      ),
-                    ],
-                  ),
+                  child: const RoutexSheetHandle(),
                 ),
-                const RoutexDivider(role: RoutexDividerRole.section),
                 Expanded(
                   // **시트의 스크롤 컨트롤러를 그대로 쓴다.** 자기 컨트롤러를
-                  // 두면 목록 맨 위에서 아래로 끌 때 시트가 안 줄어들고, 반대로
+                  // 두면 맨 위에서 아래로 끌 때 시트가 안 줄어들고, 반대로
                   // 시트를 키우는 드래그가 목록 스크롤로 새어 든다.
                   child: SingleChildScrollView(
                     controller: scrollController,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: RoutexSpacing.componentPadding,
-                      vertical: RoutexSpacing.contentGap,
-                    ),
-                    child: TransitTimeline(
-                      itinerary: itinerary,
-                      destinationLabel: widget.destinationLabel,
-                      departureAt: _departure,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: RoutexSpacing.contentGap,
+                          ),
+                          child: RoutexSheetHeader(
+                            title: '${widget.destinationLabel}까지',
+                            // 뒤로는 이 화면만 닫는다. 목록이 그대로 남아 다른
+                            // 경로를 눌러 보는 것이 이 화면의 존재 이유다.
+                            onBack: () => Navigator.of(context).pop(),
+                          ),
+                        ),
+                        _Summary(
+                          itinerary: itinerary,
+                          arrival: transitArrivalTime(_departure, itinerary),
+                        ),
+                        const RoutexDivider(role: RoutexDividerRole.section),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: RoutexSpacing.componentPadding,
+                            vertical: RoutexSpacing.contentGap,
+                          ),
+                          child: TransitTimeline(
+                            itinerary: itinerary,
+                            destinationLabel: widget.destinationLabel,
+                            departureAt: _departure,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),

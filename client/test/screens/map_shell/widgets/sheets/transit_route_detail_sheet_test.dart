@@ -291,6 +291,21 @@ void main() {
     );
   });
 
+  testWidgets('끝까지 줄여도 넘치지 않는다', (tester) async {
+    // 실기기에서 "BOTTOM OVERFLOWED BY 21 PIXELS"로 나타났다. 머리말과 요약까지
+    // 스크롤 밖에 고정하면, 시트를 줄였을 때 고정분이 시트보다 커진다.
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    await _open(tester);
+    // 손잡이를 바닥까지 끌어 최소 크기로 만든다.
+    await tester.drag(find.byType(RoutexSheetHandle), const Offset(0, 2000));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('안내 시작을 누르면 true를 돌려주고 닫힌다', (tester) async {
     final result = await _open(tester);
     expect(find.text('안내 시작'), findsOneWidget);
