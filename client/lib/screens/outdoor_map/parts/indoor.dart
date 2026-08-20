@@ -222,12 +222,15 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
   /// ([enterIndoorFromGuidance]·[exitIndoorFromGuidance]).
   ///
   /// 왜 자동을 버렸는지는 `docs/client/indoor-entry-rules.md` 6절.
-  void _updateTransitionDebugChip() {
+  /// [sinceLastFix]는 좌표 간격이다. 게이트와 무관하지만 같은 줄에 있어야 한다 —
+  /// 버튼이 안 켜질 때 **"거리가 모자라다"와 "좌표가 안 온다"는 완전히 다른
+  /// 문제**인데, 이 값이 없으면 화면만 보고 구분할 수 없다.
+  void _updateTransitionDebugChip({Duration? sinceLastFix}) {
     if (!_debugModeController.enabled) {
       _gpsVerdictDebugText.value = null;
       return;
     }
-    _gpsVerdictDebugText.value = _indoorEntered
+    var line = _indoorEntered
         ? describeManualTransitionGate(
             outdoorExitGate,
             label: '나가기',
@@ -238,6 +241,39 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
             label: '진입',
             radiusMeters: manualIndoorEntryRadiusMeters,
           );
+    if (sinceLastFix != null) {
+      final seconds = (sinceLastFix.inMilliseconds / 1000).toStringAsFixed(1);
+      line = '$line · +${seconds}s';
+    }
+    line = '$line · ${_gps.lastFixFromStream ? '스트림' : '직접'}'
+        ' · 재시작${_gps.restartCount}';
+    _gpsVerdictDebugText.value = line;
+  }
+
+  /// 지금 그려진 안내가 **건물 안으로 들어가는 여정**인지.
+  ///
+  /// 근거는 예약된 실내 구간이다([_pendingIndoorDestination]) — 야외 구간을 다
+  /// 걸으면 문 앞이고, 그 다음이 실내라는 사실을 이 예약 하나가 담고 있다. 목적지
+  /// 좌표가 건물 안인지를 다시 재지 않는다: 같은 사실을 두 곳에서 계산하면
+  /// 폴백(그래프를 못 받아 실내 구간이 안 풀린 경우)에서 둘이 어긋나, 들어가 봐야
+  /// 이어질 경로가 없는데 버튼만 뜬다.
+  bool get _guidanceEntersBuilding =>
+      _guidanceStarted && !_indoorEntered && _pendingIndoorDestination != null;
+
+  /// 지금 그려진 안내가 **건물 밖으로 나가는 여정**인지.
+  ///
+  /// 실내 구간의 목적지 노드가 지상 출입구면 그렇다. 실내→야외 도보
+  /// ([showIndoorToOutdoorRouteTo])와 실내→대중교통
+  /// ([showIndoorLegToTransitBoarding])이 **둘 다 출구를 목적지로 삼는 실내 경로**를
+  /// 그리므로, 한 조건이 두 여정을 함께 잡는다.
+  ///
+  /// [_pendingOutdoorDestination]으로 가르지 않는 이유가 그것이다 — 대중교통 쪽은
+  /// 야외 구간을 예약하지 않고 처음부터 통째로 그린다(사진의 그 화면이다).
+  bool get _guidanceLeavesBuilding {
+    if (!_guidanceStarted || !_indoorEntered) return false;
+    final nodeId = _indoorRouteDestination?.nodeId;
+    if (nodeId == null) return false;
+    return _groundEntrances.any((entrance) => entrance.nodeId == nodeId);
   }
 
   /// 지금 GPS 좌표. 없으면 null이라 진입 게이트가 닫힌다.
@@ -807,22 +843,17 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
   /// 실내 모드에서 건물 바깥을 탭했을 때의 이탈.
   ///
   /// **재무장하지 않는다** — 그 시점의 줌은 보통 임계값 위라, 재무장하면 다음 카메라
-  /// 정지에서 곧바로 되끌려 들어가 "나갈 수 없는" 상태가 된다. **GPS 자동 진입도
-  /// 함께 끈다** — GPS는 여전히 "건물 안"이라 다음 좌표 한 건이 다시 끌고 들어간다.
+  /// 정지에서 곧바로 되끌려 들어가 "나갈 수 없는" 상태가 된다.
+  ///
+  /// [exitIndoorFromGuidance]와 달리 `leftBuilding`을 세우지 않는다. 이건 "바깥
+  /// 지도를 보여줘"라는 화면 조작이지 "내가 건물을 나왔다"가 아니라서, 실내 위치를
+  /// 버리면 도면을 다시 폈을 때 위치를 처음부터 다시 지정해야 한다.
   void _exitIndoorByOutsideTap() {
     // 앵커 배치 대기 중이었다면 함께 종료해 하단 바 버튼 톤도 되돌린다.
     // (배치 대기 중인 탭은 위에서 이미 소비되므로 방어적 처리다.)
     if (_placingPdrAnchor) _setPlacingAnchor(false);
-    _gpsEntryArmed = false;
     _setIndoorEntered(false);
   }
-
-  /// 실내 위치가 지금 잡혀 있는지. 자동 이탈을 허용할지 가르는 기준이다
-  /// ([_applyBuildingVerdict]).
-  ///
-  /// 앵커만으로 판단한다 — 궤적은 세션이 끝난 뒤에도 남아 "지금 안에 있다"의
-  /// 근거가 못 된다.
-  bool get _indoorPositionPlaced => _pdrTrailState.anchor != null;
 
   /// [_indoorEntered] 상태 변경을 한 곳으로 모은 헬퍼. setState·상위 통지에 더해
   /// dim scrim·마커·페이드까지 여기서 함께 갱신한다.
@@ -837,20 +868,12 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     _routeOverviewHoldsIndoor = false;
     // 걸어 나감 무장은 **이 세션의 층 좌표**로 쌓은 근거다. 오갈 때마다 버려야
     // 다음 진입이 지난번 문 앞에 서 있던 상태로 시작하지 않는다.
-    _walkoutDetector.reset();
     // 상태를 내리기 **전에** 버린다. 아래 [_syncPdrCurrentLayer]가 이 값을 보고
     // 그릴지 말지를 정하므로, 뒤에 버리면 그 한 프레임 동안 옛 위치가 남는다.
     if (!value && leftBuilding) _dropIndoorPosition();
-    // 자동으로 들어왔다는 표식은 야외로 나가는 순간 내린다. 남겨 두면 다음에
-    // 사용자가 건물을 직접 탭해 연 도면까지 GPS가 제멋대로 닫는다
-    // ([_applyBuildingVerdict]의 outside 갈래).
-    if (!value) _indoorEnteredByGps = false;
-    // **정말로 나갔을 때만** 층 질문을 다시 열어 둔다. 도면만 접은 사용자는 같은
+    // **정말로 나갔을 때만** 매장 질문을 다시 열어 둔다. 도면만 접은 사용자는 같은
     // 자리에 그대로 있어서, 다시 펼 때마다 묻는 것은 답을 아는 질문을 되묻는 것이다.
-    if (!value && leftBuilding) {
-      _entryFloorAsked = false;
-      _nearbyStoreAsked = false;
-    }
+    if (!value && leftBuilding) _nearbyStoreAsked = false;
     // 실내 안내를 켜고 끄는 유일한 지점이다.
     //
     // 예전에는 오버레이가 꺼져도 복도 보정이 계속 돌았다 — 화면에 안 보일 뿐

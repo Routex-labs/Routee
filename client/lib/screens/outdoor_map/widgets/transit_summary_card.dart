@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:routex_design_system/routex_design_system.dart';
 
 import '../../../models/route/transit_route.dart';
+import '../../../widgets/guidance_action_row.dart';
 import '../../../widgets/transit_route_summary.dart';
 import '../../../widgets/transit_style.dart';
 import '../../../widgets/transit_timeline.dart';
@@ -20,6 +21,7 @@ class TransitSummaryCard extends StatefulWidget {
     required this.onClose,
     this.onStartGuidance,
     this.onClosePointerDown,
+    this.transition,
   });
 
   final TransitItinerary itinerary;
@@ -30,6 +32,10 @@ class TransitSummaryCard extends StatefulWidget {
   final VoidCallback? onStartGuidance;
 
   final ValueChanged<Offset>? onClosePointerDown;
+
+  /// 안내 중 `안내 종료` 왼쪽에 함께 놓을 실내↔야외 전환. 실내에서 타러 나가는
+  /// 여정이 이 카드로 안내되므로, 도보 카드([EtaCard])와 같은 손잡이를 받는다.
+  final GuidanceTransitionAction? transition;
 
   @override
   State<TransitSummaryCard> createState() => _TransitSummaryCardState();
@@ -61,10 +67,9 @@ class _TransitSummaryCardState extends State<TransitSummaryCard> {
               children: [
                 TransitDurationFare(itinerary: itinerary),
                 _details(context, departure),
-                RoutexButton(
-                  label: '안내 종료',
-                  variant: RoutexButtonVariant.secondary,
-                  onPressed: widget.onClose,
+                GuidanceActionRow(
+                  onStop: widget.onClose,
+                  transition: widget.transition,
                 ),
               ],
             ),

@@ -79,8 +79,7 @@ class GpsBuildingJudgement {
   final GpsBuildingVerdict verdict;
 
   /// 이 좌표의 오차 반경(m). **이탈 갈래만** 이 값을 본다
-  /// ([outdoorExitAccuracyMeters]) — 진입도 재무장([shouldRearmGpsEntry])도
-  /// 오차를 따지지 않는다.
+  /// ([outdoorExitAccuracyMeters]) — 안팎을 가르는 유일한 오차 문턱이다.
   final double accuracyMeters;
 
   /// 외곽선 **안쪽**으로 들어와 있는 거리(m). 밖이면 0.
@@ -137,19 +136,6 @@ GpsBuildingJudgement judgeBuildingFromGps({
     hasFootprint: true,
   );
 }
-
-/// 자동 진입 빗장을 풀 근거인가. **오차를 보지 않는다.**
-///
-/// 요구 거리는 이탈과 같은 [outdoorExitMarginMeters]지만 오차 문턱이 없다 —
-/// 틀렸을 때의 비용이 다르기 때문이다. 이탈은 틀리면 건물 안에서 도면과 위치를
-/// 잃지만, 재무장은 진입을 **허용할 뿐 발화시키지 않는다**(실제로 들어가려면
-/// 안쪽 [indoorEnterInsetMeters]를 넘긴 좌표가 따로 와야 한다).
-///
-/// 오차 문턱을 여기 두면 오차가 30 m 아래로 안 내려오는 자리에서 빗장이
-/// **영구히** 걸린다 — 걸어 나감 이탈이 끈 빗장을 아무도 못 푼다.
-bool shouldRearmGpsEntry(GpsBuildingJudgement judgement) =>
-    judgement.hasFootprint &&
-    judgement.metersOutside >= outdoorExitMarginMeters;
 
 /// 잰 거리로 결론을 내리는 사다리. 순서가 곧 정책이다.
 ///

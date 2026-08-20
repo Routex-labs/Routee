@@ -73,7 +73,6 @@ import '../../map/icon/category_map_icon.dart';
 import '../../map/style/floor_facility_style.dart';
 import '../../domain/store/nearest_around_me.dart';
 import '../../map/camera/scale_bar.dart';
-import 'widgets/entry_floor_prompt.dart';
 import 'widgets/floor_selector.dart';
 import 'widgets/map_scale_bar.dart';
 import 'widgets/nearby_store_sheet.dart';
@@ -81,6 +80,8 @@ import 'widgets/floor_switch_escalator_motif.dart';
 import 'widgets/guidance_recenter_button.dart';
 import 'widgets/indoor_arrival_card.dart';
 import 'widgets/route_steps_sheet.dart';
+import '../../core/korean_josa.dart';
+import '../../widgets/guidance_action_row.dart';
 import '../../map/icon/icon_cache.dart';
 import '../../map/icon/place_pin.dart';
 import 'widgets/map_overlay_tap_guard.dart';
@@ -92,7 +93,7 @@ import 'entry/initial_camera.dart';
 import 'camera/building_orientation.dart';
 import 'entry/indoor_entry_proximity.dart';
 import 'entry/indoor_entry_zoom.dart';
-import 'entry/indoor_exit_walkout.dart';
+import 'entry/manual_transition_gate.dart';
 import 'outdoor_map_tuning.dart';
 import 'widgets/placing_anchor_hint.dart';
 import 'route_recompute_policy.dart';
@@ -404,28 +405,6 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   /// 지금 굴러가는 연출의 방향. 문이 당겨 열릴지 밀려 열릴지를 정한다.
   IndoorTransitionDirection _indoorTransitionDirection =
       IndoorTransitionDirection.enter;
-
-  /// 앱을 켠 뒤 GPS가 "건물 밖"이라고 한 번이라도 말했는지.
-  ///
-  /// **앱을 실내에서 켠 경우를 가르는 값이다.** 걸어 들어온 사람은 반드시
-  /// 밖에서 걸어왔으므로 그 사이 한 번은 밖이 나온다. 한 번도 없이 안이
-  /// 나왔다면 사용자는 처음부터 건물 안에 있었다는 뜻이고, 그때만 몇 층인지
-  /// 묻는다([_askEntryFloorThenTrack]).
-  ///
-  /// 시각이 아니라 이 사실로 가르는 이유는 **건물 로드가 늦을 수 있어서**다.
-  /// 외곽선이 없는 동안의 판정은 전부 `unclear`라, "첫 좌표"로 가르면 로딩이
-  /// 느린 기기에서 실내에서 켠 사용자가 걸어 들어온 것으로 읽힌다.
-  bool _sawOutsideSinceLaunch = false;
-
-  /// GPS 자동 실내 진입이 지금 켜져 있는지. 1회성 플래그였을 때는 오탐 한 번이
-  /// 기능 자체를 죽였다([IndoorEntryGpsDecision.rearm]이 다시 켠다).
-  ///
-  /// **건물 밖 탭만으로는 켜지 않는다** — 화면 조작이지 "내가 밖에 있다"가 아니다.
-  bool _gpsEntryArmed = true;
-
-  /// 걸어서 출입구를 통과했는지 따라가는 상태기. GPS가 늦은 구간을 메우는
-  /// 두 번째 이탈 입력이다([_exitIndoorIfWalkedOut]).
-  final EntranceWalkoutDetector _walkoutDetector = EntranceWalkoutDetector();
 
   Position? _position;
 
@@ -914,11 +893,12 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
         _pdrTrailState.recordSnapshot(snapshot);
         _syncCorridorTracking(snapshot);
       });
-      // 걸어서 문을 통과했으면 GPS를 기다리지 않고 여기서 나간다. setState
-      // **바깥**에 두는 것이 중요하다 — 이 판정은 화면을 실내에서 야외로 통째로
-      // 바꾸므로, 안에서 부르면 setState가 중첩된다. 나갔으면 아래 갱신은
-      // [_setIndoorEntered]가 이미 야외 기준으로 다시 돌렸다.
-      if (_exitIndoorIfWalkedOut()) return;
+      // 걸음 한 건은 **화면을 실내에서 야외로 바꾸지 않는다.** 예전에는 여기서
+      // 출입구 통과를 판정해 스스로 나갔는데, PDR heading이 180도 어긋난 기기에서
+      // 건물 안으로 걸어 들어가는 동선이 "나가는 것"으로 읽혔다. 지금 이 걸음이
+      // 바꾸는 것은 "밖으로 나가기" 버튼의 색뿐이고, 그 판정은 위 setState가
+      // 굴린 rebuild에서 [outdoorExitGate]가 다시 잰다.
+      _updateTransitionDebugChip();
       _syncPdrCurrentLayer();
       // 마커를 그린 **직후**에 카메라를 본다. 걷는 안내 중 마커가 화면 가운데를
       // 크게 벗어났을 때만 다시 부른다([_followIndoorMarkerDuringGuidance]).
@@ -1093,26 +1073,12 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   /// 한 프레임 떴다 사라져, 정작 읽어야 할 사람이 못 읽는다.
   EscalatorDetectionEvent? _lastEscalatorEvent;
 
-  /// 이번 실내 상태가 **자동 진입**으로 켜졌는지.
-  ///
-  /// 자동 이탈은 자동 진입을 되돌리기 위한 것이다. 사용자가 건물을 직접 탭해서
-  /// 도면을 연 경우까지 자동으로 닫으면, 입구 앞에 서서 층 도면을 보려던 사람의
-  /// 화면이 신호가 잡히는 순간 제멋대로 닫힌다.
-  bool _indoorEnteredByGps = false;
-
-  /// 이번 진입에서 "몇 층에 계신가요?"를 이미 물었는지([_askEntryFloor]).
-  ///
-  /// **건물을 실제로 나갈 때만 되돌린다.** 벽 근처에서는 판정이 안팎을 오가는데,
-  /// 매 진입마다 물으면 그 화면이 되풀이해 떠 지도에 닿을 수가 없다. 도면만 접은
-  /// 경우(`returnToOutdoorView`)도 되돌리지 않는다 — 같은 자리에 그대로 있다.
-  bool _entryFloorAsked = false;
-
   /// 이번 진입에서 "근처 매장에서 골라주세요"를 이미 띄웠는지.
   ///
-  /// **[_entryFloorAsked]와 같은 규칙으로 되돌린다.** 지도를 크게 축소하면 실내
-  /// 오버레이가 닫히고, 다시 확대하거나 GPS가 한 번 더 잡히면 진입이 다시
-  /// 발화한다 — 그때마다 시트가 올라오면 지도를 훑을 수가 없다. 다시 고르고
-  /// 싶으면 하단 바의 "가까운 매장으로 위치 지정"이 그 자리에 있다.
+  /// **건물을 실제로 나갈 때만 되돌린다.** 도면만 접은 경우
+  /// (`returnToOutdoorView`)는 같은 자리에 그대로 있어서, 다시 펼 때마다 시트가
+  /// 올라오면 지도를 훑을 수가 없다. 다시 고르고 싶으면 하단 바의 "가까운
+  /// 매장으로 위치 지정"이 그 자리에 있다.
   bool _nearbyStoreAsked = false;
 
   /// GPS 구독을 [_gpsTrackingWanted] 상태에 맞춘다. 구독 시작/해제의 유일한

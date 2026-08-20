@@ -117,6 +117,11 @@ extension OutdoorMapUi on OutdoorMapBodyState {
     final guidance = _guidanceStarted && !_showingArrivalOnly
         ? _indoorRouteGuidance
         : null;
+    // 안내 중 하단 카드가 셋 중 어느 것이든 같은 버튼을 받는다 — 실내→야외
+    // 여정이 도보로도 대중교통으로도 시작될 수 있어서다.
+    final transition = _guidanceStarted && !_showingArrivalOnly
+        ? _guidanceTransitionAction()
+        : null;
     final initialCenter = position == null
         ? fallbackLocation
         : ll.LatLng(position.latitude, position.longitude);
@@ -490,6 +495,7 @@ extension OutdoorMapUi on OutdoorMapBodyState {
                       .clamp(1, 999),
               label: _indoorEtaLabel(indoorRouteDestination),
               guidanceStarted: _guidanceStarted,
+              transition: transition,
               onStartGuidance: _guidanceStarted
                   ? null
                   : () => unawaited(_startCurrentGuidance()),
@@ -512,6 +518,7 @@ extension OutdoorMapUi on OutdoorMapBodyState {
               key: _etaCardKey,
               itinerary: itinerary,
               label: _transitLabel ?? '목적지까지',
+              transition: transition,
               onStartGuidance: _guidanceStarted
                   ? null
                   : () => unawaited(_startCurrentGuidance()),
@@ -532,6 +539,7 @@ extension OutdoorMapUi on OutdoorMapBodyState {
                   ? (_userDestinationLabel ?? '목적지까지')
                   : '건물 입구까지',
               guidanceStarted: _guidanceStarted,
+              transition: transition,
               routeOptions: _directionsRouteExtras(context, route),
               extraMetric: _directionsFareMetric(route),
               onClose: userDestination != null
@@ -561,6 +569,36 @@ extension OutdoorMapUi on OutdoorMapBodyState {
         ),
       ],
     );
+  }
+
+  /// 안내 중 하단 카드의 **왼쪽 버튼**. 이 여정이 실내↔야외를 건너지 않으면 null
+  /// 이라 카드는 지금까지처럼 `안내 종료` 하나만 띄운다.
+  ///
+  /// 두 갈래가 배타적인 것은 [_guidanceEntersBuilding]·[_guidanceLeavesBuilding]이
+  /// `_indoorEntered`를 반대로 보기 때문이다 — 한 화면에 진입과 나가기가 함께
+  /// 뜨는 상태는 없다.
+  ///
+  /// **버튼을 숨기지 않고 회색으로 둔다.** 조건을 채웠을 때만 나타나면 사용자는
+  /// 그런 버튼이 있는 줄도 모르고 걷다가, 정작 문 앞에서 처음 보고 "이게 뭐지"를
+  /// 한 번 더 생각해야 한다.
+  GuidanceTransitionAction? _guidanceTransitionAction() {
+    if (_guidanceEntersBuilding) {
+      final name = _building?.name;
+      if (name == null || name.isEmpty) return null;
+      return GuidanceTransitionAction(
+        label: '${withDirectionJosa(name)} 진입',
+        onPressed: indoorEntryGate.enabled
+            ? () => unawaited(enterIndoorFromGuidance())
+            : null,
+      );
+    }
+    if (_guidanceLeavesBuilding) {
+      return GuidanceTransitionAction(
+        label: '밖으로 나가기',
+        onPressed: outdoorExitGate.enabled ? exitIndoorFromGuidance : null,
+      );
+    }
+    return null;
   }
 
   /// 후보 패널과 상세보기 버튼을 묶어 [EtaCard.routeOptions]에 얹는다.
