@@ -4,6 +4,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:navigation_client/models/route/transit_route.dart';
 import 'package:navigation_client/screens/map_shell/widgets/sheets/transit_route_detail_sheet.dart';
 import 'package:navigation_client/theme/app_theme.dart';
+import 'package:routex_design_system/routex_design_system.dart';
 
 const _point = LatLng(37.5253, 126.9250);
 
@@ -134,6 +135,10 @@ void main() {
     await _pump(tester, _withBus);
 
     expect(find.text('국회의사당'), findsNothing);
+    // 상세가 아래 절반만 덮는 시트가 된 뒤로는 접기 줄이 화면 밖일 수 있다.
+    // 안 굴려 주면 탭이 빗나가고 "펼쳐도 안 보인다"로 보인다.
+    await tester.ensureVisible(find.text('3개 정류장 이동'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('3개 정류장 이동'));
     await tester.pumpAndSettle();
     expect(find.text('국회의사당'), findsOneWidget);
@@ -246,27 +251,44 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('상세는 목록 위에 겹치는 시트가 아니라 전체 화면 라우트다', (tester) async {
+  testWidgets('상세는 아래 절반만 덮고 위는 지도로 비운다', (tester) async {
+    // 시간표를 읽는 동안 그 경로가 어디로 도는지 함께 보여야 한다. 위쪽을
+    // 비우지 않으면 사용자는 두 화면을 번갈아 열어 견줘야 한다.
     await _open(tester);
 
+    // 라우트는 그대로 PageRoute다 — 시트로 바꾼 이유는 아래 목록을 트리에서
+    // 내리지 않기 위해서였고(지도 플랫폼 뷰가 헐린다), 그건 그대로다.
     final route = ModalRoute.of(
       tester.element(find.byType(TransitRouteDetailSheet)),
     );
-    expect(route, isA<PageRoute>(), reason: '시트로 뜨면 아래 목록이 뒤로 비친다');
-    // 화면을 꽉 채우고, 그 표면이 불투명해야 아래가 안 비친다.
+    expect(route, isA<PageRoute>(), reason: '목록이 트리에서 내려가면 지도가 헐린다');
+
+    final screen = tester.getSize(find.byType(MaterialApp));
+    final sheet = tester.getRect(find.byType(RoutexBottomSheet).first);
     expect(
-      tester.getSize(find.byType(TransitRouteDetailSheet)),
-      tester.getSize(find.byType(MaterialApp)),
+      sheet.top,
+      greaterThan(screen.height * 0.25),
+      reason: '위쪽은 지도 자리다 — 꽉 채우면 경로를 볼 수 없다',
     );
-    final scaffold = tester.widget<Scaffold>(
-      find
-          .descendant(
-            of: find.byType(TransitRouteDetailSheet),
-            matching: find.byType(Scaffold),
-          )
-          .first,
+    expect(
+      sheet.bottom,
+      closeTo(screen.height, 1),
+      reason: '시트는 바닥에 붙어 있어야 한다',
     );
-    expect(scaffold.backgroundColor?.a, 1.0);
+  });
+
+  testWidgets('드래그로 시트 크기를 바꿀 수 있다', (tester) async {
+    await _open(tester);
+
+    final before = tester.getRect(find.byType(RoutexBottomSheet).first).top;
+    await tester.drag(find.byType(RoutexSheetHandle), const Offset(0, -200));
+    await tester.pumpAndSettle();
+
+    expect(
+      tester.getRect(find.byType(RoutexBottomSheet).first).top,
+      lessThan(before),
+      reason: '손잡이를 위로 끌면 시트가 커져야 한다',
+    );
   });
 
   testWidgets('안내 시작을 누르면 true를 돌려주고 닫힌다', (tester) async {

@@ -75,6 +75,13 @@ class TransitRoutesSheet extends StatefulWidget {
 class _TransitRoutesSheetState extends State<TransitRoutesSheet> {
   bool _intentionalPop = false;
 
+  /// 상세가 위에 떠 있는 동안 true. 그때는 이 목록을 화면에서 물린다.
+  ///
+  /// **닫는 것이 아니라 비켜서는 것이다.** 상세도 이제 아래 절반만 덮는 시트라
+  /// (`TransitRouteDetailSheet`), 그대로 두면 같은 자리에 시트 두 겹이 겹쳐
+  /// 보인다. 트리에는 남겨 둬야 뒤로 나왔을 때 필터와 스크롤 위치가 그대로다.
+  bool _detailOpen = false;
+
   /// 지금 고른 갈래. **목록만 좁힌다** — 지도에 그려진 경로는 건드리지 않는다.
   /// 필터는 보는 범위를 줄이는 것이지 선택을 바꾸는 것이 아니다.
   TransitFilter _filter = TransitFilter.all;
@@ -90,12 +97,15 @@ class _TransitRoutesSheetState extends State<TransitRoutesSheet> {
   /// 후보를 들고 있어, 뒤로 나온 순간 화면이 한 번 더 바뀐다.
   Future<void> _pick(TransitItinerary itinerary) async {
     widget.onPreview(itinerary);
+    setState(() => _detailOpen = true);
     final start = await TransitRouteDetailSheet.show(
       context,
       itinerary: itinerary,
       destinationLabel: widget.destinationLabel,
     );
-    if (!mounted || start != true) return;
+    if (!mounted) return;
+    setState(() => _detailOpen = false);
+    if (start != true) return;
     _markIntentional();
     Navigator.of(context).pop(itinerary);
   }
@@ -108,6 +118,19 @@ class _TransitRoutesSheetState extends State<TransitRoutesSheet> {
     // 탭도 안 눌린 채 빈 목록만 남는다.
     final filter = filters.contains(_filter) ? _filter : TransitFilter.all;
     final itineraries = applyTransitFilter(all, filter);
+    return Offstage(
+      offstage: _detailOpen,
+      child: _buildSheet(context, all, filters, filter, itineraries),
+    );
+  }
+
+  Widget _buildSheet(
+    BuildContext context,
+    List<TransitItinerary> all,
+    List<TransitFilter> filters,
+    TransitFilter filter,
+    List<TransitItinerary> itineraries,
+  ) {
     return PopScope(
       canPop: true,
       onPopInvokedWithResult: (didPop, _) {
