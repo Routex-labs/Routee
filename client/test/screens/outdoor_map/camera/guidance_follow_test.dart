@@ -6,7 +6,7 @@ import 'package:navigation_client/screens/outdoor_map/camera/guidance_follow.dar
 
 /// 걷는 안내 중 카메라가 마커를 언제 다시 부르는지의 검증 기준표.
 ///
-/// 화면은 세로로 긴 폰(360×800)이고 배율은 안내 시작 배율(18)이다. 그 조합에서
+/// 화면은 세로로 긴 폰(360×800)이고 배율은 실내 안내 중 흔한 배율(18)이다. 그 조합에서
 /// 짧은 변(360px)이 덮는 실제 폭이 약 214 m라, 데드밴드는 그 절반의 35% ≈ 37 m다.
 const _camera = LatLng(37.525862, 126.928540);
 const _metersPerDegreeLat = 111320.0;

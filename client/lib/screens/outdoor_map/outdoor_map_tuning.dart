@@ -105,6 +105,17 @@ const routeFitMaxZoom = 17.5;
 /// 적용하지 않는다 — 들여다보려 당겨 둔 배율을 버튼 한 번에 뺏지 않는다.
 const walkingViewZoom = indoorTilesMaxZoom;
 
+/// `안내 시작`을 누른 직후 내려앉는 배율.
+///
+/// [walkingViewZoom](18)보다 한 단계 더 당긴다. 18은 세로 화면 폭에 약 85 m가
+/// 담기는데, 첫 걸음을 어느 쪽으로 떼는지 보려는 사람에게는 자기 아이콘이 너무
+/// 작다. 19면 약 43 m — 지금 선 복도와 다음 갈림길이 함께 들어온다.
+///
+/// **실내 타일은 [indoorTilesMaxZoom]를 넘으면 z=18을 over-scale한다.** 그건
+/// 그 상수가 이미 의도한 동작이라(indoor_entry_zoom.dart) 도면이 흐려질 뿐
+/// 뒤틀리지 않는다.
+const guidanceStartZoom = 19.0;
+
 /// "내 위치로" 이동 시간. 직접 누른 조작이라 과정을 보여 줄 이유가 없다.
 const recenterDuration = Duration(milliseconds: 300);
 

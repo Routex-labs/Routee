@@ -318,12 +318,12 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
 
   Future<void> _moveCameraToStartPointNow() async {
     if (_indoorEntered) {
-      await _centerOnIndoorMarker(zoom: walkingViewZoom);
+      await _centerOnIndoorMarker(zoom: guidanceStartZoom);
       return;
     }
     final position = _position;
     if (position == null) return;
-    await _moveCameraToUser(position, zoom: walkingViewZoom);
+    await _moveCameraToUser(position, zoom: guidanceStartZoom);
   }
 
   /// 걷는 안내 중 실내 마커를 화면 가운데 언저리에 붙들어 둔다.
@@ -375,12 +375,27 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
     _notifyRouteStateIfChanged();
     // 계획 화면의 약속은 "경로 전체가 보인다"다. 따라가기만 풀면 카메라가
     // 사용자에게 확대된 채로 남아 어느 후보가 어느 선인지 대조할 수 없다.
+    //
+    // **도면을 편 상태에서는 그 약속을 지키지 않는다.** 왜 그런지와 안 지켰을 때
+    // 무엇이 깨지는지는 [guidanceStopCameraTarget]에 있다.
     final itinerary = _transitItinerary;
     final route = _route;
-    if (itinerary != null) {
-      _fitCameraToPoints(itinerary.points);
-    } else if (route != null) {
-      _fitCameraToRoute(route);
+    final segment = _indoorRouteSegment;
+    switch (guidanceStopCameraTarget(
+      indoorEntered: _indoorEntered,
+      hasIndoorSegment: segment != null,
+      hasRouteToShow: itinerary != null || route != null,
+    )) {
+      case GuidanceStopCameraTarget.wholeRoute:
+        if (itinerary != null) {
+          _fitCameraToPoints(itinerary.points);
+        } else if (route != null) {
+          _fitCameraToRoute(route);
+        }
+      case GuidanceStopCameraTarget.indoorSegment:
+        unawaited(_fitCameraToRouteSegment(segment!));
+      case GuidanceStopCameraTarget.keep:
+        break;
     }
   }
 
