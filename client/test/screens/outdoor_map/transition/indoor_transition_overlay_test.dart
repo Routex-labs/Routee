@@ -113,4 +113,20 @@ void main() {
       }
     }
   });
+
+  testWidgets('좁은 화면에서 긴 건물명이 넘치지 않는다', (tester) async {
+    // 한때 `Row` 안의 `Text`에 폭 제한이 없어 `overflow: ellipsis`가 안 걸렸고,
+    // 긴 이름이 말줄임 대신 **오버플로로 터졌다.** 프레임 추출기가 잡아 준
+    // 버그인데 그 도구를 지웠으므로, 좁은 화면을 여기서 직접 만든다.
+    tester.view.physicalSize = const Size(320, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await _pump(
+      tester,
+      progress: 0.5,
+      direction: IndoorTransitionDirection.enter,
+      buildingName: '스타필드 코엑스몰 서관 지하 아케이드',
+    );
+    expect(tester.takeException(), isNull);
+  });
 }

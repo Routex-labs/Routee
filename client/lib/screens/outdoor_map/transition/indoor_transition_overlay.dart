@@ -13,7 +13,7 @@ import '../../../theme/app_theme.dart';
 import 'indoor_transition_timeline.dart';
 
 /// 문틀 크기(논리 px). 문구와 **나란히 서는** 크기라 작다 — 크게 하면 연출이
-/// 화면을 잡아먹고, 이 오버레이는 1초 남짓 떠 있다 사라지는 것이다.
+/// 화면을 잡아먹고, 이 오버레이는 잠깐 떠 있다 사라지는 것이다.
 const _doorWidth = 50.0;
 const _doorHeight = 70.0;
 
@@ -39,8 +39,8 @@ const _exitSwing = 56 * 3.1415926535 / 180;
 /// [buildingName]은 진입 문구에 들어갈 이름이고, 비어 있으면 이름 없이
 /// "들어가는 중..."만 띄운다 — 건물을 아직 못 받은 경우다.
 ///
-/// 지도 조작을 막지 않는다([IgnorePointer]). 덮개가 떠 있는 1초 남짓 동안 탭이
-/// 먹지 않으면 사용자는 앱이 멈춘 것으로 읽는다.
+/// 지도 조작을 막지 않는다([IgnorePointer]). 덮개가 떠 있는 동안 탭이 먹지
+/// 않으면 사용자는 앱이 멈춘 것으로 읽는다.
 class IndoorTransitionOverlay extends StatelessWidget {
   const IndoorTransitionOverlay({
     super.key,
@@ -91,7 +91,7 @@ class IndoorTransitionOverlay extends StatelessWidget {
                   const SizedBox(width: 12),
                   // **Flexible이 없으면 말줄임이 안 걸린다.** Row 안의 Text는
                   // 제한 없는 폭을 요구해서, 긴 건물명은 잘리는 대신 오버플로로
-                  // 터진다(프레임 추출기에서 실제로 그렇게 났다).
+                  // 터진다(실제로 그렇게 났다).
                   Flexible(
                     child: Padding(
                       padding: const EdgeInsets.only(bottom: 2),
@@ -137,7 +137,7 @@ class _Door extends StatelessWidget {
     // 정했다: 자유단(경첩에서 폭 w)은 회전 후 `z' = −w·sinθ`이고 원근 나눗셈이
     // `1 + p·z'`이므로, θ>0이면 분모가 1보다 작아져 **확대**된다 = 관찰자 쪽으로
     // 온다. 그래서 당기는 진입이 양수다. CSS와는 부호가 반대다(같은 식에서 +z가
-    // 관찰자 쪽이라, 미리보기 하네스를 CSS로 먼저 만들었다면 뒤집어야 한다).
+    // 관찰자 쪽이라, 웹으로 먼저 그려 본 곡선을 옮길 때는 뒤집어야 한다).
     final swing = direction == IndoorTransitionDirection.enter
         ? _enterSwing
         : -_exitSwing;

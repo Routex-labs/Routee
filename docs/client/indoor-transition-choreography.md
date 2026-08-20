@@ -7,7 +7,6 @@
 |---|---|
 | `screens/outdoor_map/transition/indoor_transition_timeline.dart` | 진행률 → 각 요소의 값 (순수 계산) |
 | `screens/outdoor_map/transition/indoor_transition_overlay.dart` | 흰 덮개·문 한 짝·문구를 그리는 위젯 |
-| `screens/outdoor_map/transition/indoor_transition_preview.dart` | 가짜 지도 위에서 곡선을 보는 하네스 |
 | `core/korean_josa.dart` | 건물명 뒤 조사('로'/'으로') |
 
 굴리는 곳은 `parts/indoor.dart`의 `_runIndoorTransition` **한 곳뿐**이다.
@@ -93,9 +92,9 @@
 `z' = −w·sinθ`이고 원근 나눗셈이 `1 + p·z'`다. θ>0이면 분모가 1보다 작아져 **확대**
 = 관찰자 쪽으로 온다. 그래서 당기는 진입이 양수다.
 
-**CSS와는 부호가 반대다.** 같은 식에서 CSS는 +z가 관찰자 쪽이라, 미리보기를 CSS로
-먼저 만들었다면 옮길 때 뒤집어야 한다. 정지 프레임에서는 깊이가 안 읽혀 이 계산이
-유일한 근거였다.
+**CSS와는 부호가 반대다.** 같은 식에서 CSS는 +z가 관찰자 쪽이라, 웹으로 먼저 그려 본
+곡선을 옮길 때는 뒤집어야 한다. 정지 프레임에서는 깊이가 안 읽혀 이 계산이 유일한
+근거였고, **확인은 실기기에서 실제로 드나들며 한다.**
 
 ### 문틀은 문짝보다 먼저 그린다
 
@@ -120,7 +119,8 @@
 ### 긴 이름은 Flexible로 잡는다
 
 `Row` 안의 `Text`는 제한 없는 폭을 요구해서, `overflow: ellipsis`만으로는 말줄임이
-걸리지 않고 **오버플로로 터진다.** 프레임 추출기에서 실제로 그렇게 났다.
+걸리지 않고 **오버플로로 터진다.** 실제로 그렇게 났고, 지금은 좁은 화면에 긴 이름을
+넣어 보는 검사가 그 자리를 지킨다(`indoor_transition_overlay_test.dart`).
 
 ---
 

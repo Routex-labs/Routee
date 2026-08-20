@@ -34,7 +34,6 @@ const _rootFileRank = <String, int>{
   'app.dart': 5,
   'main.dart': 5,
   'pdr_device_harness_main.dart': 5,
-  'indoor_transition_preview_main.dart': 5,
   _serviceLocator: 5,
 };
 
