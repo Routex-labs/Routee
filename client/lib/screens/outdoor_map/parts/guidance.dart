@@ -224,7 +224,10 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
       storePoint: origin.point,
       storeName: origin.name,
     );
+    if (!mounted) return;
     _notifyRouteStateIfChanged();
+    // 앵커를 방금 찍었으므로 이제 옮길 자리가 있다. 야외 갈래와 같은 연출이다.
+    await _moveCameraToGuidanceStart();
   }
 
   /// 안내 시작 판정에 쓸, 지금 지도에 그려진 야외 경로의 좌표열.
@@ -283,7 +286,30 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
       _guidanceStarted = true;
     });
     _notifyRouteStateIfChanged();
-    if (_routeIsDriving) await startFollowingCurrentLocation();
+    if (_routeIsDriving) {
+      await startFollowingCurrentLocation();
+      return;
+    }
+    await _moveCameraToGuidanceStart();
+  }
+
+  /// 안내를 시작하는 순간 시점을 **지금 서 있는 자리**로 내린다.
+  ///
+  /// 개요는 "어디로 가는가"를 보여 주는 화면이고, 시작을 누른 사람이 다음에
+  /// 봐야 하는 것은 "지금 어디서 어느 쪽으로 첫 걸음을 떼는가"다. 개요 배율에
+  /// 그대로 두면 첫 갈림길이 몇 픽셀이라 어느 쪽인지 읽히지 않는다.
+  ///
+  /// 위치의 주인을 그대로 따른다 — 실내면 도면 위 실내 마커(바라보는 방향으로
+  /// 회전까지), 야외면 GPS 좌표다. 둘 다 없으면 아무것도 하지 않는다: 옮길
+  /// 자리를 모르면서 배율만 당기면 엉뚱한 곳을 확대한다.
+  Future<void> _moveCameraToGuidanceStart() async {
+    if (_indoorEntered) {
+      await _centerOnIndoorMarker(zoom: walkingViewZoom);
+      return;
+    }
+    final position = _position;
+    if (position == null) return;
+    await _moveCameraToUser(position, zoom: walkingViewZoom);
   }
 
   /// 안내만 끈다 — 경로선·후보·목적지는 남는다. **뒤로가기가 부른다.**
