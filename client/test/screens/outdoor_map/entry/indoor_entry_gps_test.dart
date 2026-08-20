@@ -242,7 +242,7 @@ void main() {
       expect(result, GpsEntryConfirmation.immediate);
     });
 
-    test('오차 10~20m inside는 3초 안의 두 표본으로 확정한다', () {
+    test('오차 10~20m inside는 서로 다른 두 표본으로 확정한다', () {
       final tracker = GpsEntryEvidenceTracker();
       final judgement = _judge(
         point: _offset(north: _halfWidthMeters - 6),
@@ -276,7 +276,7 @@ void main() {
       );
     });
 
-    test('3초를 넘겨 뒤늦게 온 inside는 새 후보가 된다', () {
+    test('스트림이 느려도 뒤늦게 온 두 번째 inside를 확정한다', () {
       final tracker = GpsEntryEvidenceTracker();
       final judgement = _judge(point: _center, accuracy: 15);
 
@@ -284,11 +284,9 @@ void main() {
       expect(
         tracker.observe(
           judgement,
-          observedAt: start.add(
-            entryConfirmationMaxGap + const Duration(milliseconds: 1),
-          ),
+          observedAt: start.add(const Duration(seconds: 36)),
         ),
-        GpsEntryConfirmation.pending,
+        GpsEntryConfirmation.confirmed,
       );
     });
 

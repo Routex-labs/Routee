@@ -42,9 +42,6 @@ const footprintOutwardToleranceMeters = 6.0;
 /// 한 번 더 확인한다.
 const immediateEntryAccuracyMeters = 10.0;
 
-/// 보통 inside 두 건을 같은 진입 시도로 묶는 최대 간격.
-const entryConfirmationMaxGap = Duration(seconds: 3);
-
 /// 판정에 쓰는 위치 한 건.
 class GpsFix {
   const GpsFix({required this.point, required this.accuracyMeters});
@@ -79,7 +76,7 @@ enum GpsEntryConfirmation {
   /// 오차가 작은 강한 inside라 추가 대기 없이 확정했다.
   immediate,
 
-  /// 제한 시간 안에 서로 다른 보통 inside 두 건이 이어져 확정했다.
+  /// 서로 다른 보통 inside 두 건이 이어져 확정했다.
   confirmed,
 }
 
@@ -115,7 +112,7 @@ class GpsEntryEvidenceTracker {
       // 같은 OS fix를 스트림과 일회성 조회가 중복 배달해도 두 표본으로 세지 않는다.
       return GpsEntryConfirmation.pending;
     }
-    if (gap.isNegative || gap > entryConfirmationMaxGap) {
+    if (gap.isNegative) {
       _pendingAt = observedAt;
       return GpsEntryConfirmation.pending;
     }
