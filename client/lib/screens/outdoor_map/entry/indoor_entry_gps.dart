@@ -8,6 +8,8 @@
 /// `docs/client/indoor-entry-rules.md`.
 library;
 
+import 'dart:math' as math;
+
 import 'package:latlong2/latlong.dart' as ll;
 
 import 'indoor_entry_proximity.dart';
@@ -41,6 +43,14 @@ const footprintOutwardToleranceMeters = 6.0;
 /// 한 건만으로 진입을 확정해도 되는 최대 오차. 이보다 큰 inside는 다음 표본을
 /// 한 번 더 확인한다.
 const immediateEntryAccuracyMeters = 10.0;
+
+/// 정상 inside 뒤에는 이 정도까지의 정확도 저하를 "실내로 들어가며 신호가
+/// 약해졌다"는 두 번째 증거로 쓸 수 있다.
+const degradedEntryAccuracyMeters = 65.0;
+
+/// 첫 inside 후보를 기억하는 시간. 이 안에 서로 다른 fix가 와야 같은 경계 통과로
+/// 본다.
+const entryConfirmationWindow = Duration(seconds: 10);
 
 /// 판정에 쓰는 위치 한 건.
 class GpsFix {
@@ -78,6 +88,9 @@ enum GpsEntryConfirmation {
 
   /// 서로 다른 보통 inside 두 건이 이어져 확정했다.
   confirmed,
+
+  /// 정상 inside 직후 좌표는 계속 안쪽인데 GPS 정확도만 떨어져 확정했다.
+  confirmedAfterDegradation,
 }
 
 /// 단일 GPS 튐은 막되 좋은 좌표에는 지연을 더하지 않는 진입 증거 누적기.
@@ -85,39 +98,98 @@ enum GpsEntryConfirmation {
 /// 좌표를 평활하거나 경로에 붙이지 않는다. 원본 표본이 만든 [GpsBuildingJudgement]
 /// 만 시간순으로 읽으므로 화면용 위치 보정이 판정 사실을 바꾸지 않는다.
 class GpsEntryEvidenceTracker {
-  DateTime? _pendingAt;
+  DateTime? _pendingFixAt;
+  DateTime? _pendingReceivedAt;
 
-  void reset() => _pendingAt = null;
+  void reset() {
+    _pendingFixAt = null;
+    _pendingReceivedAt = null;
+  }
 
   GpsEntryConfirmation observe(
     GpsBuildingJudgement judgement, {
-    required DateTime observedAt,
+    required DateTime fixAt,
+    DateTime? receivedAt,
   }) {
-    if (judgement.verdict != GpsBuildingVerdict.inside) {
-      reset();
-      return GpsEntryConfirmation.none;
-    }
-    if (judgement.accuracyMeters <= immediateEntryAccuracyMeters) {
+    final received = receivedAt ?? fixAt;
+    if (_isStrongInside(judgement)) {
       reset();
       return GpsEntryConfirmation.immediate;
     }
 
-    final previous = _pendingAt;
-    if (previous == null) {
-      _pendingAt = observedAt;
-      return GpsEntryConfirmation.pending;
+    final previousFixAt = _pendingFixAt;
+    final previousReceivedAt = _pendingReceivedAt;
+    if (previousFixAt == null || previousReceivedAt == null) {
+      return _startCandidateIfReliableInside(
+        judgement,
+        fixAt: fixAt,
+        receivedAt: received,
+      );
     }
-    final gap = observedAt.difference(previous);
-    if (gap == Duration.zero) {
+
+    final fixGap = fixAt.difference(previousFixAt);
+    if (fixGap == Duration.zero) {
       // 같은 OS fix를 스트림과 일회성 조회가 중복 배달해도 두 표본으로 세지 않는다.
       return GpsEntryConfirmation.pending;
     }
-    if (gap.isNegative) {
-      _pendingAt = observedAt;
-      return GpsEntryConfirmation.pending;
+    final receivedGap = received.difference(previousReceivedAt);
+    if (fixGap.isNegative || receivedGap.isNegative) {
+      reset();
+      return _startCandidateIfReliableInside(
+        judgement,
+        fixAt: fixAt,
+        receivedAt: received,
+      );
     }
+    if (receivedGap > entryConfirmationWindow) {
+      reset();
+      return _startCandidateIfReliableInside(
+        judgement,
+        fixAt: fixAt,
+        receivedAt: received,
+      );
+    }
+
+    if (judgement.verdict == GpsBuildingVerdict.inside) {
+      reset();
+      return GpsEntryConfirmation.confirmed;
+    }
+    if (_isDegradedInside(judgement)) {
+      reset();
+      return GpsEntryConfirmation.confirmedAfterDegradation;
+    }
+
     reset();
-    return GpsEntryConfirmation.confirmed;
+    return GpsEntryConfirmation.none;
+  }
+
+  GpsEntryConfirmation _startCandidateIfReliableInside(
+    GpsBuildingJudgement judgement, {
+    required DateTime fixAt,
+    required DateTime receivedAt,
+  }) {
+    if (judgement.verdict != GpsBuildingVerdict.inside) {
+      return GpsEntryConfirmation.none;
+    }
+    _pendingFixAt = fixAt;
+    _pendingReceivedAt = receivedAt;
+    return GpsEntryConfirmation.pending;
+  }
+
+  bool _isStrongInside(GpsBuildingJudgement judgement) {
+    if (judgement.verdict != GpsBuildingVerdict.inside) return false;
+    if (judgement.accuracyMeters > immediateEntryAccuracyMeters) return false;
+    // 벽을 겨우 넘은 좌표는 오차가 10m여도 실제 사용자가 밖일 수 있다. 한 건
+    // 확정은 오차 반경만큼 안쪽까지 들어온 경우로 한정한다.
+    return judgement.metersInside >=
+        math.max(indoorEnterInsetMeters, judgement.accuracyMeters);
+  }
+
+  bool _isDegradedInside(GpsBuildingJudgement judgement) {
+    return judgement.hasFootprint &&
+        judgement.metersInside >= indoorEnterInsetMeters &&
+        judgement.accuracyMeters > decisiveAccuracyMeters &&
+        judgement.accuracyMeters <= degradedEntryAccuracyMeters;
   }
 }
 
@@ -249,6 +321,9 @@ String describeGpsBuildingJudgement(
     line = '$line · 즉시확정';
   } else if (entryConfirmation == GpsEntryConfirmation.confirmed) {
     line = '$line · 확인2/2';
+  } else if (entryConfirmation ==
+      GpsEntryConfirmation.confirmedAfterDegradation) {
+    line = '$line · 신호저하확정';
   }
   if (sinceLastFix != null) {
     final seconds = (sinceLastFix.inMilliseconds / 1000).toStringAsFixed(1);

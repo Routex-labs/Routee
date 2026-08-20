@@ -61,7 +61,7 @@ class _FakeStreams {
   List<bool> deliveries,
   List<String> events,
 })
-_harness({bool Function()? isActive}) {
+_harness({bool Function()? isActive, GpsPositionRequester? requestPosition}) {
   final streams = _FakeStreams();
   final deliveries = <bool>[];
   final events = <String>[];
@@ -70,6 +70,9 @@ _harness({bool Function()? isActive}) {
     onFix: (_, {bool fromStream = false}) => deliveries.add(fromStream),
     isActive: isActive ?? () => true,
     onStreamError: () => events.add('error'),
+    // 수명 테스트에서 주기 감시가 실제 플랫폼 채널을 부르지 않게 한다. 직접
+    // 조회 자체를 검증하는 테스트만 아래에서 완료되는 Future를 따로 넣는다.
+    requestPosition: requestPosition ?? () => Completer<Position>().future,
   );
   return (
     session: session,
@@ -279,6 +282,61 @@ void main() {
         expect(h.streams.openCount, 1);
         h.session.stop();
       });
+    });
+  });
+
+  group('즉시 새 좌표 요청', () {
+    test('진입 후보가 생기면 3초 감시를 기다리지 않고 직접 좌표를 배달한다', () async {
+      var requests = 0;
+      final h = _harness(
+        requestPosition: () async {
+          requests++;
+          return _fix();
+        },
+      );
+
+      await h.session.requestFreshFix();
+
+      expect(requests, 1);
+      expect(h.deliveries, [false]);
+      h.session.stop();
+    });
+
+    test('직접 조회가 진행 중이면 요청을 겹쳐 보내지 않는다', () async {
+      final completer = Completer<Position>();
+      var requests = 0;
+      final h = _harness(
+        requestPosition: () {
+          requests++;
+          return completer.future;
+        },
+      );
+
+      final first = h.session.requestFreshFix();
+      final second = h.session.requestFreshFix();
+      expect(requests, 1);
+
+      completer.complete(_fix());
+      await Future.wait([first, second]);
+      expect(h.deliveries, [false]);
+      h.session.stop();
+    });
+
+    test('추적이 꺼져 있으면 직접 조회하지 않는다', () async {
+      var requests = 0;
+      final h = _harness(
+        isActive: () => false,
+        requestPosition: () async {
+          requests++;
+          return _fix();
+        },
+      );
+
+      await h.session.requestFreshFix();
+
+      expect(requests, 0);
+      expect(h.deliveries, isEmpty);
+      h.session.stop();
     });
   });
 }

@@ -229,17 +229,32 @@ void main() {
   group('GpsEntryEvidenceTracker', () {
     final start = DateTime.utc(2026, 8, 20, 6);
 
-    test('오차 10m 이하 inside는 한 건으로 즉시 확정한다', () {
+    test('오차 반경보다 깊은 정확한 inside는 한 건으로 즉시 확정한다', () {
       final tracker = GpsEntryEvidenceTracker();
       final result = tracker.observe(
         _judge(
           point: _offset(north: _halfWidthMeters - 6),
           accuracy: immediateEntryAccuracyMeters,
         ),
-        observedAt: start,
+        fixAt: start,
       );
 
       expect(result, GpsEntryConfirmation.immediate);
+    });
+
+    test('정확해도 벽을 얕게 넘은 inside는 한 건으로 확정하지 않는다', () {
+      final tracker = GpsEntryEvidenceTracker();
+      final judgement = _judge(
+        // 실제 외곽선 바깥 1m라 부풀린 선 기준 안쪽 5m다.
+        point: _offset(north: _halfWidthMeters + 1),
+        accuracy: immediateEntryAccuracyMeters,
+      );
+
+      expect(judgement.verdict, GpsBuildingVerdict.inside);
+      expect(
+        tracker.observe(judgement, fixAt: start),
+        GpsEntryConfirmation.pending,
+      );
     });
 
     test('오차 10~20m inside는 서로 다른 두 표본으로 확정한다', () {
@@ -250,13 +265,13 @@ void main() {
       );
 
       expect(
-        tracker.observe(judgement, observedAt: start),
+        tracker.observe(judgement, fixAt: start),
         GpsEntryConfirmation.pending,
       );
       expect(
         tracker.observe(
           judgement,
-          observedAt: start.add(const Duration(seconds: 1)),
+          fixAt: start.add(const Duration(seconds: 1)),
         ),
         GpsEntryConfirmation.confirmed,
       );
@@ -267,26 +282,44 @@ void main() {
       final judgement = _judge(point: _center, accuracy: 15);
 
       expect(
-        tracker.observe(judgement, observedAt: start),
+        tracker.observe(judgement, fixAt: start),
         GpsEntryConfirmation.pending,
       );
       expect(
-        tracker.observe(judgement, observedAt: start),
+        tracker.observe(judgement, fixAt: start),
         GpsEntryConfirmation.pending,
       );
     });
 
-    test('스트림이 느려도 뒤늦게 온 두 번째 inside를 확정한다', () {
+    test('OS 시각이 멀어도 실제로 연달아 받은 두 번째 inside는 확정한다', () {
       final tracker = GpsEntryEvidenceTracker();
       final judgement = _judge(point: _center, accuracy: 15);
 
-      tracker.observe(judgement, observedAt: start);
+      tracker.observe(judgement, fixAt: start, receivedAt: start);
       expect(
         tracker.observe(
           judgement,
-          observedAt: start.add(const Duration(seconds: 36)),
+          fixAt: start.add(const Duration(seconds: 36)),
+          receivedAt: start.add(const Duration(seconds: 1)),
         ),
         GpsEntryConfirmation.confirmed,
+      );
+    });
+
+    test('오래된 inside 후보는 뒤늦은 표본으로 확정하지 않는다', () {
+      final tracker = GpsEntryEvidenceTracker();
+      final judgement = _judge(point: _center, accuracy: 15);
+
+      tracker.observe(judgement, fixAt: start, receivedAt: start);
+      expect(
+        tracker.observe(
+          judgement,
+          fixAt: start.add(const Duration(seconds: 36)),
+          receivedAt: start
+              .add(entryConfirmationWindow)
+              .add(const Duration(milliseconds: 1)),
+        ),
+        GpsEntryConfirmation.pending,
       );
     });
 
@@ -294,42 +327,74 @@ void main() {
       final tracker = GpsEntryEvidenceTracker();
       final judgement = _judge(point: _center, accuracy: 15);
 
-      tracker.observe(
-        judgement,
-        observedAt: start.add(const Duration(seconds: 1)),
-      );
+      tracker.observe(judgement, fixAt: start.add(const Duration(seconds: 1)));
       expect(
-        tracker.observe(judgement, observedAt: start),
+        tracker.observe(judgement, fixAt: start),
         GpsEntryConfirmation.pending,
       );
       expect(
         tracker.observe(
           judgement,
-          observedAt: start.add(const Duration(seconds: 1)),
+          fixAt: start.add(const Duration(seconds: 1)),
         ),
         GpsEntryConfirmation.confirmed,
       );
     });
 
-    test('unclear가 끼면 기존 inside 후보를 버린다', () {
+    test('첫 정상 inside 직후 안쪽 좌표의 정확도가 떨어지면 진입을 확정한다', () {
       final tracker = GpsEntryEvidenceTracker();
       final inside = _judge(point: _center, accuracy: 15);
       final unclear = _judge(point: _center, accuracy: 40);
 
-      tracker.observe(inside, observedAt: start);
+      tracker.observe(inside, fixAt: start, receivedAt: start);
       expect(
         tracker.observe(
           unclear,
-          observedAt: start.add(const Duration(seconds: 1)),
+          fixAt: start.add(const Duration(seconds: 1)),
+          receivedAt: start.add(const Duration(seconds: 1)),
         ),
+        GpsEntryConfirmation.confirmedAfterDegradation,
+      );
+    });
+
+    test('처음부터 정확도가 나쁜 inside는 진입 근거가 아니다', () {
+      final tracker = GpsEntryEvidenceTracker();
+      final unclear = _judge(point: _center, accuracy: 40);
+
+      expect(tracker.observe(unclear, fixAt: start), GpsEntryConfirmation.none);
+    });
+
+    test('정확도가 상한을 넘은 좌표는 정상 inside 후보를 취소한다', () {
+      final tracker = GpsEntryEvidenceTracker();
+      final inside = _judge(point: _center, accuracy: 15);
+      final unusable = _judge(
+        point: _center,
+        accuracy: degradedEntryAccuracyMeters + 1,
+      );
+
+      tracker.observe(inside, fixAt: start);
+      expect(
+        tracker.observe(unusable, fixAt: start.add(const Duration(seconds: 1))),
         GpsEntryConfirmation.none,
       );
       expect(
-        tracker.observe(
-          inside,
-          observedAt: start.add(const Duration(seconds: 2)),
-        ),
+        tracker.observe(inside, fixAt: start.add(const Duration(seconds: 2))),
         GpsEntryConfirmation.pending,
+      );
+    });
+
+    test('좌표가 안쪽 문턱에서 물러나면 정상 inside 후보를 취소한다', () {
+      final tracker = GpsEntryEvidenceTracker();
+      final inside = _judge(point: _center, accuracy: 15);
+      final boundary = _judge(
+        point: _offset(north: _halfWidthMeters + 3),
+        accuracy: 40,
+      );
+
+      tracker.observe(inside, fixAt: start);
+      expect(
+        tracker.observe(boundary, fixAt: start.add(const Duration(seconds: 1))),
+        GpsEntryConfirmation.none,
       );
     });
   });
@@ -427,6 +492,18 @@ void main() {
           entryConfirmation: GpsEntryConfirmation.pending,
         ),
         endsWith('· 확인1/2'),
+      );
+    });
+
+    test('정상 inside 뒤 신호 저하로 확정한 사실을 붙인다', () {
+      final judgement = _judge(point: _center, accuracy: 40);
+      expect(
+        describeGpsBuildingJudgement(
+          judgement,
+          armed: true,
+          entryConfirmation: GpsEntryConfirmation.confirmedAfterDegradation,
+        ),
+        endsWith('· 신호저하확정'),
       );
     });
 

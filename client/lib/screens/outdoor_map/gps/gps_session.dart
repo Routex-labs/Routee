@@ -19,13 +19,19 @@ import 'gps_freshness_policy.dart';
 /// 좌표 한 건이 도착했을 때. [fromStream]이 false면 일회성 조회로 끌어온 것이다
 /// (진단 칩이 이 둘을 구분해 보여준다).
 typedef GpsFixHandler = void Function(Position position, {bool fromStream});
+typedef GpsPositionRequester = Future<Position> Function();
 
 class GpsSession {
   GpsSession({
     required this.onFix,
     required this.isActive,
     required this.onStreamError,
-  });
+    GpsPositionRequester? requestPosition,
+  }) : _requestPosition =
+           requestPosition ??
+           (() => Geolocator.getCurrentPosition(
+             locationSettings: oneShotFixSettings(),
+           ));
 
   /// 좌표 배달구. 스트림으로 온 것과 일회성 조회로 끌어온 것이 **같은 문**을
   /// 지난다 — 따로 처리하면 손으로 끌어온 좌표만 판정을 건너뛰게 된다.
@@ -39,6 +45,7 @@ class GpsSession {
   /// 화면이 마지막 좌표를 버린다 — 에러는 "지금 위치를 모른다"는 뜻이라,
   /// 옛 좌표를 계속 그려 두면 사용자가 그 자리에 있다고 읽는다.
   final VoidCallback onStreamError;
+  final GpsPositionRequester _requestPosition;
 
   StreamSubscription<Position>? _subscription;
 
@@ -179,24 +186,31 @@ class GpsSession {
     );
   }
 
+  /// 진입 후보처럼 다음 좌표를 지금 확인할 이유가 생겼을 때 즉시 한 건을 요청한다.
+  /// 주기 감시와 같은 in-flight 게이트를 써 중복 플랫폼 요청은 만들지 않는다.
+  Future<void> requestFreshFix() => _requestFreshFix(force: true);
+
   /// 스트림이 약속한 간격을 안 지키는 기기에서 위치를 직접 끌어온다.
   ///
   /// 실측에서 1초를 요청했는데 15~36초에 한 건이 왔고, 같은 순간 "위치 갱신"
   /// 버튼의 일회성 조회는 즉시 응답했다. 그 경로를 앱이 대신 눌러 준다.
   Future<void> _maybeRequestFreshFix() async {
-    if (!isActive()) return;
-    if (!shouldRequestFreshFix(
-      lastFixReceivedAt: _lastFixReceivedAt,
-      now: DateTime.now(),
-      requestInFlight: _freshFixInFlight,
-    )) {
+    await _requestFreshFix(force: false);
+  }
+
+  Future<void> _requestFreshFix({required bool force}) async {
+    if (!isActive() || _freshFixInFlight) return;
+    if (!force &&
+        !shouldRequestFreshFix(
+          lastFixReceivedAt: _lastFixReceivedAt,
+          now: DateTime.now(),
+          requestInFlight: _freshFixInFlight,
+        )) {
       return;
     }
     _freshFixInFlight = true;
     try {
-      final position = await Geolocator.getCurrentPosition(
-        locationSettings: oneShotFixSettings(),
-      );
+      final position = await _requestPosition();
       _deliver(position, fromStream: false);
     } catch (error) {
       // 조용히 넘긴다. 다음 주기에 다시 시도하고, 실패해도 스트림은 그대로다.

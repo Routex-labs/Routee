@@ -237,7 +237,8 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     if (!_indoorEntered && _gpsEntryArmed) {
       entryConfirmation = _gpsEntryEvidence.observe(
         judgement,
-        observedAt: position.timestamp,
+        fixAt: position.timestamp,
+        receivedAt: DateTime.now(),
       );
     } else {
       _gpsEntryEvidence.reset();
@@ -255,13 +256,15 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
             streamRestarts: _gps.restartCount,
           )
         : null;
-    switch (judgement.verdict) {
-      case GpsBuildingVerdict.inside:
-        if (_indoorEntered || !_gpsEntryArmed) return;
-        if (entryConfirmation != GpsEntryConfirmation.immediate &&
-            entryConfirmation != GpsEntryConfirmation.confirmed) {
-          return;
-        }
+    if (!_indoorEntered && _gpsEntryArmed) {
+      if (entryConfirmation == GpsEntryConfirmation.pending) {
+        unawaited(_gps.requestFreshFix());
+      }
+      final entryConfirmed =
+          entryConfirmation == GpsEntryConfirmation.immediate ||
+          entryConfirmation == GpsEntryConfirmation.confirmed ||
+          entryConfirmation == GpsEntryConfirmation.confirmedAfterDegradation;
+      if (entryConfirmed) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('건물 감지 중...')));
@@ -269,6 +272,12 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
         _indoorEnteredByGps = true;
         _setIndoorEntered(true);
         unawaited(_askEntryFloorThenTrack(position));
+        return;
+      }
+    }
+    switch (judgement.verdict) {
+      case GpsBuildingVerdict.inside:
+        break;
       case GpsBuildingVerdict.outside:
         // 건물을 확실히 벗어났다. 다음 진입을 다시 자동으로 잡을 수 있게 한다.
         _gpsEntryArmed = true;
