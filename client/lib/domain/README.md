@@ -12,7 +12,7 @@ Flutter 화면이나 HTTP를 모르는 계산 계층이다. 백엔드가 제공�
 | 폴더 | 무엇 | 대표 파일 |
 |---|---|---|
 | [`route/`](route) | **경로를 만든다** | `dijkstra.dart`(최단 경로) · `floor_router.dart`(경로점 변환) · `multi_floor_router.dart`(층별 분할) · `route_endpoint_fill.dart`(끝을 출입구에 맞춤) · `transit_walk_fill.dart`(앞뒤 도보 채움) · `building_entrances.dart`(어느 문으로 들어갈지) |
-| [`guidance/`](guidance) | **만든 경로를 따라간다** | `route_progress.dart`(진행·남은거리·이탈) · `route_guidance.dart`(다음 행동 한 줄, 경로선 분할, 도착 자동 종료) · `route_checkpoint.dart` · `corridor_tracking.dart`(복도 보정의 어휘) · `escalator_ride.dart`(탑승~하차 마커 활강) · `guidance_chrome.dart`(안내 중 chrome 접기) |
+| [`guidance/`](guidance) | **만든 경로를 따라간다** | `route_progress.dart`(진행·남은거리·이탈) · `route_guidance.dart`(다음 행동 한 줄, 경로선 분할, 도착 자동 종료) · `route_checkpoint.dart` · `corridor_tracking.dart`(복도 보정의 어휘) · `escalator_ride.dart`(탑승~하차 마커 활강) · `reroute_start_node.dart`(이탈 재탐색의 출발 노드) · `guidance_chrome.dart`(안내 중 chrome 접기) |
 | [`store/`](store) | **매장을 고른다** | `nearest_store.dart`(같은 이름 중 최근접) · `nearby_stores.dart`(이 매장 기준 근처) · `store_hours.dart`(지금 영업 중인가) · `indoor_store_lookup.dart`(POI 브랜드로 재조회) · `reach_label.dart`(몇 m · 도보 몇 분) |
 | [`search/`](search) | **질의를 후보로 바꾼다** | `store_suggestions.dart`(자동완성·오타 교정) · `hangul.dart`(자모 분해) · `search_result_order.dart`(거리순 정렬) · `name_siblings.dart`(형제 매장) · `reason_text.dart`(추천 이유 다듬기) |
 | [`category/`](category) | **분류와 표시 문구** | `category_taxonomy.dart` · `category_label_order.dart` · `subcategory_label.dart` |
@@ -75,6 +75,7 @@ flowchart LR
 - 좌표 대응점이 부족하거나 거의 일직선이면 affine 피팅이 불안정하다.
 - 층별 그래프만으로 수직 전이 edge를 찾을 수 없다.
 - 경로 이탈을 좌표 거리로 판정하면 경로와 나란한 옆 복도에 잘못 붙었을 때도 "경로 위"로 보인다. 판정은 간선 동일성으로만 한다.
+- 재탐색 출발 노드를 최근접으로 고르면 나란한 에스컬레이터 레인(실측 1.3~2.6m, 서로 직접 연결) 사이에서 0.8m 드리프트만으로 반대 레인이 선택되고 경로가 통째로 뒤집힌다. 그래프 거리로는 못 거른다.
 - 진행률을 매번 전역 최소 투영으로 구하면 ㄷ자 경로에서 마주보는 구간이 가까워 진행거리가 순간이동한다. 이전 진행거리 기준 지역 탐색이 필요하다.
 - 이전 진행거리 근처 후보라도 실제 걸음으로 설명할 수 없는 폭으로 튀면 다음 행동과 파란선이 건너뛴다. 마지막 채택 이후 걸음 수로 허용 이동량을 제한해야 한다.
 - 경로·층 세그먼트가 바뀔 때 이전 진행거리를 기준으로 남겨두면 매 걸음 재획득이 켜진다. 호출자가 기준점을 초기화해야 한다.
@@ -90,6 +91,8 @@ flowchart LR
 - 이탈거리가 작아도 현재 간선이 경로에 없으면 경로 위로 판정하지 않는다.
 - 걸음 없는 큰 진행거리 점프는 표시에서 보류하고, 누적 걸음으로 설명되는 이동은 반영한다.
   ([`../../test/domain/guidance/route_progress_test.dart`](../../test/domain/guidance/route_progress_test.dart))
+- 이탈 재탐색의 출발 노드는 수직 전이 노드를 고르지 않으며, 나란한 레인 사이 어디에서 밀려도 같은 junction을 고른다.
+  ([`../../test/domain/guidance/reroute_start_node_test.dart`](../../test/domain/guidance/reroute_start_node_test.dart))
 - 측정된 진행률로 목적지에 도착했을 때만 안내 자동 종료를 예약하고, 도착 상태에서 벗어나면 취소한다. 환승 지점·역주행·진행률 없는 짧은 경로는 종료하지 않는다.
   ([`../../test/domain/guidance/route_arrival_auto_clear_test.dart`](../../test/domain/guidance/route_arrival_auto_clear_test.dart))
 
