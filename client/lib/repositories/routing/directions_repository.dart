@@ -19,4 +19,12 @@ abstract class DirectionsRepository {
     required LatLng origin,
     required LatLng destination,
   });
+
+  /// 자동차 경로 후보 여러 개. `feature-car-route-alternatives` 브랜치의
+  /// `getDrivingRoutes()`를 반환 타입만 [DirectionsRouteOptions](라벨 있는
+  /// 목록 봉투)로 바꿔 옮긴 것이다.
+  Future<DirectionsRouteOptions> getDrivingRouteOptions({
+    required LatLng origin,
+    required LatLng destination,
+  });
 }

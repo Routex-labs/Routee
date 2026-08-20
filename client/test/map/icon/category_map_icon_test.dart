@@ -1,4 +1,7 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:routex_design_system/routex_design_system.dart';
 
 import 'package:navigation_client/map/icon/category_icon.dart';
 import 'package:navigation_client/map/icon/category_map_icon.dart';
@@ -54,6 +57,24 @@ void main() {
       for (var i = 2; i < expression.length - 1; i += 2) {
         expect(expression[i], isA<String>());
       }
+    });
+
+    test('선택 표현식은 같은 feature의 아이콘 이름만 바꾼다', () {
+      const selectedId = 'store-osulloc';
+      final expression = storeCategoryIconExpression(
+        highlightedStoreId: selectedId,
+      );
+      expect(expression[0], 'case');
+      expect(expression[1], [
+        '==',
+        ['get', 'id'],
+        selectedId,
+      ]);
+      expect(
+        expression.toString(),
+        contains(selectedStoreCategoryIconImageName('카페')),
+      );
+      expect(expression.toString(), contains(storeCategoryIconImageName('카페')));
     });
 
     test('등록 대상에 폴백이 포함된다', () {
@@ -173,5 +194,34 @@ void main() {
     expect(bytes!, isNotEmpty);
     // PNG 시그니처. addImage가 받는 형식이 아니면 지도에서 조용히 무시된다.
     expect(bytes.sublist(0, 4), [0x89, 0x50, 0x4E, 0x47]);
+  });
+
+  testWidgets('선택 아이콘은 디자인시스템 포인트 색 비트맵을 갖는다', (tester) async {
+    final centerColor = await tester.runAsync(() async {
+      final bytes = await renderStoreCategoryIconPng('카페', selected: true);
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      final rgba = await frame.image.toByteData(
+        format: ui.ImageByteFormat.rawRgba,
+      );
+      // 중앙은 흰 글리프가 덮을 수 있으므로 글리프 바깥의 색 면을 읽는다.
+      final offset = ((24 * frame.image.width) + 24) * 4;
+      return ui.Color.fromARGB(
+        rgba!.getUint8(offset + 3),
+        rgba.getUint8(offset),
+        rgba.getUint8(offset + 1),
+        rgba.getUint8(offset + 2),
+      );
+    });
+    expect(centerColor, RoutexColorTokens.light.actionPrimary);
+    expect(
+      RoutexColorTokens.light.actionPrimary,
+      isNot(categoryColorFor('카페')),
+    );
+    expect(
+      selectedStoreCategoryIconImageName('카페'),
+      isNot(storeCategoryIconImageName('카페')),
+      reason: 'MapLibre는 등록된 PNG를 이름으로 고르므로 두 키가 달라야 한다',
+    );
   });
 }

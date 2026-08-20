@@ -17,13 +17,43 @@ const mapFootprintOutline = '#C8C1B8';
 /// 매장 폴리곤 면. 경계선이 얹힐 바탕을 주는 정도로만 낮춘다.
 const mapStoreFill = '#F1EEEA';
 
+/// 걸을 수 없는 면(아트리움 보이드·지하 기둥·조경) 면.
+///
+/// 통로(`mapFootprintFill`)와 매장(`mapStoreFill`) **사이**에 두되 매장보다 밝다 —
+/// 카카오 실측이 그렇고(통로 대비 매장 쪽으로 65% 지점), 걸을 수 없다고 매장보다
+/// 어두워지면 "밝을수록 걷는 곳"이라는 위 규칙이 뒤집힌다. 실측표는
+/// `docs/client/map-style-rules.md`.
+const mapNonWalkableFill = '#F4F1ED';
+
+/// 못 걷는 면 경계선. 면은 통로와 11/255 차이뿐이라 **이 선이 구분을 만든다**
+/// (파일 상단 규칙). 매장 경계선(`mapStoreOutline`)보다 옅게 둬서 매장이 계속 더
+/// 강하게 읽히게 한다 — 배경이 매장보다 또렷하면 안 된다.
+///
+/// **통로 경계선과 같은 값까지 올렸다.** 옛 `#E4DFD8`은 면 대비가 거의 없는
+/// 위에 선까지 옅어, 복도 한가운데 뚫린 보이드가 "복도가 조금 밝은 자리"로만
+/// 보였다. 면을 더 어둡게 하는 길은 막혀 있다 — 통로와 매장 사이 폭이 14/255
+/// 뿐이고, 매장보다 어두워지면 배경이 매장을 이긴다(`docs/client/map-style-rules.md`).
+const mapNonWalkableOutline = '#C8C1B8';
+
 /// 매장 경계선. 도면에서 실제로 구분을 만드는 값이라 면과 명도를 크게 벌린다.
 ///
 /// `fillOutlineColor`는 **두께가 1px 고정**이라, 색으로 모자랄 때만 line 레이어를
 /// 따로 얹는 비용을 낸다.
 const mapStoreOutline = '#A69C90';
 
-// `mapSelectionColor`는 여기 없다. 선택 강조가 폴리곤 fill에서 **핀**으로
-// 바뀌면서(`docs/client/kakao-map-indoor-observation.md` S절) 참조가 0이 됐다.
-// 핀은 비트맵이라 hex 문자열이 아니라 `AppColors`를 직접 읽는다 —
-// MapLibre에 넘기는 색만 이 파일이 갖는다.
+/// 고른 매장 폴리곤을 덮는 색.
+///
+/// **연한 파랑 한 칸이다.** 라벨 아이콘의 선택 색(디자인시스템 `actionPrimary`,
+/// 짙은 청록)과 일부러 다르게 둔다 — 아이콘은 "이거 하나"를 콕 집는 점이고
+/// 이 면은 "여기까지"를 말하는 배경이라, 같은 세기로 칠하면 매장 이름이 면에
+/// 밀린다. 실제 화면에 나타나는 색은 이 값과 [mapSelectionFillOpacity]를 매장
+/// 바닥(`mapStoreFill`) 위에 합성한 결과다.
+const mapSelectionFill = '#4A87F1';
+
+/// **0.16은 사실상 안 보였고 0.35는 매장 이름을 먹기 시작했다**(실기기 확인).
+/// 그 사이에서 이름 쪽에 붙인 값이다 — 어느 매장을 골랐는지는 [mapSelectionLine]
+/// 테두리가 못 박고, 면은 범위만 말한다.
+const mapSelectionFillOpacity = 0.28;
+
+/// 고른 매장 폴리곤의 테두리. 면보다 진해야 경계가 읽힌다.
+const mapSelectionLine = '#4A87F1';

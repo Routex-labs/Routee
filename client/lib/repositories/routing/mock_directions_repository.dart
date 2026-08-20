@@ -41,4 +41,40 @@ class MockDirectionsRepository implements DirectionsRepository {
       // 줄을 아예 안 그린다.
     );
   }
+
+  @override
+  Future<DirectionsRouteOptions> getDrivingRouteOptions({
+    required LatLng origin,
+    required LatLng destination,
+  }) async {
+    final direct = await getDrivingRoute(origin: origin, destination: destination);
+    if (direct == null) {
+      return const DirectionsRouteOptions.failure();
+    }
+    // 대안 후보: 중점을 살짝 밀어 올린 경유점을 하나 끼운 두 번째 선. 실제
+    // API처럼 값이 달라야 목록이 둘로 보인다 — 완전히 같으면
+    // mergeDirectionsRouteOptions가 하나로 합쳐 버린다.
+    final midpoint = LatLng(
+      (origin.latitude + destination.latitude) / 2 + 0.002,
+      (origin.longitude + destination.longitude) / 2,
+    );
+    final viaDistance =
+        const Distance().as(LengthUnit.Meter, origin, midpoint) +
+        const Distance().as(LengthUnit.Meter, midpoint, destination);
+    final alternative = DirectionsRoute(
+      points: [origin, midpoint, destination],
+      distanceMeters: viaDistance,
+      durationSeconds: (viaDistance / _drivingSpeedMetersPerSecond).round(),
+    );
+    return DirectionsRouteOptions.ok([
+      DirectionsRouteOption(
+        kinds: const [DirectionsRouteOptionKind.recommended],
+        route: direct,
+      ),
+      DirectionsRouteOption(
+        kinds: const [DirectionsRouteOptionKind.shortestDistance],
+        route: alternative,
+      ),
+    ]);
+  }
 }

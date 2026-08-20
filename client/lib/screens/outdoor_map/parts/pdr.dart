@@ -65,7 +65,8 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
       // 않았더라도 "위치를 먼저 지정하라"는 안내는 먼저 띄운다.
       final target = _pdrCurrentWgs84();
       if (target == null) {
-        _showSnack('아직 현재 위치가 없습니다. 위치 지정 버튼으로 먼저 위치를 잡아주세요.');
+        // 눌러야 할 버튼을 깜빡여 말한다([OutdoorMapBody.onNeedLocationPlacement]).
+        widget.onNeedLocationPlacement?.call();
         return;
       }
       final controller = _mapController;
@@ -78,7 +79,11 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
       // 돌리면 내 위치가 화면 가장자리로 밀려나기 때문이다. 줌·tilt는 유지.
       final heading = _pdrCurrentHeadingDeg;
       if (heading == null) {
-        _showSnack('아직 바라보는 방향을 알 수 없습니다. 위치 지정 후 조금 걸어 방향을 잡아주세요.');
+        // 위치를 잡으라는 말은 그 버튼이 깜빡여 대신한다([_recalibrateIndoor]의
+        // 홀수 탭과 같다). 남는 것은 "조금 걸어야 방향이 잡힌다"는 사실 하나뿐
+        // 이라 한 줄로 짧게, 잠깐만 띄운다.
+        widget.onNeedLocationPlacement?.call();
+        _showSnack('조금 걸으면 방향이 잡힙니다', duration: OutdoorMapUi._briefSnackDuration);
         return;
       }
       final controller = _mapController;
@@ -110,14 +115,16 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
   /// 그만큼 돌아간 채로 쌓인다.
   ///
   /// 실패는 조용히 넘긴다(여기서 return하면 길찾기가 통째로 죽는다).
-  /// [announce]가 false면 안내를 띄우지 않는다 — 사용자가 방금 그 이동을 직접
-  /// 시킨 경우(맞바꾸기)에는 알릴 것이 없다.
+  ///
+  /// **찍고 나서 알리지 않는다.** 예전에는 "여기서 출발하는 것으로 봤다"를
+  /// 되돌리기 손잡이와 함께 띄웠는데, 사용자가 방금 그 매장을 출발지로 고른
+  /// 직후라 이미 아는 사실이었다 — 화면 아래를 가리는 값만 냈다. 위치를 다시
+  /// 잡을 길은 하단 바의 "위치 지정"에 그대로 있다.
   Future<void> _anchorAtStoreOrigin({
     required String floor,
     required String nodeId,
     required ll.LatLng storePoint,
     required String storeName,
-    bool announce = true,
   }) async {
     // [_confirmPdrAnchor]가 축 변환(axes)을 [_floorGraph]에서 가져오므로,
     // 앵커를 찍기 전에 그 층 그래프가 화면에 올라와 있어야 한다.
@@ -150,30 +157,6 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
 
     if (!await _bindPdrSessionToFloor(floor)) return;
     await _confirmPdrAnchor(floorPoint, notifyLocationChanged: false);
-    if (!mounted) return;
-    if (!indoorNavigationDriver.currentCalibration.canRenderPosition) return;
-    if (!announce) return;
-    // 되돌릴 손잡이를 함께 띄운다. 출발지가 실제 위치와 다르면 조용히 틀린
-    // 지점에서 안내가 시작되는데, 그건 사용자가 알아챌 수 있어야 한다.
-    showDebugToast(
-      context,
-      message: '$storeName에서 출발하는 것으로 보고 현재 위치를 잡았습니다.',
-      bottomOffset:
-          mapShellBottomChromePx +
-          (_hasAnyRouteVisible ? etaCardHeightPx : 0) +
-          12,
-      actionLabel: '위치 다시 지정',
-      onAction: () => unawaited(_resetAnchorForManualPlacement(floor)),
-    );
-  }
-
-  /// 자동으로 잡은 앵커를 버리고 사용자 지정 흐름으로 되돌린다.
-  Future<void> _resetAnchorForManualPlacement(String floor) async {
-    // changeFloor는 같은 층으로 불러도 걸음 세션과 앵커를 초기화하고
-    // awaitingPin으로 되돌린다 — 앵커만 버리는 전용 명령이 따로 없다.
-    await indoorNavigationDriver.changeFloor(floorId: floor);
-    if (!mounted) return;
-    await startLocationPlacement();
   }
 
   /// 실내 위치(PDR) 마커. 야외 상태에서는 [_indoorLocationVisible]이 false라
@@ -554,11 +537,14 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
       return;
     }
     if (snapped.distanceToGraphM > maxPdrAnchorSnapDistanceM) {
-      // 매번 같은 문구만 나오면 어디가 문제인지 알 수 없다. 실측 거리를 함께
-      // 노출해서 "탭이 건물에서 얼마나 떨어진지" 사용자·개발자가 즉시 확인할
-      // 수 있게 한다.
-      final gapM = snapped.distanceToGraphM.toStringAsFixed(1);
-      _showSnack('가장 가까운 통로에서 약 ${gapM}m 떨어져 있습니다. 건물 안쪽 복도를 탭해주세요.');
+      // **한 줄로 짧게, 잠깐만.** 예전에는 실측 거리까지 문장에 실었는데, 읽고
+      // 나서 할 일은 "복도를 다시 누른다" 하나뿐이라 나머지는 화면 아래를 4초
+      // 동안 가리는 값만 냈다. 거리는 로그로 남긴다 — 어디가 문제인지 가리는
+      // 데는 여전히 그 숫자가 필요하고, 그건 개발자가 볼 자리다.
+      debugPrint(
+        '[anchor] 통로에서 ${snapped.distanceToGraphM.toStringAsFixed(1)}m 떨어진 탭',
+      );
+      _showSnack('복도를 선택해주세요!', duration: OutdoorMapUi._briefSnackDuration);
       return;
     }
     // **지도를 직접 찍은 경우는 방향도 함께 묻는다.** 사용자가 「위치 지정」으로

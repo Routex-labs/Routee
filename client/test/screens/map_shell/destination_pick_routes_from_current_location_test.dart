@@ -117,10 +117,7 @@ void main() {
     // 접혔어도 출발지를 바꾸는 길은 남아 있어야 한다. 이게 없으면 도착 행을 눌러
     // 도착지 칸이 활성인 시트를 받고 그 안에서 한 번 더 눌러야 한다
     // (`directions_origin_focus_test.dart`가 막는 증상).
-    expect(
-      find.byKey(const Key('route-draft-origin')),
-      findsOneWidget,
-      reason: '출발지 진입점까지 사라지면 출발지를 바꿀 길이 없다',
-    );
+    expect(find.byKey(const Key('route-planner')), findsOneWidget);
+    expect(find.text('현재 위치'), findsOneWidget);
   });
 }

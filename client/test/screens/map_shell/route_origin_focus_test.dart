@@ -74,6 +74,13 @@ void main() {
     // ("길찾기는 항상 건물 전체") 1층을 보는 중에도 2층 매장을 고를 수 있다.
     await tester.tap(find.byTooltip('길찾기'));
     await drain(tester);
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const Key('route-planner')),
+        matching: find.text('현재 위치'),
+      ),
+    );
+    await drain(tester);
     await tester.enterText(
       find.descendant(
         of: find.byKey(const Key('route-draft-origin')),

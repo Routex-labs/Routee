@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:navigation_client/theme/app_theme.dart';
@@ -31,7 +30,9 @@ void main() {
       RoutePlanField field = RoutePlanField.destination,
     }) async {
       await tester.pumpWidget(
-        MaterialApp(theme: AppTheme.light, home: Scaffold(
+        MaterialApp(
+          theme: AppTheme.light,
+          home: Scaffold(
             body: RouteFieldResults(
               field: field,
               results: results,
@@ -40,8 +41,6 @@ void main() {
               reachByNodeId: reachByNodeId,
               searching: false,
               onPicked: (_) {},
-              onPickOnMap: () {},
-              showPickOnMap: false,
               onCurrentLocation: () {},
             ),
           ),
@@ -61,9 +60,7 @@ void main() {
             floor: 'B2',
           ),
         ],
-        reachByNodeId: const {
-          'n-1': NodeReach(distanceM: 120, costM: 120),
-        },
+        reachByNodeId: const {'n-1': NodeReach(distanceM: 120, costM: 120)},
       );
 
       expect(find.textContaining('120m'), findsOneWidget);

@@ -81,3 +81,6 @@ thehyundai_indoor_navigation_dataset/*
 !thehyundai_indoor_navigation_dataset/navigation_map_parts/
 thehyundai_indoor_navigation_dataset/navigation_map_parts/*
 !thehyundai_indoor_navigation_dataset/navigation_map_parts/*.json
+
+# 개인 실행 스크립트 — 기기 id와 로컬 경로가 박혀 있어 저장소에서 뺀다.
+client/run-on-phone.ps1

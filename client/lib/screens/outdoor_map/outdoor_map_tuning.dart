@@ -15,6 +15,15 @@ const fallbackLocation = ll.LatLng(37.5665, 126.9780);
 /// 느슨하다 — 배지는 경고이고 판정은 결론이라 후자가 더 엄격한 것이 맞다.
 const lowAccuracyThresholdMeters = 30.0;
 
+/// 안내를 시작할 수 있는 경로로부터의 최대 거리(m).
+///
+/// **실측이 아니라 가정이다.** 도심 GPS 오차([lowAccuracyThresholdMeters], 30 m)와
+/// 이면도로 한 블록을 덮되, 다른 동네에서 누르면 확실히 걸리는 값으로 잡았다.
+/// [outdoorRouteMaxProjectionOffsetM](25 m)을 쓰지 않는 이유는 그 값이 "걸어온
+/// 자취를 경로 위에 그려도 되는가"라 훨씬 엄격해서다 — 그 기준으로 막으면 출발선에
+/// 선 사용자도 GPS가 한 번 튀면 시작하지 못한다. 현장에서 조정할 자리다.
+const guidanceStartMaxOffsetM = 150.0;
+
 /// 야외 완료선이 채택하는 최대 경로 이탈(m). 넘으면 건물 안이나 평행 도로를
 /// 걸은 흔적이 계획 경로 위에 그려진다.
 const outdoorRouteMaxProjectionOffsetM = 25.0;
@@ -125,7 +134,6 @@ const pdrControlRightInsetPx = 184.0;
 
 /// PDR 토스트를 하단 바(+ETA 카드) 위로 띄우는 오프셋.
 const mapShellBottomChromePx = 112.0;
-const etaCardHeightPx = 130.0;
 
 /// 위치 지정 안내를 상단 chrome 아래에 놓는 오프셋.
 ///

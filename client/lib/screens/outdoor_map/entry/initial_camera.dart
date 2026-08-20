@@ -13,8 +13,8 @@ library;
 ///     맞춰 둔 화면을 뺏는 것이 된다.
 ///   - [followingUser] — 안내 중이면 추종 로직이 카메라의 주인이다.
 ///   - [indoorEntered] — 실내 도면을 보는 중에 GPS 좌표로 튀면 안 된다.
-///   - [storeFocusOwnsCamera] — 공유 링크·검색이 매장으로 카메라를 예약했다.
-///     실내 모드는 아직 꺼져 있으므로 [indoorEntered]가 이것을 대신하지 못한다.
+///   - [initialCameraClaimed] — 공유 링크·검색이 카메라를 예약했다. 실내 모드는
+///     아직 꺼져 있으므로 [indoorEntered]가 이것을 대신하지 못한다.
 ///   - [mapReady] — 컨트롤러·스타일이 없으면 이동이 조용히 무시된다. 그때
 ///     "했다"고 표시하면 카메라가 영영 안 움직인다(그 경우는 스타일 로드
 ///     콜백의 pending 경로가 처리한다).
@@ -22,12 +22,12 @@ bool shouldCenterOnFirstFix({
   required bool alreadyCentered,
   required bool followingUser,
   required bool indoorEntered,
-  required bool storeFocusOwnsCamera,
+  required bool initialCameraClaimed,
   required bool mapReady,
 }) {
   if (alreadyCentered) return false;
   if (followingUser) return false;
   if (indoorEntered) return false;
-  if (storeFocusOwnsCamera) return false;
+  if (initialCameraClaimed) return false;
   return mapReady;
 }

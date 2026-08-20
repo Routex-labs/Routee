@@ -4,12 +4,11 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:navigation_client/map/icon/place_pin.dart';
 
-/// 핀 비트맵이 **실제로 서로 다른 그림인지**를 본다.
+/// 출구 핀 비트맵이 **실제로 서로 다른 그림인지**를 본다.
 ///
 /// 눈으로만 확인하면 놓치는 회귀가 둘 있다 — 방위마다 다른 이름으로 등록하는데
-/// 그림이 같으면 모든 문에 같은 글자가 찍히고, 선택 핀과 출구 핀이 같아지면
-/// "매장인가 문인가"를 구분하려고 만든 규칙 자체가 사라진다. 둘 다 addImage
-/// 이름은 멀쩡해서 로그로는 드러나지 않는다.
+/// 그림이 같으면 모든 문에 같은 글자가 찍힌다. addImage 이름은 멀쩡해서
+/// 로그로는 드러나지 않는다.
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -29,15 +28,6 @@ void main() {
   });
 
   group('place_pin', () {
-    test('선택 매장 핀과 출구 핀은 다른 그림이다', () async {
-      final selected = await renderSelectedStorePinIcon();
-      final gate = await renderGatePinIcon('남');
-
-      expect(selected, isNotEmpty);
-      expect(gate, isNotEmpty);
-      expect(selected, isNot(equals(gate)));
-    });
-
     test('방위가 다르면 다른 그림이다', () async {
       final south = await renderGatePinIcon('남');
       final north = await renderGatePinIcon('북');

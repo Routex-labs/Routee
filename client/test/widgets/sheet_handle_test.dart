@@ -11,6 +11,7 @@ import 'package:navigation_client/repositories/place/destination_repository.dart
 import 'package:navigation_client/repositories/building/mock_building_repository.dart';
 import 'package:navigation_client/repositories/place/mock_destination_repository.dart';
 import 'package:navigation_client/screens/map_shell/widgets/sheets/app_menu_sheet.dart';
+import 'package:navigation_client/screens/map_shell/widgets/sheets/building_info_sheet.dart';
 import 'package:navigation_client/screens/map_shell/widgets/sheets/category_stores_sheet.dart';
 import 'package:navigation_client/screens/map_shell/widgets/sheets/favorites_sheet.dart';
 import 'package:navigation_client/screens/map_shell/widgets/sheets/outdoor_poi_sheet.dart';
@@ -29,8 +30,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// 남아 있었다. 판정 기준은 포팅 가이드 단계 3 — 실제 min/max extent 사이를 끌 수 있는
 /// 시트에만 하나 둔다.
 ///
-/// 이 파일은 `lib/`의 한 파일을 비추지 않는다. 손잡이 계약이 시트 일곱에 걸쳐 있어서다
-/// (건물 정보 시트를 없애면서 여덟에서 하나 줄었다).
+/// 이 파일은 `lib/`의 한 파일을 비추지 않는다. 손잡이 계약이 시트 여덟에 걸쳐 있어서다.
 void main() {
   late BuildingRepository originalBuildingRepository;
   late DestinationRepository originalDestinationRepository;
@@ -110,6 +110,20 @@ void main() {
       expect(grabHandle, findsOneWidget);
     });
 
+    testWidgets('건물 정보', (WidgetTester tester) async {
+      final building = (await repository.getAllBuildings()).first;
+      await openSheet(
+        tester,
+        (context) => BuildingInfoSheet.show(
+          context,
+          building: building,
+          onCloseAll: () {},
+        ),
+      );
+
+      expect(grabHandle, findsOneWidget);
+    });
+
     testWidgets('야외 장소', (WidgetTester tester) async {
       await openSheet(
         tester,
@@ -134,7 +148,11 @@ void main() {
 
       final handleBottom = tester.getRect(grabHandle).bottom;
       final titleTop = tester.getRect(find.text('MLB')).top;
-      expect(handleBottom, lessThan(titleTop));
+      expect(
+        handleBottom,
+        lessThanOrEqualTo(titleTop),
+        reason: '손잡이와 첫 콘텐츠는 붙을 수는 있어도 겹치면 안 된다',
+      );
     });
   });
 

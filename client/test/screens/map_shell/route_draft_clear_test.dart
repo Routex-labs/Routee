@@ -97,7 +97,7 @@ void main() {
       reason: '테스트 전제(도착을 누르면 경로가 그려짐)가 성립하지 않았다',
     );
 
-    await tester.tap(find.byKey(const Key('route-draft-clear')));
+    await tester.tap(find.byTooltip('경로 계획 닫기'));
     await drain(tester);
 
     expect(

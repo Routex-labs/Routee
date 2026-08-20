@@ -12,12 +12,12 @@
   "PO-aNOI0qviT9257": {
     "name": "불가리",
     "category": "패션",
-    "subcategory": "명품"
+    "subcategory": "시계·주얼리"
   },
   "PO-vMDL4LoLl0289": {
     "name": "부쉐론",
     "category": "패션",
-    "subcategory": "명품"
+    "subcategory": "시계·주얼리"
   },
   "PO-C3lhY03Nq2306": {
     "name": "리모와",
@@ -37,7 +37,7 @@
   "PO-7fAC1zcRT7649": {
     "name": "미우미우",
     "category": "패션",
-    "subcategory": "컨템포러리"
+    "subcategory": "명품"
   },
   "PO-xVTcQys5A8977": {
     "name": "셀린느",
@@ -112,12 +112,12 @@
   "PO-nZDHFEAfT9816": {
     "name": "톰브라운",
     "category": "패션",
-    "subcategory": "컨템포러리"
+    "subcategory": "명품"
   },
   "PO-lB8Eh8MAx1081": {
     "name": "생로랑",
-    "category": "뷰티",
-    "subcategory": "화장품·향수"
+    "category": "패션",
+    "subcategory": "명품"
   },
   "PO-AZP5VspPq4681": {
     "name": "몽클레르",
@@ -246,8 +246,8 @@
   },
   "PO-1MUAt0Fom4757": {
     "name": "페어몬트 호텔",
-    "category": "서비스",
-    "subcategory": "호텔"
+    "category": "편의시설",
+    "subcategory": "생활편의"
   },
   "PO-FnAfnhVcz5929": {
     "name": "메모 파리",
@@ -271,13 +271,13 @@
   },
   "PO-KUcsEB8l37533": {
     "name": "스킨 케어룸",
-    "category": "뷰티",
-    "subcategory": "화장품·향수"
+    "category": "편의시설",
+    "subcategory": "생활편의"
   },
   "PO-07DinRnZI3871": {
     "name": "커뮤니티 라운지",
-    "category": "서비스",
-    "subcategory": "라운지"
+    "category": "편의시설",
+    "subcategory": "생활편의"
   },
   "PO-QDhLZPwn-9734": {
     "name": "구찌 뷰티",
@@ -302,7 +302,7 @@
   "PO-FmmYZib575409": {
     "name": "반클리프아펠",
     "category": "패션",
-    "subcategory": "명품"
+    "subcategory": "시계·주얼리"
   },
   "PO-Azlfnmzx76821": {
     "name": "맥코이",
@@ -321,8 +321,8 @@
   },
   "PO-tEX9PFDuM0831": {
     "name": "이모야킨지로",
-    "category": "카페",
-    "subcategory": "카페·베이커리"
+    "category": "음식점",
+    "subcategory": "레스토랑"
   },
   "PO-yjdp4u_E24495": {
     "name": "하네단",

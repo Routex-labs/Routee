@@ -187,6 +187,11 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "6.0.0"
+  flutter_localizations:
+    dependency: "direct main"
+    description: flutter
+    source: sdk
+    version: "0.0.0"
   flutter_svg:
     dependency: "direct main"
     description:
@@ -314,10 +319,10 @@ packages:
     dependency: transitive
     description:
       name: intl
-      sha256: "1ca20c894b1717686a2319b8548763d812bc0aabdac580420a44c5178c57a867"
+      sha256: "3df61194eb431efc39c4ceba583b95633a403f46c9fd341e550ce0bfa50e9aa5"
       url: "https://pub.dev"
     source: hosted
-    version: "0.20.3"
+    version: "0.20.2"
   jni:
     dependency: transitive
     description:
@@ -673,11 +678,11 @@ packages:
     dependency: "direct main"
     description:
       path: "packages/routex_design_system"
-      ref: "1e08e6118c634040950221fad8c77184a311b34d"
-      resolved-ref: "1e08e6118c634040950221fad8c77184a311b34d"
+      ref: "104f0fce777d9e2596b281e6a8ed8c98b3e13b77"
+      resolved-ref: "104f0fce777d9e2596b281e6a8ed8c98b3e13b77"
       url: "https://github.com/Routex-labs/routex-design-system.git"
     source: git
-    version: "0.2.21"
+    version: "0.2.23"
   share_plus:
     dependency: "direct main"
     description:

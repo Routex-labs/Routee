@@ -273,6 +273,12 @@ void main() {
       );
       await drain(tester);
 
+      // **밖 좌표를 먼저 흘린다.** 밖을 한 번도 안 본 진입은 "앱을 실내에서 켰다"로
+      // 읽혀 층 시트가 뜨고 연출은 뜨지 않는다(entry_floor_prompt_test.dart).
+      positions.add(fix(wellOutside, 8));
+      await tester.pump(const Duration(milliseconds: 50));
+      await drain(tester);
+
       positions.add(fix(entrance, 10));
       // 덮개가 덮이는 중간을 잡는다. drain까지 돌리면 연출이 끝나 버려서 "떴다"를
       // 확인할 수 없다.

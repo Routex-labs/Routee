@@ -203,6 +203,9 @@ def get_floor_map(
         # 찾기 때문이다(docs/backend/shared-polygon-split.md).
         "stores": [_to_store_dict(store, transform, shared_polygons.get(store.id)) for store in stores],
         "pois": [_to_poi_dict(poi, transform) for poi in pois],
+        # 못 걷는 면(Floor.non_walkable_polygons_local_m)은 여기에 싣지 않는다.
+        # 화면은 MVT 타일의 non_walkable 레이어로 그리므로 이 응답에 넣어도 아무도
+        # 읽지 않고, B4는 기둥만 209개라 층을 열 때마다 폴리곤 수백 개가 헛돈다.
     }
 
 

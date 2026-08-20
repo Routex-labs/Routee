@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:navigation_client/theme/app_theme.dart';
 import 'package:navigation_client/screens/map_shell/widgets/chrome/map_top_bar.dart';
 import 'package:navigation_client/screens/map_shell/widgets/search/search_panel.dart';
+import 'package:routex_design_system/routex_design_system.dart';
 
 /// 설계와 검증 기준은 `docs/client/naver-map-ui-ux-analysis.md` I절이 단일 출처다.
 ///
@@ -75,18 +76,23 @@ void main() {
       );
       await tester.pump();
 
+      final topSurface = tester.widget<RoutexSurface>(
+        find.descendant(
+          of: find.byType(MapTopBar),
+          matching: find.byType(RoutexSurface),
+        ),
+      );
       final topBar = _outerMaterial(tester, MapTopBar);
       final panel = _outerMaterial(tester, SearchPanel);
 
-      expect(topBar.elevation, AppElevation.chrome);
+      expect(topSurface.role, RoutexSurfaceRole.onMap);
+      expect(topBar.elevation, RoutexLayer.onMap);
       expect(panel.elevation, AppElevation.overlay);
       // 예전에는 둘 다 6이라 한 덩어리로 보였다.
       expect(panel.elevation, greaterThan(topBar.elevation));
     });
 
-    // 그림자를 줄인 만큼 윤곽은 이 선이 맡는다. 없으면 밝은 도면 위에서
-    // 흰 카드가 배경에 녹는다.
-    testWidgets('상단 바에는 hairline 경계가 있다', (tester) async {
+    testWidgets('상단 검색은 디자인시스템 onMap 표면을 쓴다', (tester) async {
       await tester.pumpWidget(
         MaterialApp(
           theme: AppTheme.light,
@@ -105,9 +111,14 @@ void main() {
         ),
       );
 
-      final shape = _outerMaterial(tester, MapTopBar).shape;
-      expect(shape, isA<RoundedRectangleBorder>());
-      expect((shape! as RoundedRectangleBorder).side.color, AppColors.hairline);
+      final surface = tester.widget<RoutexSurface>(
+        find.descendant(
+          of: find.byType(MapTopBar),
+          matching: find.byType(RoutexSurface),
+        ),
+      );
+      expect(surface.role, RoutexSurfaceRole.onMap);
+      expect(surface.shape, RoutexSurfaceShape.field);
     });
   });
 }

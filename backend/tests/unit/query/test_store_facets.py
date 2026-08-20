@@ -568,8 +568,14 @@ def test_배포된_intents_파일이_검수_범위를_유지한다():
     # 근거는 store_facets.py 모듈 주석.
     assert intents["식사"]["rules"] == {"category": ["음식점"]}
     assert intents["카페"]["rules"] == {"category": ["카페"]}
-    # P3 검수 결과 = 예 145건. 규칙이 잡는 슈즈 8건은 extra에 없어야 한다.
-    assert len(intents["신발"]["extra_store_ids"]) == 145
+    # P3 검수 결과 = 예 145건. 규칙이 잡는 슈즈 소분류는 extra에 없어야 한다.
+    #
+    # 148이 아니라 142인 이유: 공식 층별안내로 카테고리를 다시 매기면서 버윅·
+    # 아떼바네사브루노·쿠에른 셋이 3F `슈즈&백 갤러리` 소속으로 잡혀 규칙이 직접
+    # 가져간다. 검수 결과가 줄어든 게 아니라 **손으로 적을 필요가 없어진 것**이라,
+    # 셋을 남겨 두면 오히려 중복으로 리소스 검증이 죽는다.
+    # (docs/backend/store-category-resurvey.md 「소분류는 검색이 붙잡고 있다」)
+    assert len(intents["신발"]["extra_store_ids"]) == 142
     assert "extra_store_ids" not in intents["식사"]
 
     # 확장분(W9)은 소분류에서 결정적으로 유도되는 규칙만 쓴다. 매장별 판단이 필요한

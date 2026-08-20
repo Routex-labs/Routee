@@ -34,6 +34,6 @@ Studio 시드 파이프라인, Docker/운영)에 해당하는 항목만** 추려
 ## 공통 규칙
 
 - 각 브랜치는 위 표의 순서대로 `main`에서 분기하고, 이전 항목이 머지된 뒤 다음 브랜치를 새로 판다(리베이스 충돌 최소화).
-- 커밋/PR 규칙은 저장소 루트 `AGENTS.md`를 따른다(한글 커밋, `Co-Authored-By` 금지, PR 5섹션 템플릿).
+- 커밋/PR 규칙은 [.github/CONTRIBUTING.md](../../../.github/CONTRIBUTING.md)를 따른다(한글 커밋, `Co-Authored-By` 금지, PR 5섹션 템플릿).
 - 각 문서의 "완료 기준"은 PR 설명의 테스트 계획에 그대로 옮겨 쓴다.
 - 실제 동작 확인은 `AGENTS.md`의 로컬 실행 절차(백엔드 venv, uvicorn stdout 로그)를 사용한다. 파일 기반 진단 캡처(옛 `NAV_SQL_ECHO`/`NAV_HTTP_CAPTURE`)는 제거됐고, 상세 로그가 필요하면 `NAV_LOG_LEVEL=DEBUG`로 실행한다.

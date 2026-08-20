@@ -46,6 +46,42 @@ void main() {
     expect(notified, 1);
   });
 
+  // **중복 거르기에는 시간이 붙어 있어야 한다.** URI만으로 거르면, 시트를 닫은
+  // 사용자가 메신저로 돌아가 같은 링크를 다시 눌렀을 때 앱만 앞으로 오고 시트도
+  // 실패 안내도 뜨지 않는다 — 그 사람에게는 링크가 고장 난 것으로 보인다.
+  test('시간이 지난 뒤 같은 URI를 다시 누르면 또 받는다', () {
+    var clock = DateTime(2026, 8, 17, 10);
+    final timed = PlaceLinkInbox(origin: origin, now: () => clock);
+    addTearDown(timed.dispose);
+
+    final uri = Uri.parse('$origin/place/b/p');
+    timed.offer(uri);
+    timed.take();
+
+    clock = clock.add(const Duration(seconds: 5));
+    timed.offer(uri);
+
+    expect(timed.value, const PlaceLink(buildingId: 'b', placeId: 'p'));
+  });
+
+  // 같은 창 안에서는 여전히 한 번이다. cold start의 최초 URI와 stream이 프레임
+  // 몇 개 사이로 같은 링크를 흘리는 그 한 벌이 막으려는 것이다.
+  test('창 안에서 다시 오면 여전히 한 번만 받는다', () {
+    var clock = DateTime(2026, 8, 17, 10);
+    final timed = PlaceLinkInbox(origin: origin, now: () => clock);
+    addTearDown(timed.dispose);
+
+    var notified = 0;
+    timed.addListener(() => notified++);
+
+    final uri = Uri.parse('$origin/place/b/p');
+    timed.offer(uri);
+    clock = clock.add(const Duration(milliseconds: 200));
+    timed.offer(uri);
+
+    expect(notified, 1);
+  });
+
   test('우리 링크가 아니면 들고 있던 것을 지우지 않는다', () {
     inbox.offer(Uri.parse('$origin/place/b/p'));
 

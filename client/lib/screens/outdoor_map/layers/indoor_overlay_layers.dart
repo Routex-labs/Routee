@@ -16,7 +16,8 @@ import '../../../map/style/category_map_fill.dart';
 import '../../../map/style/category_map_filter.dart';
 import '../../../map/icon/category_map_icon.dart';
 import '../../../map/style/floor_facility_style.dart';
-import '../entry/indoor_entry_zoom.dart' show indoorTilesMaxZoom, indoorTilesMinZoom;
+import '../entry/indoor_entry_zoom.dart'
+    show indoorTilesMaxZoom, indoorTilesMinZoom;
 import 'route_map_layers.dart' show kOutdoorRouteCasingLayerId;
 
 /// `Color`를 MapLibre가 받는 `#RRGGBB` 문자열로. 알파는 별도 opacity 속성으로
@@ -59,6 +60,18 @@ FillLayerProperties indoorFootprintProps(List<Object> fadeExpr) =>
       fillOpacity: fadeExpr,
     );
 
+/// 걸을 수 없는 면(보이드·기둥·조경) fill. 타일의 `non_walkable` 소스 레이어를
+/// 그린다.
+///
+/// **kind(void|pillar|feature)로 색을 가르지 않는다** — 카카오 실측에서 보이드와
+/// 조경이 같은 회색 하나이고, 기둥만 다른 값을 주면 근거 없는 숫자가 된다.
+FillLayerProperties indoorNonWalkableProps(List<Object> fadeExpr) =>
+    FillLayerProperties(
+      fillColor: mapNonWalkableFill,
+      fillOutlineColor: mapNonWalkableOutline,
+      fillOpacity: fadeExpr,
+    );
+
 /// 실내 오버레이의 매장 fill. 색은 [map_palette.dart]에서 온다 — 여기에 hex를
 /// 직접 박으면 층 전환 사이에 같은 매장이 다른 색으로 보이던 옛 문제로 돌아간다.
 FillLayerProperties indoorStoresFillProps(List<Object> fadeExpr) =>
@@ -85,30 +98,6 @@ FillLayerProperties indoorVerticalTransportProps(List<Object> fadeExpr) =>
       fillOpacity: fadeExpr,
     );
 
-/// 선택된 매장의 이름·아이콘을 키우는 **최종** 배수.
-///
-/// 핀만 키우면 글자가 그대로라 "핀은 큰데 이름은 남들과 같은" 어중간한 상태가
-/// 된다. 카카오는 고른 매장의 **핀·아이콘·이름을 함께** 키운다.
-///
-/// 여기까지 한 번에 뛰지 않는다 — 화면이 이 값으로 가는 과정을 카메라 이동과
-/// 같은 시간에 걸쳐 보간해 넘긴다([selectionScale] 인자).
-const kSelectedLabelScale = 1.35;
-
-/// [highlightedStoreId]가 있으면 그 매장만 [selectionScale]배로 키운다.
-/// null이거나 배수가 1이면 상수를 그대로 써서 표현식 비용을 만들지 않는다.
-Object _scaledBySelection(
-  double base,
-  String? highlightedStoreId,
-  double selectionScale,
-) => (highlightedStoreId == null || selectionScale == 1.0)
-    ? base
-    : <Object>[
-        'case',
-        ['==', ['get', 'id'], highlightedStoreId],
-        base * selectionScale,
-        base,
-      ];
-
 /// 매장명 라벨 + 대분류 아이콘(같은 심볼에 얹는 이유는 [category_map_icon.dart]).
 ///
 /// **호출하는 쪽이 모두 [selection]을 넘겨야 한다** — 페이드 갱신에서도 불리는데
@@ -125,33 +114,26 @@ SymbolLayerProperties indoorStoresLabelProps(
   bool alwaysVisible = false,
   Object? symbolSortKey,
   String? highlightedStoreId,
-  double selectionScale = kSelectedLabelScale,
 }) => SymbolLayerProperties(
   textField: categoryLabelTextField(selection),
   textFont: const [mapFontStackRegular],
   // 색·헤일로·크기 전부 [map_label_style.dart]가 단일 출처다. 크기가 고정인
   // 이유는 이 오버레이가 도면 전체를 훑는 축소 화면이라, 폴리곤 맞춤 크기를
-  // 쓰면 작은 매장 이름이 읽을 수 없게 작아지기 때문이다. **고른 매장 하나만**
-  // 예외로 키운다.
-  textSize: _scaledBySelection(
-    mapLabelFixedTextSize,
-    highlightedStoreId,
-    selectionScale,
-  ),
+  // 쓰면 작은 매장 이름이 읽을 수 없게 작아지기 때문이다. 선택 표시도 크기가 아니라
+  // 아이콘 색만 바꾸어 라벨 밀도를 흔들지 않는다.
+  textSize: mapLabelFixedTextSize,
   textColor: mapLabelStoreColor,
   textHaloColor: mapLabelHaloColor,
   textHaloWidth: mapLabelHaloWidth,
   textMaxWidth: mapLabelFixedMaxWidth,
   textOpacity: fadeExpr,
-  iconImage: storeCategoryIconExpression(),
+  iconImage: storeCategoryIconExpression(
+    highlightedStoreId: highlightedStoreId,
+  ),
   // 화장실·정수기 같은 시설 아이콘과 **같은 크기 하나**를 쓴다
   // ([kIndoorMarkerLogicalPx]). 실내 화면이 같은 피드백("대분류 아이콘을
   // 화장실만큼")으로 이미 내린 결론인데 이 오버레이만 따라오지 않았다.
-  iconSize: _scaledBySelection(
-    indoorMarkerIconSize(devicePixelRatio),
-    highlightedStoreId,
-    selectionScale,
-  ),
+  iconSize: indoorMarkerIconSize(devicePixelRatio),
   iconOpacity: fadeExpr,
   // 이름은 항상 아이콘 아래다 — 실내 도면·편의시설 라벨과 같은 규칙.
   textAnchor: 'top',
@@ -237,7 +219,7 @@ SymbolLayerProperties indoorFacilityIconProps(
 /// 리턴해 다음 addSource가 "source already exists"로 조용히 실패한다(그 층만
 /// 아무것도 안 그려지는 증상). 세대 카운터로 ID를 유일하게 만들어 경쟁을 없앤다.
 ///
-/// 필드 11개를 값 하나로 묶은 이유는 하나라도 빠뜨리면 그 레이어만 이전 세대 ID로
+/// 필드 12개를 값 하나로 묶은 이유는 하나라도 빠뜨리면 그 레이어만 이전 세대 ID로
 /// 남아 remove 대상에서 새기 때문이다.
 class IndoorOverlayIds {
   const IndoorOverlayIds([this.generation = 0]);
@@ -253,6 +235,12 @@ class IndoorOverlayIds {
   String get source => _idFor('outdoor-indoor-tiles');
   String get footprint => _idFor('outdoor-indoor-footprint');
   String get storesFill => _idFor('outdoor-indoor-stores-fill');
+
+  /// 걸을 수 없는 면 fill. **[storesFill] 바로 위 한 자리뿐이다** — 아래로
+  /// 내리면 주차칸·흰 바닥에 가려 픽셀이 사라지고(2026-08-15 되돌림 2번),
+  /// [categoryHighlightFill] 위로 올리면 강조·수직이동 색이 회색에 덮인다.
+  /// 매장을 덮을 걱정은 임포터의 중심점 규칙이 받는다.
+  String get nonWalkableFill => _idFor('outdoor-indoor-non-walkable-fill');
 
   /// 카테고리 필터로 고른 매장만 파란톤으로 덧칠하는 fill. 일반 매장 fill 위,
   /// 수직이동 오버레이 아래에 넣어 실내 화면과 레이어 순서를 맞춘다 — 순서가
@@ -282,8 +270,7 @@ class IndoorOverlayIds {
   String get poiIcon => _idFor('outdoor-indoor-pois-icon');
 
   /// `stores` 소스 레이어에 이름으로 매칭되는 편의시설 위 아이콘 심볼.
-  String get storeFacilityIcon =>
-      _idFor('outdoor-indoor-store-facility-icons');
+  String get storeFacilityIcon => _idFor('outdoor-indoor-store-facility-icons');
 
   /// 현재 세대의 레이어 ID 목록(위→아래 순). removeLayer 순서로 그대로 쓸 수
   /// 있다 — 레이어는 반드시 소스보다 먼저 제거해야 한다.
@@ -295,6 +282,7 @@ class IndoorOverlayIds {
     storesLabel,
     verticalTransportFill,
     categoryHighlightFill,
+    nonWalkableFill,
     storesFill,
     footprint,
   ];
@@ -345,10 +333,11 @@ Future<void> purgeStaleIndoorOverlay(
   } catch (_) {}
 }
 
-/// 실내 오버레이 소스와 레이어 9장을 한 번에 등록한다. 성공하면 true.
+/// 실내 오버레이 소스와 레이어 10장을 한 번에 등록한다. 성공하면 true.
 ///
-/// 등록 **순서가 곧 쌓임 순서**다(footprint → fill → 강조 → 수직이동 → 라벨 →
-/// 아이콘, 전부 route casing 아래). 바꾸면 경로선·마커가 fill 밑으로 깔린다.
+/// 등록 **순서가 곧 쌓임 순서**다(footprint → 매장 fill → 못 걷는 면 → 강조 →
+/// 수직이동 → 라벨 → 아이콘, 전부 route casing 아래). 바꾸면 경로선·마커가 fill
+/// 밑으로 깔린다.
 ///
 /// [ensureIconImages]를 콜백으로 받는 이유는 "스타일당 한 번" 게이팅을 호출자가
 /// 들고 있어서다. 실패하면 **부분 등록된 것을 스스로 정리한다** — 안 그러면 다음
@@ -364,192 +353,207 @@ Future<bool> registerIndoorOverlayLayers(
   Object? symbolSortKey,
   required Future<void> Function(MapLibreMapController) ensureIconImages,
 }) async {
-    try {
-      await controller.addSource(
-        ids.source,
-        VectorSourceProperties(
-          tiles: [tileUrl],
-          // minzoom 미만에서는 타일 요청·캐시 자체를 막아, 저-zoom 부모 타일이
-          // over-scale된 채 잠깐 보이면서 도면이 회전한 것처럼 보이는 문제를
-          // 예방한다. 근거는 indoorTilesMinZoom 정의 위 주석 참고.
-          minzoom: indoorTilesMinZoom,
-          // z=18 상한. 더 높이면 tile 경계가 좁아져(z=21은 20m 남짓) 4096 유닛
-          // quantize 오차가 커지고, 극한 확대에서 도면이 뒤틀려 보인다. 18이면
-          // 경계 ~150m라 0.04m/유닛으로 어떤 배율에서도 sub-pixel이다.
-          maxzoom: indoorTilesMaxZoom,
-        ),
-      );
-      // POI/시설 아이콘 비트맵을 스타일당 한 번만 addImage로 등록한다. 층을
-      // 바꿔도 이미지는 그대로 재사용되므로 반복 렌더를 피한다.
-      await ensureIconImages(controller);
-      // route casing 바로 아래에 삽입한다 — 안 그러면 먼저 그린 경로선·마커가
-      // stores fill 밑으로 깔려 사라진다.
-      // **전 레이어 인터랙션을 끈다** — 탭 검출은 [_handleMapClick]의
-      // queryRenderedFeatures가 하고, 남겨 두면 크로스페이드 동안 은퇴 목록에 있는
-      // 이전 층 폴리곤까지 탭 대상이 된다.
-      await controller.addFillLayer(
-        ids.source,
-        ids.footprint,
-        indoorFootprintProps(fadeExpr),
-        sourceLayer: 'footprint',
-        belowLayerId: kOutdoorRouteCasingLayerId,
-        enableInteraction: false,
-      );
-      await controller.addFillLayer(
-        ids.source,
-        ids.storesFill,
-        indoorStoresFillProps(fadeExpr),
-        sourceLayer: 'stores',
-        belowLayerId: kOutdoorRouteCasingLayerId,
-        enableInteraction: false,
-      );
-      // 카테고리 강조. 일반 매장 fill 바로 위에 얹어 선택한 매장만 파랗게
-      // 덮는다. 선택이 없을 때도 레이어는 남겨 두고 아무것도 맞지 않는 필터를
-      // 걸어 둔다 — 이유는 kCategoryHighlightNoneFilter 주석.
-      await controller.addFillLayer(
-        ids.source,
-        ids.categoryHighlightFill,
-        indoorCategoryHighlightProps(fadeExpr),
-        sourceLayer: 'stores',
-        belowLayerId: kOutdoorRouteCasingLayerId,
-        filter: categoryFilter,
-        // 탭은 아래 일반 매장 fill이 받는다. 여기서도 받으면 같은 폴리곤에
-        // 두 번 반응한다(실내 화면과 같은 이유).
-        enableInteraction: false,
-      );
-      // 수직이동 구조물(에스컬레이터/엘리베이터) 전용 오버레이. 일반 매장 fill
-      // 바로 위, 라벨/POI 아이콘보다 아래에 깔아서 초록 아이콘과 한 덩어리로
-      // 읽히게 한다. 필터가 어긋나면(백엔드 name 변경 등) 이 레이어만 비고
-      // 아래 일반 매장 스타일로 자연스럽게 폴백된다. 필터는 실내 화면과 같은
-      // 형식(any + 개별 ==)을 유지한다.
-      await controller.addFillLayer(
-        ids.source,
-        ids.verticalTransportFill,
-        indoorVerticalTransportProps(fadeExpr),
-        sourceLayer: 'stores',
-        belowLayerId: kOutdoorRouteCasingLayerId,
-        filter: [
-          'any',
-          for (final name in kVerticalTransportStoreNames)
-            [
-              '==',
-              ['get', 'name'],
-              name,
-            ],
-        ],
-        enableInteraction: false,
-      );
-      await controller.addSymbolLayer(
-        ids.source,
-        ids.storesLabel,
-        indoorStoresLabelProps(
-          fadeExpr,
-          categorySelection,
-          devicePixelRatio,
-          symbolSortKey: symbolSortKey,
-        ),
-        // **폴리곤이 아니라 라벨 전용 점 레이어를 본다.** MapLibre는 폴리곤
-        // 심볼을 면적 무게중심에 찍는데, ㄱ자·길쭉한 매장에서 그 점이 눈에
-        // 보이는 가운데가 아니다(백엔드 `label_point.py` 주석에 실측을 적었다).
-        // 백엔드가 폴리곤마다 "라벨 놓을 자리"를 계산해 이 레이어로 내려준다.
-        sourceLayer: 'store_labels',
-        // 한 폴리곤을 나눠 쓰는 자리(`shared`)는 아래 전용 레이어가 그린다.
-        // 두 레이어가 같은 feature를 그리면 이름이 두 번 찍힌다.
-        filter: [
-          'all',
-          storeLabelWithCategoryIconFilter(),
+  try {
+    await controller.addSource(
+      ids.source,
+      VectorSourceProperties(
+        tiles: [tileUrl],
+        // minzoom 미만에서는 타일 요청·캐시 자체를 막아, 저-zoom 부모 타일이
+        // over-scale된 채 잠깐 보이면서 도면이 회전한 것처럼 보이는 문제를
+        // 예방한다. 근거는 indoorTilesMinZoom 정의 위 주석 참고.
+        minzoom: indoorTilesMinZoom,
+        // z=18 상한. 더 높이면 tile 경계가 좁아져(z=21은 20m 남짓) 4096 유닛
+        // quantize 오차가 커지고, 극한 확대에서 도면이 뒤틀려 보인다. 18이면
+        // 경계 ~150m라 0.04m/유닛으로 어떤 배율에서도 sub-pixel이다.
+        maxzoom: indoorTilesMaxZoom,
+      ),
+    );
+    // POI/시설 아이콘 비트맵을 스타일당 한 번만 addImage로 등록한다. 층을
+    // 바꿔도 이미지는 그대로 재사용되므로 반복 렌더를 피한다.
+    await ensureIconImages(controller);
+    // route casing 바로 아래에 삽입한다 — 안 그러면 먼저 그린 경로선·마커가
+    // stores fill 밑으로 깔려 사라진다.
+    // **전 레이어 인터랙션을 끈다** — 탭 검출은 [_handleMapClick]의
+    // queryRenderedFeatures가 하고, 남겨 두면 크로스페이드 동안 은퇴 목록에 있는
+    // 이전 층 폴리곤까지 탭 대상이 된다.
+    await controller.addFillLayer(
+      ids.source,
+      ids.footprint,
+      indoorFootprintProps(fadeExpr),
+      sourceLayer: 'footprint',
+      belowLayerId: kOutdoorRouteCasingLayerId,
+      enableInteraction: false,
+    );
+    await controller.addFillLayer(
+      ids.source,
+      ids.storesFill,
+      indoorStoresFillProps(fadeExpr),
+      sourceLayer: 'stores',
+      belowLayerId: kOutdoorRouteCasingLayerId,
+      enableInteraction: false,
+    );
+    // 걸을 수 없는 면. **매장 fill 바로 위·카테고리 강조 바로 아래** — 지하
+    // 주차 구획이 전부 매장이라 매장 아래에 깔면 기둥 면적의 40%가 주차칸에
+    // 가린다(실측 근거는 docs/client/kakao-map-indoor-observation.md 3절).
+    // 위로 올려도 매장은 안 사라진다 — 중심점을 품는 도형은 임포터가 이미
+    // 뺐고, 남은 최대 겹침은 매장 하나의 28%다.
+    await controller.addFillLayer(
+      ids.source,
+      ids.nonWalkableFill,
+      indoorNonWalkableProps(fadeExpr),
+      sourceLayer: 'non_walkable',
+      belowLayerId: kOutdoorRouteCasingLayerId,
+      // 탭 대상이 아니다 — 이름도 id도 없는 배경 도형이라 누를 것이 없다.
+      // [store_tap.dart]의 레이어 목록에도 넣지 않는다.
+      enableInteraction: false,
+    );
+    // 카테고리 강조. 일반 매장 fill 바로 위에 얹어 선택한 매장만 파랗게
+    // 덮는다. 선택이 없을 때도 레이어는 남겨 두고 아무것도 맞지 않는 필터를
+    // 걸어 둔다 — 이유는 kCategoryHighlightNoneFilter 주석.
+    await controller.addFillLayer(
+      ids.source,
+      ids.categoryHighlightFill,
+      indoorCategoryHighlightProps(fadeExpr),
+      sourceLayer: 'stores',
+      belowLayerId: kOutdoorRouteCasingLayerId,
+      filter: categoryFilter,
+      // 탭은 아래 일반 매장 fill이 받는다. 여기서도 받으면 같은 폴리곤에
+      // 두 번 반응한다(실내 화면과 같은 이유).
+      enableInteraction: false,
+    );
+    // 수직이동 구조물(에스컬레이터/엘리베이터) 전용 오버레이. 일반 매장 fill
+    // 바로 위, 라벨/POI 아이콘보다 아래에 깔아서 초록 아이콘과 한 덩어리로
+    // 읽히게 한다. 필터가 어긋나면(백엔드 name 변경 등) 이 레이어만 비고
+    // 아래 일반 매장 스타일로 자연스럽게 폴백된다. 필터는 실내 화면과 같은
+    // 형식(any + 개별 ==)을 유지한다.
+    await controller.addFillLayer(
+      ids.source,
+      ids.verticalTransportFill,
+      indoorVerticalTransportProps(fadeExpr),
+      sourceLayer: 'stores',
+      belowLayerId: kOutdoorRouteCasingLayerId,
+      filter: [
+        'any',
+        for (final name in kVerticalTransportStoreNames)
           [
-            '!',
-            ['has', 'shared'],
+            '==',
+            ['get', 'name'],
+            name,
           ],
-        ],
-        belowLayerId: kOutdoorRouteCasingLayerId,
-        enableInteraction: false,
-      );
-      // 한 폴리곤을 여러 매장이 나눠 쓰는 자리 전용. 백엔드가 라벨 점을 흩어
-      // 놓았지만(`tiling._shared_label_points`) 간격이 글자 폭보다 좁을 수
-      // 있어, 충돌 판정에 맡기면 결국 하나가 지워진다 — 오설록만 보이는데
-      // 일상다완이 열리던 증상. 충돌 판정을 끄고 전부 그린다.
-      await controller.addSymbolLayer(
-        ids.source,
-        ids.sharedStoresLabel,
-        indoorStoresLabelProps(
-          fadeExpr,
-          categorySelection,
-          devicePixelRatio,
-          alwaysVisible: true,
-          symbolSortKey: symbolSortKey,
-        ),
-        sourceLayer: 'store_labels',
-        filter: [
-          'all',
-          storeLabelWithCategoryIconFilter(),
+      ],
+      enableInteraction: false,
+    );
+    await controller.addSymbolLayer(
+      ids.source,
+      ids.storesLabel,
+      indoorStoresLabelProps(
+        fadeExpr,
+        categorySelection,
+        devicePixelRatio,
+        symbolSortKey: symbolSortKey,
+      ),
+      // **폴리곤이 아니라 라벨 전용 점 레이어를 본다.** MapLibre는 폴리곤
+      // 심볼을 면적 무게중심에 찍는데, ㄱ자·길쭉한 매장에서 그 점이 눈에
+      // 보이는 가운데가 아니다(백엔드 `label_point.py` 주석에 실측을 적었다).
+      // 백엔드가 폴리곤마다 "라벨 놓을 자리"를 계산해 이 레이어로 내려준다.
+      sourceLayer: 'store_labels',
+      // 한 폴리곤을 나눠 쓰는 자리(`shared`)는 아래 전용 레이어가 그린다.
+      // 두 레이어가 같은 feature를 그리면 이름이 두 번 찍힌다.
+      filter: [
+        'all',
+        storeLabelWithCategoryIconFilter(),
+        [
+          '!',
           ['has', 'shared'],
         ],
-        belowLayerId: kOutdoorRouteCasingLayerId,
-        enableInteraction: false,
-      );
-      // 편의시설은 이름만 — 아이콘은 아래 ids.storeFacilityIcon가
-      // 그린다. 위 레이어에 섞으면 아이콘이 두 개 뜬다.
-      await controller.addSymbolLayer(
-        ids.source,
-        ids.facilityLabel,
-        indoorFacilityLabelProps(fadeExpr, categorySelection),
-        // 매장명 라벨과 같은 이유로 라벨 점 레이어를 본다.
-        sourceLayer: 'store_labels',
-        filter: facilityStoreLabelFilter(),
-        belowLayerId: kOutdoorRouteCasingLayerId,
-        enableInteraction: false,
-      );
-      // POI(엘리베이터·에스컬레이터·화장실 등) 심볼 레이어. `pois` 소스 레이어에
-      // 있는 feature의 type 속성으로 아이콘을 골라 얹는다. iconOpacity를 fadeExpr
-      // 로 묶어 오버레이와 같은 줌 구간에서 함께 페이드인된다.
-      await controller.addSymbolLayer(
-        ids.source,
-        ids.poiIcon,
-        indoorPoiIconProps(fadeExpr, devicePixelRatio),
-        sourceLayer: 'pois',
-        belowLayerId: kOutdoorRouteCasingLayerId,
-        enableInteraction: false,
-      );
-      // 편의시설 아이콘: 화장실·정수기 같은 시설물은 백엔드에서 `pois`가 아니라
-      // 매장으로 들어오므로 POI 아이콘 레이어를 타지 않는다. 이름을 기준으로
-      // 심볼을 하나 더 얹어 아이콘이 붙게 한다. 이름은 위 편의시설 라벨
-      // 레이어가 같은 점에 아래로 그린다.
-      await controller.addSymbolLayer(
-        ids.source,
-        ids.storeFacilityIcon,
-        indoorFacilityIconProps(fadeExpr, devicePixelRatio),
-        // 이름과 아이콘이 **같은 점**에 놓여야 한다. 하나만 라벨 점 레이어로
-        // 옮기면 아이콘과 이름이 매장 안 서로 다른 자리에 뜬다.
-        sourceLayer: 'store_labels',
-        belowLayerId: kOutdoorRouteCasingLayerId,
-        filter: [
-          'any',
-          for (final name in kStoreFacilityStyleByName.keys)
-            [
-              '==',
-              ['get', 'name'],
-              name,
-            ],
-        ],
-        enableInteraction: false,
-      );
-      return true;
-    } catch (error, stack) {
-      debugPrint('[outdoor overlay] MVT register FAILED: $error\n$stack');
-      // 부분 추가된 소스/레이어를 정리해 다음 호출이 깨끗한 상태에서 다시
-      // 시도할 수 있게 한다. 각 remove가 실패해도(안 붙어있어서) 조용히 넘긴다.
-      for (final id in ids.layersTopFirst) {
-        try {
-          await controller.removeLayer(id);
-        } catch (_) {}
-      }
+      ],
+      belowLayerId: kOutdoorRouteCasingLayerId,
+      enableInteraction: false,
+    );
+    // 한 폴리곤을 여러 매장이 나눠 쓰는 자리 전용. 백엔드가 라벨 점을 흩어
+    // 놓았지만(`tiling._shared_label_points`) 간격이 글자 폭보다 좁을 수
+    // 있어, 충돌 판정에 맡기면 결국 하나가 지워진다 — 오설록만 보이는데
+    // 일상다완이 열리던 증상. 충돌 판정을 끄고 전부 그린다.
+    await controller.addSymbolLayer(
+      ids.source,
+      ids.sharedStoresLabel,
+      indoorStoresLabelProps(
+        fadeExpr,
+        categorySelection,
+        devicePixelRatio,
+        alwaysVisible: true,
+        symbolSortKey: symbolSortKey,
+      ),
+      sourceLayer: 'store_labels',
+      filter: [
+        'all',
+        storeLabelWithCategoryIconFilter(),
+        ['has', 'shared'],
+      ],
+      belowLayerId: kOutdoorRouteCasingLayerId,
+      enableInteraction: false,
+    );
+    // 편의시설은 이름만 — 아이콘은 아래 ids.storeFacilityIcon가
+    // 그린다. 위 레이어에 섞으면 아이콘이 두 개 뜬다.
+    await controller.addSymbolLayer(
+      ids.source,
+      ids.facilityLabel,
+      indoorFacilityLabelProps(fadeExpr, categorySelection),
+      // 매장명 라벨과 같은 이유로 라벨 점 레이어를 본다.
+      sourceLayer: 'store_labels',
+      filter: facilityStoreLabelFilter(),
+      belowLayerId: kOutdoorRouteCasingLayerId,
+      enableInteraction: false,
+    );
+    // POI(엘리베이터·에스컬레이터·화장실 등) 심볼 레이어. `pois` 소스 레이어에
+    // 있는 feature의 type 속성으로 아이콘을 골라 얹는다. iconOpacity를 fadeExpr
+    // 로 묶어 오버레이와 같은 줌 구간에서 함께 페이드인된다.
+    await controller.addSymbolLayer(
+      ids.source,
+      ids.poiIcon,
+      indoorPoiIconProps(fadeExpr, devicePixelRatio),
+      sourceLayer: 'pois',
+      belowLayerId: kOutdoorRouteCasingLayerId,
+      enableInteraction: false,
+    );
+    // 편의시설 아이콘: 화장실·정수기 같은 시설물은 백엔드에서 `pois`가 아니라
+    // 매장으로 들어오므로 POI 아이콘 레이어를 타지 않는다. 이름을 기준으로
+    // 심볼을 하나 더 얹어 아이콘이 붙게 한다. 이름은 위 편의시설 라벨
+    // 레이어가 같은 점에 아래로 그린다.
+    await controller.addSymbolLayer(
+      ids.source,
+      ids.storeFacilityIcon,
+      indoorFacilityIconProps(fadeExpr, devicePixelRatio),
+      // 이름과 아이콘이 **같은 점**에 놓여야 한다. 하나만 라벨 점 레이어로
+      // 옮기면 아이콘과 이름이 매장 안 서로 다른 자리에 뜬다.
+      sourceLayer: 'store_labels',
+      belowLayerId: kOutdoorRouteCasingLayerId,
+      filter: [
+        'any',
+        for (final name in kStoreFacilityStyleByName.keys)
+          [
+            '==',
+            ['get', 'name'],
+            name,
+          ],
+      ],
+      enableInteraction: false,
+    );
+    return true;
+  } catch (error, stack) {
+    debugPrint('[outdoor overlay] MVT register FAILED: $error\n$stack');
+    // 부분 추가된 소스/레이어를 정리해 다음 호출이 깨끗한 상태에서 다시
+    // 시도할 수 있게 한다. 각 remove가 실패해도(안 붙어있어서) 조용히 넘긴다.
+    for (final id in ids.layersTopFirst) {
       try {
-        await controller.removeSource(ids.source);
+        await controller.removeLayer(id);
       } catch (_) {}
-      return false;
     }
+    try {
+      await controller.removeSource(ids.source);
+    } catch (_) {}
+    return false;
+  }
 }
 
 /// [syncIndoorOverlayProps]가 어떤 레이어까지 다시 밀지.
@@ -560,7 +564,7 @@ enum IndoorOverlaySyncScope {
   /// 매장명·공유 매장명·편의시설 라벨 세 장.
   labels,
 
-  /// footprint·매장·카테고리 강조·수직이동 fill 네 장.
+  /// footprint·매장·못 걷는 면·카테고리 강조·수직이동 fill 다섯 장.
   fills,
 }
 
@@ -579,7 +583,6 @@ Future<void> syncIndoorOverlayProps(
   required double devicePixelRatio,
   Object? symbolSortKey,
   String? highlightedStoreId,
-  double selectionScale = kSelectedLabelScale,
   IndoorOverlaySyncScope scope = IndoorOverlaySyncScope.all,
 }) async {
   // 선택을 반드시 함께 넘긴다. 빼면 줌을 움직일 때마다 가려 뒀던 매장 이름이
@@ -593,7 +596,6 @@ Future<void> syncIndoorOverlayProps(
         devicePixelRatio,
         symbolSortKey: symbolSortKey,
         highlightedStoreId: highlightedStoreId,
-        selectionScale: selectionScale,
       ),
     ),
     (
@@ -605,7 +607,6 @@ Future<void> syncIndoorOverlayProps(
         alwaysVisible: true,
         symbolSortKey: symbolSortKey,
         highlightedStoreId: highlightedStoreId,
-        selectionScale: selectionScale,
       ),
     ),
     (ids.facilityLabel, indoorFacilityLabelProps(fadeExpr, categorySelection)),
@@ -613,6 +614,9 @@ Future<void> syncIndoorOverlayProps(
   final fills = <(String, LayerProperties)>[
     (ids.footprint, indoorFootprintProps(fadeExpr)),
     (ids.storesFill, indoorStoresFillProps(fadeExpr)),
+    // 빠뜨리면 층 전환 크로스페이드 동안 이 한 장만 계수를 못 따라가, 이전 층
+    // 위에 못 걷는 면만 불투명하게 남는다.
+    (ids.nonWalkableFill, indoorNonWalkableProps(fadeExpr)),
     (ids.categoryHighlightFill, indoorCategoryHighlightProps(fadeExpr)),
     (ids.verticalTransportFill, indoorVerticalTransportProps(fadeExpr)),
   ];

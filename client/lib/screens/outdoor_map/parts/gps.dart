@@ -69,7 +69,7 @@ extension OutdoorMapGps on OutdoorMapBodyState {
       alreadyCentered: _didInitialCenter,
       followingUser: _followingUser,
       indoorEntered: _indoorEntered,
-      storeFocusOwnsCamera: _storeFocusOwnsCamera,
+      initialCameraClaimed: _initialCameraClaimed,
       mapReady: _styleReady && _mapController != null,
     )) {
       _didInitialCenter = true;
@@ -92,6 +92,169 @@ extension OutdoorMapGps on OutdoorMapBodyState {
     // 않게 한다([_updateRoute]). 진행률·회색선 갱신은 그 거르기와 무관하게
     // 매 좌표마다 돌아야 하므로 위 두 줄은 거르지 않는다.
     _updateRoute(position, fromPositionStream: true);
+  }
+
+  /// 자동 실내 진입 직후, **층을 먼저 묻고** 그 층으로 실내 위치를 잡는다.
+  ///
+  /// GPS는 건물 안이라는 것까지만 말한다. 그대로 두면 [_activeFloor]가 건물의
+  /// `default_floor`(1F)로 굳어, B2에 서 있는 사람의 위치와 경로가 1층에 찍힌다.
+  ///
+  /// **묻는 것은 진입 한 번에 한 번뿐이다**([_entryFloorAsked]). 벽 근처에서
+  /// 판정이 오가면 이 화면이 되풀이해 뜨는데, 그러면 지도에 닿을 수가 없다.
+  /// 건너뛰면(null) 지금까지와 같이 기본 층으로 간다 — 층은 선택기로 언제든
+  /// 바꿀 수 있고, 여기서 막으면 판정이 틀렸을 때의 출구가 사라진다.
+  Future<void> _askEntryFloorThenTrack(Position position) async {
+    // **경로를 그리는 중이면 아무것도 묻지 않는다.** "서울창업허브 → 더현대
+    // 서울"처럼 목적지를 정해 두고 걸어 들어오는 길이 있는데, 그때 도착해서
+    // 층·매장을 묻는 시트가 뜨면 방금 보던 경로를 통째로 덮는다. 어디로 가는
+    // 중인지는 이미 화면이 말하고 있고, 위치가 필요하면 하단 바의 두 버튼이
+    // 그 자리에 있다. **위치는 그대로 자동으로 잡는다** — 묻지 않는 것과
+    // 추적하지 않는 것은 다르다.
+    if (_guidancePlanned) {
+      await _startTrackingFromGpsFix(position);
+      return;
+    }
+    final floor = await _askEntryFloor();
+    if (!mounted || !_indoorEntered) return;
+    // 층 전환은 chip을 누른 것과 **같은 경로**를 탄다 — 도면 교체와 그 층
+    // 외곽선에 맞춘 카메라 정렬이 거기 붙어 있다([_onFloorChipSelected]).
+    if (floor != null && floor != _activeFloor) {
+      await _onFloorChipSelected(floor);
+      if (!mounted || !_indoorEntered) return;
+    }
+    await _startTrackingFromGpsFix(position);
+    if (!mounted || !_indoorEntered) return;
+    // 자동으로 띄우는 것은 **진입 한 번에 한 번뿐이다**. 버튼으로 다시 여는
+    // 쪽은 이 제한을 받지 않는다.
+    await _askNearbyStoreForAnchor(once: true);
+  }
+
+  /// GPS가 잡아 준 **어림 위치를 사람이 다듬게 한다.**
+  ///
+  /// 자동 배치는 "이쯤"까지다 — 건물 안 GPS는 오차가 십수 m라 복도 하나쯤은
+  /// 예사로 틀린다. 지금 무엇 앞에 서 있는지는 **사람이 훨씬 정확히 안다.**
+  /// 고른 매장의 입구 노드가 곧 위치가 된다.
+  ///
+  /// 어림 위치조차 없으면(층 그래프가 없거나 스냅 실패) 묻지 않는다 — 거리를
+  /// 잴 기준이 없어 "가까운 순"이 성립하지 않는다. 그때는 지금까지처럼 하단
+  /// 바의 "위치 지정"이 출구다.
+  Future<void> _askNearbyStoreForAnchor({bool once = false}) async {
+    if (once && _nearbyStoreAsked) return;
+    final rows = _nearbyStoreRows();
+    if (rows.isEmpty) return;
+    if (once) _nearbyStoreAsked = true;
+    final picked = await showNearbyStoreSheet(context, rows: rows);
+    if (picked == null || !mounted || !_indoorEntered) return;
+    await _anchorAtNearbyStore(picked);
+  }
+
+  /// 지금 어림 위치에서 가까운 매장 줄. 기준점이 없거나 층 도면이 없으면 빈 목록.
+  List<NearbyStoreRow> _nearbyStoreRows() {
+    final plan = _floorPlan;
+    final graph = _floorGraph;
+    if (plan == null || graph == null || graph.nodes.isEmpty) return const [];
+    final from = _pdrTrailState.anchor?.anchorLocalM ?? _estimatedFloorPoint();
+    if (from == null) return const [];
+
+    final transform = fitFloorGeoTransform(graph.nodes);
+    final nodeById = {for (final node in graph.nodes) node.id: node};
+    // 묶음 매장(다른 매장 이름을 이어 붙인 구역 항목)은 지도에서도 탭 대상이
+    // 아니다([aggregateStoreIds]). 목록에서도 빼야 같은 자리가 두 줄이 되지 않는다.
+    final aggregates = aggregateStoreIds(plan.stores);
+    final storeById = <String, StorePolygon>{};
+    final points = <({String id, double x, double y})>[];
+    for (final store in plan.stores) {
+      if (aggregates.contains(store.id)) continue;
+      // **수직이동 구조물은 뺀다.** 이름이 층마다 열 몇 개씩 같아서
+      // ("에스컬레이터" 1F에만 16개) 목록을 채우기만 하고, 무엇을 고른 것인지
+      // 사용자가 가릴 수 없다. 위치의 기준으로도 나쁘다 — 타고 오르내리는
+      // 자리라 "그 앞에 서 있다"가 한 지점을 가리키지 않는다.
+      if (kVerticalTransportStoreNames.contains(store.name)) continue;
+      // **입구 노드를 먼저 쓴다.** 고른 뒤 앵커를 찍을 자리가 바로 그 노드라,
+      // 목록에 적힌 거리와 실제로 옮겨 가는 자리가 같아야 한다.
+      final node = nodeById[store.entranceNodeId];
+      final double x;
+      final double y;
+      if (node != null) {
+        x = node.xM;
+        y = node.yM;
+      } else {
+        final local = transform.invert(
+          store.centroid.latitude,
+          store.centroid.longitude,
+        );
+        if (local == null) continue;
+        x = local.$1;
+        y = local.$2;
+      }
+      storeById[store.id] = store;
+      points.add((id: store.id, x: x, y: y));
+    }
+
+    return [
+      for (final near in nearestAroundMe(
+        fromX: from.eastM,
+        fromY: from.northM,
+        points: points,
+      ))
+        if (storeById[near.id] case final store?)
+          (store: store, distanceM: near.distanceM),
+    ];
+  }
+
+  /// GPS를 층 그래프에 투영해 둔 어림 위치. 없으면 null.
+  PdrLocalPoint? _estimatedFloorPoint() {
+    final estimate = indoorLocationEstimateController.current;
+    if (estimate == null || estimate.floorId != _activeFloor) return null;
+    return estimate.localM;
+  }
+
+  /// 고른 매장 앞을 지금 위치로 확정한다. 지도를 탭해 찍는 것과 **같은 함수**를
+  /// 지나 방향 보정까지 같은 규칙을 탄다([_confirmPdrAnchor]).
+  Future<void> _anchorAtNearbyStore(StorePolygon store) async {
+    final graph = _floorGraph;
+    if (graph == null) return;
+    final node = graph.nodes
+        .where((n) => n.id == store.entranceNodeId)
+        .firstOrNull;
+    final PdrLocalPoint floorPoint;
+    if (node != null) {
+      floorPoint = PdrLocalPoint(node.xM, node.yM);
+    } else {
+      // 입구 노드가 없는 매장은 중심점을 통로에 붙인다 — 수동 배치가 탭 좌표에
+      // 하는 것과 같다. 붙일 통로를 못 찾으면 찍지 않는다: 틀린 자리를 찍는
+      // 것보다 어림 위치를 그대로 두는 편이 낫다.
+      final local = fitFloorGeoTransform(
+        graph.nodes,
+      ).invert(store.centroid.latitude, store.centroid.longitude);
+      if (local == null) return;
+      final snapped = FloorMapMatcher(
+        graph,
+      ).snapToWalkableNetwork(PdrLocalPoint(local.$1, local.$2));
+      if (snapped == null) return;
+      floorPoint = snapped.point;
+    }
+    await _confirmPdrAnchor(floorPoint);
+    if (!mounted) return;
+    // **찍은 자리로 데려간다.** 시트를 걷고 나면 위치 점이 화면 밖일 수 있는데,
+    // 그러면 방금 고른 것이 반영됐는지 확인할 방법이 없다. "내 위치로"와 같은
+    // 함수를 써서 bearing을 건드리지 않는다 — 도면에 맞춰 둔 방향이 틀어지면
+    // 사용자가 보던 배치를 잃는다.
+    await _recenterOnCurrentPosition();
+  }
+
+  /// 층을 묻는다. 물을 이유가 없으면(이미 물었다·건물을 모른다·층이 하나뿐)
+  /// 묻지 않고 null.
+  Future<String?> _askEntryFloor() async {
+    if (_entryFloorAsked) return null;
+    final building = _building;
+    if (building == null || building.floors.length < 2) return null;
+    _entryFloorAsked = true;
+    return showEntryFloorPrompt(
+      context,
+      buildingName: building.name,
+      floors: building.floors,
+    );
   }
 
   /// 자동 실내 진입 직후, 실내 위치(PDR 앵커)를 잡고 센서 추적을 시작한다.
@@ -236,8 +399,6 @@ extension OutdoorMapGps on OutdoorMapBodyState {
   /// 따라가지 못한다. 대신 지금 아무 일도 안 일어나는 이유는 알린다.
   Future<void> startFollowingCurrentLocation() async {
     _followingUser = true;
-    // 버튼을 눌렀으면 이제 안내 중이다. 계획 상태로 되돌리는 길은 안내 종료뿐.
-    if (_offerStartGuidance) setState(() => _offerStartGuidance = false);
     final position = _position;
     if (position == null) {
       _showSnack('현재 위치를 아직 못 잡았습니다. 신호가 잡히면 그 자리로 지도를 옮깁니다.');

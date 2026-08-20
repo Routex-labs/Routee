@@ -3,7 +3,6 @@ import 'package:routex_design_system/routex_design_system.dart';
 
 import '../../../../service_locator.dart';
 import '../../../../models/place/favorite_place.dart';
-import '../../../../theme/app_theme.dart';
 import '../../../../widgets/sheet_header.dart';
 
 import '../../../../widgets/map_overlay_guard.dart';
@@ -90,16 +89,11 @@ class _FavoritesSheetState extends State<FavoritesSheet> {
                       final places = favoritesController.places;
                       if (places.isEmpty) {
                         return const Padding(
-                          padding: EdgeInsets.fromLTRB(20, 40, 20, 40),
-                          child: Center(
-                            child: Text(
-                              '아직 저장한 장소가 없어요.\n매장 정보에서 + 버튼으로 추가할 수 있어요.',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: AppColors.muted,
-                              ),
-                            ),
+                          padding: EdgeInsets.all(RoutexSpacing.sectionGap),
+                          child: RoutexEmptyState(
+                            title: '아직 저장한 장소가 없어요',
+                            description: '매장 정보에서 저장하면 여기에 모아 볼 수 있어요.',
+                            icon: RoutexIcons.save,
                           ),
                         );
                       }
@@ -154,47 +148,15 @@ class _FavoriteTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      onTap: onTap,
-      leading: Container(
-        width: 36,
-        height: 36,
-        decoration: BoxDecoration(
-          color: AppColors.blue50,
-          borderRadius: BorderRadius.circular(10),
-        ),
-        alignment: Alignment.center,
-        child: const Icon(Icons.storefront, color: AppColors.primary, size: 18),
-      ),
-      title: Text(
-        place.name,
-        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
-        overflow: TextOverflow.ellipsis,
-      ),
-      subtitle: Text(
-        place.floor,
-        style: const TextStyle(fontSize: 12, color: AppColors.muted),
-      ),
-      trailing: PopupMenuButton<_FavoriteMenu>(
-        icon: const Icon(Icons.more_vert, color: AppColors.muted),
-        onSelected: (value) {
-          if (value == _FavoriteMenu.delete) onDelete();
-        },
-        itemBuilder: (context) => const [
-          PopupMenuItem(
-            value: _FavoriteMenu.delete,
-            child: Row(
-              children: [
-                Icon(Icons.delete_outline, size: 18, color: Colors.redAccent),
-                SizedBox(width: 8),
-                Text('삭제'),
-              ],
-            ),
-          ),
-        ],
-      ),
+    return RoutexListCell(
+      title: place.name,
+      subtitle: place.floor,
+      leadingIcon: RoutexIcons.place,
+      reorderable: true,
+      onPressed: onTap,
+      trailingActionLabel: '삭제',
+      trailingActionIcon: RoutexIcons.delete,
+      onTrailingAction: onDelete,
     );
   }
 }
-
-enum _FavoriteMenu { delete }

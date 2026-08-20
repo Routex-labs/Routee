@@ -292,7 +292,11 @@ class _CategoryStoresSheetState extends State<CategoryStoresSheet> {
           hasScrollBody: false,
           child: Padding(
             padding: EdgeInsets.symmetric(vertical: 40),
-            child: Center(child: CircularProgressIndicator()),
+            child: RoutexResultList(
+              status: RoutexResultStatus.loading,
+              loadingMessage: '매장 목록을 불러오는 중',
+              children: [],
+            ),
           ),
         ),
       ];
@@ -364,7 +368,7 @@ class _CategoryStoresSheetState extends State<CategoryStoresSheet> {
       else
         ..._storeSlivers(onCurrent),
       const SliverToBoxAdapter(
-        child: Divider(height: 9, thickness: 9, color: Color(0xFFF3F4F6)),
+        child: RoutexDivider(role: RoutexDividerRole.section),
       ),
       _sectionHeader('다른 층', count: others.length),
       ..._storeSlivers(others),
@@ -379,7 +383,7 @@ class _CategoryStoresSheetState extends State<CategoryStoresSheet> {
       SliverList.separated(
         itemCount: entries.length,
         separatorBuilder: (_, _) =>
-            const Divider(height: 1, indent: 20, endIndent: 20),
+            const RoutexDivider(role: RoutexDividerRole.row),
         itemBuilder: (context, index) => _StoreTile(
           entry: entries[index],
           onTap: () {
@@ -471,30 +475,16 @@ class _StoreTile extends StatelessWidget {
     final subtitle = subcategory != null && subcategory != store.category
         ? '${entry.floor} · $subcategory'
         : entry.floor;
-    return ListTile(
-      onTap: onTap,
-      leading: Icon(
-        storeIconFor(
-          name: store.name,
-          subcategory: store.subcategory,
-          category: store.category,
-        ),
-        size: 20,
-        color: AppColors.primary,
+    return RoutexListCell(
+      title: store.name,
+      subtitle: subtitle,
+      leadingIcon: storeIconFor(
+        name: store.name,
+        subcategory: store.subcategory,
+        category: store.category,
       ),
-      title: Text(
-        store.name,
-        style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700),
-      ),
-      subtitle: Text(
-        subtitle,
-        style: const TextStyle(fontSize: 12, color: AppColors.muted),
-      ),
-      trailing: const Icon(
-        Icons.chevron_right,
-        size: 18,
-        color: AppColors.muted,
-      ),
+      trailingIcon: RoutexIcons.forward,
+      onPressed: onTap,
     );
   }
 }

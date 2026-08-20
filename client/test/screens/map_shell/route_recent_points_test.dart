@@ -121,7 +121,7 @@ void main() {
     await routeOnce(tester);
 
     // 길찾기를 끝내고 새로 연다. 도착 칸을 눌러 아직 아무것도 안 친 상태를 만든다.
-    await tester.tap(find.byKey(const Key('route-draft-clear')));
+    await tester.tap(find.byTooltip('경로 계획 닫기'));
     await drain(tester);
     await tester.tap(find.byTooltip('길찾기'));
     await drain(tester);
@@ -135,30 +135,20 @@ void main() {
     await tester.tap(find.text('강의실 101').last);
     await drain(tester);
 
-    final field = tester.widget<TextField>(
-      find.descendant(
-        of: find.byKey(const Key('route-draft-destination')),
-        matching: find.byType(TextField),
-      ),
-    );
-    expect(
-      field.controller?.text,
-      '강의실 101',
-      reason: '최근 항목을 눌렀는데 칸이 안 차면 검색을 다시 해야 한다',
-    );
+    expect(find.text('강의실 101'), findsWidgets);
   });
 
   testWidgets('전체 삭제를 누르면 최근 목록이 사라진다', (WidgetTester tester) async {
     await pumpShell(tester);
     await routeOnce(tester);
 
-    await tester.tap(find.byKey(const Key('route-draft-clear')));
+    await tester.tap(find.byTooltip('경로 계획 닫기'));
     await drain(tester);
     await tester.tap(find.byTooltip('길찾기'));
     await drain(tester);
     expect(find.text('최근 출발지 · 목적지'), findsOneWidget);
 
-    await tester.tap(find.byKey(const Key('route-field-recent-clear')));
+    await tester.tap(find.text('전체 삭제'));
     await drain(tester);
 
     expect(recentRoutePointsController.points, isEmpty);

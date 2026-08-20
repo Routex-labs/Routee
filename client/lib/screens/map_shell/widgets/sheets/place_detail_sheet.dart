@@ -13,13 +13,10 @@ import '../../../../models/place/place_detail.dart';
 import '../../../../models/place/store_index_entry.dart';
 import '../../../../repositories/place/place_detail_repository.dart';
 import '../../../../routing/place_link.dart';
-import '../../../../theme/app_theme.dart';
 import 'place_detail/place_detail_hours_section.dart';
 import 'place_detail/place_detail_nearby_section.dart';
 import 'place_detail/place_detail_rich_sections.dart';
 import 'place_detail/place_detail_sections.dart';
-import '../../../../widgets/sheet_header.dart';
-
 import '../../../../widgets/map_overlay_guard.dart';
 import '../../../../widgets/map_pass_through_sheet_route.dart';
 import '../../../../domain/category/subcategory_label.dart';
@@ -112,7 +109,6 @@ class PlaceDetailTarget {
     required this.subtitle,
     required this.placeId,
     this.favorite,
-    this.category,
     this.subcategory,
     this.reach,
   });
@@ -121,7 +117,6 @@ class PlaceDetailTarget {
   final String subtitle;
   final String? placeId;
   final FavoritePlace? favorite;
-  final String? category;
   final String? subcategory;
   final NodeReach? reach;
 }
@@ -295,6 +290,13 @@ class _PlaceDetailSheetState extends State<PlaceDetailSheet> {
     Navigator.of(context).pop(action);
   }
 
+  /// 장소 이름 줄의 X로 상세 chain 전체를 닫는다.
+  void _closeAll() {
+    _markIntentional();
+    widget.onCloseAll();
+    Navigator.of(context).maybePop();
+  }
+
   /// 지금 보여 주는 매장. [PlaceDetailSheet.target]이 바뀌면 여기가 따라간다.
   PlaceDetailTarget get _target => widget.target.value;
 
@@ -355,7 +357,12 @@ class _PlaceDetailSheetState extends State<PlaceDetailSheet> {
       return;
     }
 
-    setState(() => _isLoading = true);
+    // **갈아 끼울 때는 로딩 표시를 두지 않는다.** 이전 매장의 본문이 그대로 떠
+    // 있어 알릴 기다림이 없고, 손잡이 아래에서 도는 원은 "시트가 통째로 바뀌는
+    // 중"이라는 잘못된 신호가 된다. 처음 열 때만(보여 줄 본문이 아직 없을 때만)
+    // 켠다. 근거는 `docs/client/kakao-map-indoor-observation.md`의
+    // "교체할 때 로딩 표시를 두지 않는다".
+    if (_detail == null) setState(() => _isLoading = true);
     try {
       final detail = await (widget.repository ?? placeDetailRepository)
           .getPlaceDetail(widget.buildingId, placeId);
@@ -442,6 +449,11 @@ class _PlaceDetailSheetState extends State<PlaceDetailSheet> {
         favorite != null && favoritesController.contains(favorite.key);
     final subcategory = _target.subcategory;
     final sections = _visibleSections;
+    final heroItems = [
+      for (final section in sections.whereType<HeroSection>())
+        for (final item in section.items)
+          RoutexMediaItem(image: AssetImage(item.localAsset)),
+    ];
     final initialSize = placeDetailSheetInitialSize(
       MediaQuery.sizeOf(context).height,
     );
@@ -496,63 +508,36 @@ class _PlaceDetailSheetState extends State<PlaceDetailSheet> {
                       children: [
                         const RoutexSheetHandle(),
                         _SheetLoadingLine(visible: _isLoading),
-                        // 저장은 시트가 아니라 **장소**에 붙는 동작이라 이름 옆으로
-                        // 내려갔다([RoutexPlaceHeader]). 시트 상단 바는 뒤로·닫기만
-                        // 갖는다 — 그 둘은 시트를 다루는 동작이다.
-                        SheetHeader(
-                          onCloseAll: widget.onCloseAll,
-                          onIntentionalPop: _markIntentional,
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(20, 2, 20, 0),
-                          // **도보 시간을 반복하지 않는다.** 목록에서 고를 때는
-                          // 비교에 쓰는 값이지만, 이미 고른 장소의 상세에서는 같은
-                          // 값을 한 번 더 읽을 이유가 없다. 이름 앞 장식용 매장
-                          // 아이콘도 같은 이유로 뺀다. 결정의 단일 출처는 공급
-                          // 저장소의 place-detail-guidance-decisions.md다.
-                          child: RoutexPlaceHeader(
+                        // Showcase의 장소 상세와 같은 조립 순서다:
+                        // 장소 이름/메타/X → 출발·도착/공유/저장 → 대표 사진 → 본문.
+                        // 사진이 없을 때도 overview는 그대로 첫 내용이 된다.
+                        PlaceDetailSections(
+                          sections: sections,
+                          showHeroCarousel: false,
+                          overview: RoutexPlaceOverview(
+                            mediaItems: heroItems,
                             name: _target.title,
                             metadata: [
                               if (_target.subtitle.isNotEmpty) _target.subtitle,
                               ?subcategoryLabelFor(subcategory),
                             ].join(' · '),
                             saved: saved,
-                            // 저장할 대상이 없으면(구버전 저장 항목) 담을 곳이
-                            // 없다. 그때는 토글 자체를 그리지 않는다.
+                            onClose: _closeAll,
                             onSaved: favorite == null
                                 ? null
                                 : (_) => _onToggleFavorite(),
-                            // 링크를 만들 수 없으면 버튼도 없다. 만들 수는 있어도
-                            // 그 주소가 증명 파일을 내지 못하면 받은 사람에게는
-                            // 브라우저로 새는 링크일 뿐이다([placeLinkOrigin]).
                             onShare: _shareLink == null ? null : _share,
-                          ),
-                        ),
-                        // 이름을 읽은 직후가 길찾기를 누르는 자리다. 사진·메뉴를
-                        // 지나 하단까지 내려가야 한다면 흐름이 한 번 끊긴다.
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-                          child: _PlaceActions(
                             onOrigin: () => _pop(StoreInfoAction.setOrigin),
                             onDestination: () =>
                                 _pop(StoreInfoAction.setDestination),
                           ),
+                          homeFooter: _nearbyStores.isEmpty
+                              ? null
+                              : PlaceNearbySection(
+                                  stores: _nearbyStores,
+                                  onSelect: widget.onSelectNearbyStore,
+                                ),
                         ),
-                        if (sections.isNotEmpty)
-                          Padding(
-                            // 좌우 여백은 섹션이 스스로 갖는다. 사진·메뉴는
-                            // 시트 끝까지 써야 해서 여기서 일괄로 줄 수 없다.
-                            padding: const EdgeInsets.only(top: 24),
-                            child: PlaceDetailSections(
-                              sections: sections,
-                              homeFooter: _nearbyStores.isEmpty
-                                  ? null
-                                  : PlaceNearbySection(
-                                      stores: _nearbyStores,
-                                      onSelect: widget.onSelectNearbyStore,
-                                    ),
-                            ),
-                          ),
                       ],
                     ),
                   ),
@@ -601,64 +586,22 @@ class _NoOverscrollIndicator extends MaterialScrollBehavior {
   ) => child;
 }
 
-/// 이름 바로 아래에 놓는 출발·도착 한 줄.
-///
-/// 길찾기는 이 시트의 목적이라 사진·메뉴보다 먼저 눈에 닿아야 한다. 저장은
-/// 여기 없다 — 눌러도 시트가 남는 유일한 버튼이라 헤더로 갔다
-/// ([SheetHeader.trailing] 주석).
-///
-/// **바닥 고정 바로 옮겨 본 적이 있는데 되돌렸다.** 스크롤 위치와 무관하게
-/// 닿는다는 이점보다, 두 자짜리 버튼이 늘 화면 바닥을 한 줄 차지하는 부담이
-/// 컸다. 같은 이유로 폭도 가로에 맞춰 늘리지 않는다 — 글자가 두 자뿐이라
-/// 늘리면 여백만 커진다. 왼쪽에 붙여 한 쌍으로 읽히게 둔다.
-class _PlaceActions extends StatelessWidget {
-  const _PlaceActions({required this.onOrigin, required this.onDestination});
-
-  final VoidCallback onOrigin;
-  final VoidCallback onDestination;
-
-  @override
-  Widget build(BuildContext context) => Row(
-    key: const ValueKey('place-detail-actions'),
-    children: [
-      FilledButton(
-        onPressed: onOrigin,
-        style: FilledButton.styleFrom(
-          backgroundColor: AppColors.blue50,
-          foregroundColor: AppColors.primary,
-          padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 12),
-        ),
-        child: const Text('출발'),
-      ),
-      const SizedBox(width: 8),
-      FilledButton(
-        onPressed: onDestination,
-        style: FilledButton.styleFrom(
-          padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 12),
-        ),
-        child: const Text('도착'),
-      ),
-    ],
-  );
-}
-
-/// 손잡이 **바로 아래**에 놓이는 얇은 로딩 줄.
+/// 손잡이 **바로 아래**에 놓이는 얇은 로딩 줄. **처음 열 때만 뜬다** —
+/// 다른 매장으로 갈아 끼울 때는 이전 본문이 그대로 있어 알릴 기다림이 없다
+/// ([_PlaceDetailSheetState._loadDetailContent]).
 ///
 /// 예전에는 본문에 회색 막대를 놓고, 갈아 끼울 때는 시트 전체를 페이드했다.
 /// 전체 페이드는 내용이 사라졌다 다시 뜨는 것처럼 보여 번쩍였다 — 시트가
 /// 그대로 있는데 화면만 깜빡이는 셈이라 오히려 더 눈에 띄었다.
 ///
-/// 지금은 **시트도 내용도 그대로 두고** 이 줄만 켠다. 손잡이 아래는 눈이 이미
-/// 시트 위쪽을 보고 있는 자리라 알아채기 쉽고, 본문을 밀지 않는다.
-///
-/// 높이를 항상 차지한다 — 껐다 켤 때 아래 내용이 위아래로 움직이면 그것이 또
-/// 하나의 세로 운동이 된다.
+/// 로딩이 끝난 뒤에는 높이도 없앤다. 보이지 않는 18dp 슬롯을 남겨 두면 핸들과
+/// 헤더 사이가 벌어져 상세 시트의 첫 줄이 아래로 처져 보인다.
 class _SheetLoadingLine extends StatelessWidget {
   const _SheetLoadingLine({required this.visible});
 
   final bool visible;
 
-  static const double _height = 18;
+  static const double _height = RoutexMetrics.iconSmall;
 
   @override
   Widget build(BuildContext context) {
@@ -666,14 +609,15 @@ class _SheetLoadingLine extends StatelessWidget {
     // 돌아 프레임이 멎지 않는다 — 앱에서는 배터리를, 위젯 테스트에서는
     // `pumpAndSettle`을 영원히 붙잡는다(실제로 26건이 그렇게 멈췄다).
     return SizedBox(
-      height: _height,
+      height: visible ? _height : 0,
       child: visible
           ? const Center(
-              child: SizedBox(
+              child: SizedBox.square(
                 key: ValueKey('place-detail-loading'),
-                width: 14,
-                height: 14,
-                child: CircularProgressIndicator(strokeWidth: 2),
+                dimension: RoutexMetrics.iconSmall,
+                child: CircularProgressIndicator(
+                  strokeWidth: RoutexStroke.emphasis,
+                ),
               ),
             )
           : null,
@@ -687,11 +631,20 @@ class PlaceDetailSections extends StatefulWidget {
   const PlaceDetailSections({
     super.key,
     required this.sections,
+    this.overview,
+    this.showHeroCarousel = true,
     this.now,
     this.homeFooter,
   });
 
   final List<PlaceDetailSection> sections;
+
+  /// 대표 사진 바로 뒤, 나머지 상세 섹션보다 앞에 놓는 장소 요약과 주 행동.
+  final Widget? overview;
+
+  /// false면 overview가 같은 대표 사진을 이미 그린다. 사진 탭의 원본으로는
+  /// 계속 사용하되 캐러셀을 두 번 만들지 않는다.
+  final bool showHeroCarousel;
 
   /// 영업시간 판정의 기준 시각. 테스트가 넘기고 앱에서는 null이라
   /// [DateTime.now]가 쓰인다 — 시각에 의존하는 화면을 고정할 수 있어야 한다.
@@ -757,7 +710,18 @@ class _PlaceDetailSectionsState extends State<PlaceDetailSections> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (hero.isNotEmpty) ...[_render(hero), const SizedBox(height: 16)],
+        if (widget.showHeroCarousel && hero.isNotEmpty) ...[
+          _render(hero),
+          const SizedBox(height: RoutexSpacing.contentGap),
+        ],
+        if (widget.overview case final overview?) ...[
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: placeSectionGutter),
+            child: overview,
+          ),
+          if (home.isNotEmpty || menu.isNotEmpty)
+            const SizedBox(height: RoutexSpacing.contentGap),
+        ],
         if (tabbed) ...[
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: placeSectionGutter),
@@ -917,7 +881,7 @@ class _SectionBreak extends StatelessWidget {
   @override
   Widget build(BuildContext context) => const Padding(
     padding: EdgeInsets.symmetric(vertical: 14),
-    child: Divider(height: 1, thickness: 1, color: AppColors.hairline),
+    child: RoutexDivider(role: RoutexDividerRole.section),
   );
 }
 

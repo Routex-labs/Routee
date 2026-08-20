@@ -48,11 +48,11 @@ const _destinationPinImageName = 'outdoor-destination-pin-v3';
 /// 기준은 현재 위치 마커다 — 그쪽은 zoom과 무관하게 42px 고정 도트인데
 /// (kLocationMarkerIconRimRadius 21의 지름), 이전 값(0.115/0.25)에서는 실내
 /// 오버레이를 실제로 보는 zoom 18에서 핀이 31px밖에 안 돼 "저기가 목적지"를
-/// 가리키는 랜드마크가 사용자 위치 도트보다 작았다. 지금 값은 z18 ≈ 48px,
-/// z20 ≈ 65px로 도트보다 확실히 크다. 위쪽(z20) 상한은 확대했을 때 핀이 도착
+/// 가리키는 랜드마크가 사용자 위치 도트보다 작았다. 지금 값은 z18 ≈ 64px,
+/// z20 ≈ 86px로 도트보다 확실히 크다. 위쪽(z20) 상한은 확대했을 때 핀이 도착
 /// 매장 폴리곤을 통째로 덮지 않는 선에서 잡았다.
-const _destinationPinIconSizeZ16 = 0.18;
-const _destinationPinIconSizeZ20 = 0.38;
+const kDestinationPinIconSizeZ16 = 0.24;
+const kDestinationPinIconSizeZ20 = 0.50;
 
 /// 현재 위치 소스·레이어를 등록한다.
 Future<void> registerCurrentLocationLayers(
@@ -137,8 +137,8 @@ Future<void> addIndoorDestinationPinLayer(
     kOutdoorIndoorDestLayerId,
     destinationPinSymbolProps(
       imageName: _destinationPinImageName,
-      iconSizeZ16: _destinationPinIconSizeZ16,
-      iconSizeZ20: _destinationPinIconSizeZ20,
+      iconSizeZ16: kDestinationPinIconSizeZ16,
+      iconSizeZ20: kDestinationPinIconSizeZ20,
     ),
     enableInteraction: false,
   );
@@ -205,9 +205,7 @@ Future<void> registerPdrLocationLayer(MapLibreMapController controller) async {
 }
 
 /// PDR 마커 비트맵 두 벌을 등록한다. 소스·레이어보다 **먼저** 불러야 한다.
-Future<void> registerPdrLocationImages(
-  MapLibreMapController controller,
-) async {
+Future<void> registerPdrLocationImages(MapLibreMapController controller) async {
   await controller.addImage(
     _pdrLocationImageName,
     await renderLocationMarkerIcon(showHeading: true),

@@ -101,12 +101,12 @@ Dart의 파일 단위 프라이버시(`_`) 때문에 공개로 바꾼 것이고,
 | `_addIndoorDestinationPinLayer` | 〃 `addIndoorDestinationPinLayer` | 0a50df2e |
 | `_pointFeature` | 〃 `pointFeature` | 0a50df2e |
 | `_syncCurrentLayer` `_syncDestinationLayer` `_syncIndoorDestinationLayer`의 쓰기 부분 | 〃 `syncPointSource`(셋이 공유) | 0a50df2e |
-| `_buildingSourceId` `_dimScrimSourceId` `_floorOutlineSourceId` `_highlightSourceId` | `screens/outdoor_map/layers/shape_map_layers.dart:kOutdoorBuilding/DimScrim/FloorOutline/HighlightSourceId` | 0a50df2e |
+| `_buildingSourceId` `_dimScrimSourceId` `_floorOutlineSourceId` | `screens/outdoor_map/layers/shape_map_layers.dart:kOutdoorBuilding/DimScrim/FloorOutlineSourceId` | 0a50df2e |
 | `_buildingFillLayerId` `_dimScrimFillLayerId` | 〃 `kOutdoorBuildingFillLayerId` / `kOutdoorDimScrimFillLayerId` | 0a50df2e |
-| `_floorOutlineLayerId` `_highlightFillLayerId` `_highlightLineLayerId` `_highlightFillOpacity` | 〃 (파일 private) | 0a50df2e |
-| 건물·스크림·외곽선·강조 등록 (`_onStyleLoaded` 안) | 〃 `registerBuildingAndScrimLayers` / `registerFloorOutlineLayer` / `registerHighlightLayers` | 0a50df2e |
+| `_floorOutlineLayerId` | 〃 (파일 private) | 0a50df2e |
+| 건물·스크림·외곽선 등록 (`_onStyleLoaded` 안) | 〃 `registerBuildingAndScrimLayers` / `registerFloorOutlineLayer` | 0a50df2e |
 | `_closedRing` | 〃 `closedRing` | 0a50df2e |
-| `_syncBuildingLayer` `_syncFloorOutlineLayer` `_syncHighlightLayer`의 쓰기 부분 | 〃 `syncPolygonSource`(셋이 공유) | 0a50df2e |
+| `_syncBuildingLayer` `_syncFloorOutlineLayer`의 쓰기 부분 | 〃 `syncPolygonSource`(둘이 공유) | 0a50df2e |
 | `_syncDimScrimLayer`의 geometry 쓰기 부분 | 〃 `syncDimScrimSource` (opacity 판단은 화면에 남음) | 0a50df2e |
 | `_pdrCurrentSourceId` | `screens/outdoor_map/layers/marker_map_layers.dart:kOutdoorPdrCurrentSourceId` | 0a50df2e |
 | `_pdrCurrentLayerId` `_pdrLocationImageName` `_pdrLocationDotImageName` | 〃 (파일 private) | 0a50df2e |

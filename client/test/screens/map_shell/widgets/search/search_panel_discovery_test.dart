@@ -130,7 +130,7 @@ void main() {
       await flush(tester);
 
       expect(find.textContaining('찾지 못했어요'), findsNothing);
-      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      expect(find.byType(RoutexSkeletonList), findsOneWidget);
     });
 
     testWidgets('엔터 없이 debounce만으로 의미 검색이 호출된다', (WidgetTester tester) async {
@@ -202,7 +202,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 800));
       await flush(tester);
 
-      expect(find.text('취향에 맞는 매장을 찾는 중…'), findsOneWidget);
+      expect(find.textContaining('취향에 맞는 매장을 찾는 중'), findsOneWidget);
       expect(find.textContaining('찾지 못했어요'), findsNothing);
 
       await drain(tester);
@@ -220,7 +220,7 @@ void main() {
       // 가짜 시계를 1ms도 돌리지 않았는데 이미 의미 검색 단계다.
       await flush(tester);
 
-      expect(find.text('취향에 맞는 매장을 찾는 중…'), findsOneWidget);
+      expect(find.textContaining('취향에 맞는 매장을 찾는 중'), findsOneWidget);
 
       await drain(tester);
     });

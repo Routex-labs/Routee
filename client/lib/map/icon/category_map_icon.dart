@@ -12,6 +12,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:routex_design_system/routex_design_system.dart';
 
 import 'category_icon.dart';
 import '../style/floor_facility_style.dart';
@@ -29,6 +30,10 @@ const kStoreCategoryFallbackKey = '__분류없음__';
 String storeCategoryIconImageName(String category) =>
     'store-category-icon-$category';
 
+/// 고른 매장에 쓰는 같은 글리프의 포인트 색 버전.
+String selectedStoreCategoryIconImageName(String category) =>
+    'store-category-icon-selected-$category';
+
 /// 지도에 등록해야 하는 대분류 아이콘 전체. 폴백까지 포함한다.
 Iterable<String> get storeCategoryIconKeys => [
   ...categoryIconCategories,
@@ -41,16 +46,35 @@ Iterable<String> get storeCategoryIconKeys => [
 /// MapLibre GL Native에서 조용히 매치 0건이 되는 경로가 있어 이 저장소가 이미
 /// 한 번 데였다(`category_map_filter.dart` 주석). 이 형태는 POI·편의시설 아이콘이
 /// 실기기에서 검증한 경로와 같다.
-List<Object> storeCategoryIconExpression() => [
+List<Object> _storeCategoryIconMatch({required bool selected}) => [
   'match',
   ['get', 'category'],
   for (final category in categoryIconCategories) ...[
     category,
-    storeCategoryIconImageName(category),
+    selected
+        ? selectedStoreCategoryIconImageName(category)
+        : storeCategoryIconImageName(category),
   ],
-  storeCategoryIconImageName(kStoreCategoryFallbackKey),
+  selected
+      ? selectedStoreCategoryIconImageName(kStoreCategoryFallbackKey)
+      : storeCategoryIconImageName(kStoreCategoryFallbackKey),
 ];
 
+/// 선택된 feature는 크기를 바꾸지 않고 같은 아이콘을 포인트 색으로 바꾼다.
+List<Object> storeCategoryIconExpression({String? highlightedStoreId}) {
+  final normal = _storeCategoryIconMatch(selected: false);
+  if (highlightedStoreId == null) return normal;
+  return [
+    'case',
+    [
+      '==',
+      ['get', 'id'],
+      highlightedStoreId,
+    ],
+    _storeCategoryIconMatch(selected: true),
+    normal,
+  ];
+}
 
 /// 실내 화면의 대분류 배지 `icon-size`.
 ///
@@ -68,7 +92,10 @@ double storeCategoryIconSize(double devicePixelRatio) =>
 ///
 /// MapLibre 심볼 레이어는 사전 등록된 비트맵만 참조할 수 있어서 폰트 글리프를
 /// 직접 캔버스에 그려 PNG로 바꾼다([renderPoiIconPng]와 같은 이유).
-Future<Uint8List> renderStoreCategoryIconPng(String category) async {
+Future<Uint8List> renderStoreCategoryIconPng(
+  String category, {
+  bool selected = false,
+}) async {
   const canvasSize = 96.0;
   const center = Offset(canvasSize / 2, canvasSize / 2);
   final recorder = ui.PictureRecorder();
@@ -83,7 +110,10 @@ Future<Uint8List> renderStoreCategoryIconPng(String category) async {
   canvas.drawCircle(
     center,
     canvasSize / 2 - 5,
-    Paint()..color = categoryColorFor(category),
+    Paint()
+      ..color = selected
+          ? RoutexColorTokens.light.actionPrimary
+          : categoryColorFor(category),
   );
 
   paintIconGlyph(

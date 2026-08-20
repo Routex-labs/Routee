@@ -80,7 +80,7 @@ class _PlaceNearbySectionState extends State<PlaceNearbySection> {
                         : () => widget.onSelect!(widget.stores[index].store),
                   ),
                   if (index < visibleCount - 1)
-                    const Divider(height: 1, color: AppColors.hairline),
+                    const RoutexDivider(role: RoutexDividerRole.row),
                 ],
               ],
             ),

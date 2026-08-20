@@ -43,27 +43,39 @@ class _RouteStepsSheet extends StatelessWidget {
       title: '$destinationName까지',
       onClose: () => Navigator.of(context).pop(),
     ),
-    child: SingleChildScrollView(
-      child: RoutexStepList(
-        steps: [
-          for (final step in steps)
-            () {
-              final parts = routeStepParts(step);
-              return RoutexStep(
-                // 도착 행은 어디에 도착하는지까지 말한다 — "도착" 한 단어는
-                // 목록의 마지막 줄로는 심심하다.
-                instruction: step.action == RouteGuidanceAction.arrived
-                    ? '$destinationName 도착'
-                    : parts.instruction,
-                // 걷는 중 배너와 같은 매핑 — 이유는 [routeGuidanceIcon]에.
-                icon: routeGuidanceIcon(step.action),
-                distance: parts.distance,
-                detail: parts.detail,
-              );
-            }(),
-        ],
-        // 지금 어느 단계인지는 아직 세지 않는다. 계약상 null은 "아직 출발하지
-        // 않았다"는 뜻이고, 이 목록을 여는 자리가 대부분 그 상태다.
+    // 긴 목록에만 뷰포트 상한을 준다. `expand`로 시트 전체를
+    // 늘리면 세 단계에도 화면 절반을 가리므로, header·handle·여백의
+    // 상한을 뺀 본문만 제한한다. 검증은 route_steps_sheet_test.dart.
+    child: ConstrainedBox(
+      constraints: BoxConstraints(
+        maxHeight:
+            MediaQuery.sizeOf(context).height * 0.5 -
+            RoutexMetrics.minimumTouchTarget -
+            RoutexSpacing.sectionGap * 2 -
+            RoutexSpacing.controlGap,
+      ),
+      child: SingleChildScrollView(
+        child: RoutexStepList(
+          steps: [
+            for (final step in steps)
+              () {
+                final parts = routeStepParts(step);
+                return RoutexStep(
+                  // 도착 행은 어디에 도착하는지까지 말한다 — "도착" 한 단어는
+                  // 목록의 마지막 줄로는 심심하다.
+                  instruction: step.action == RouteGuidanceAction.arrived
+                      ? '$destinationName 도착'
+                      : parts.instruction,
+                  // 걷는 중 배너와 같은 매핑 — 이유는 [routeGuidanceIcon]에.
+                  icon: routeGuidanceIcon(step.action),
+                  distance: parts.distance,
+                  detail: parts.detail,
+                );
+              }(),
+          ],
+          // 지금 어느 단계인지는 아직 세지 않는다. 계약상 null은 "아직 출발하지
+          // 않았다"는 뜻이고, 이 목록을 여는 자리가 대부분 그 상태다.
+        ),
       ),
     ),
   );

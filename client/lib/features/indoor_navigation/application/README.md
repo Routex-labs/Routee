@@ -9,10 +9,16 @@
 |---|---|---|
 | [`indoor_navigation_controller.dart`](indoor_navigation_controller.dart) | 센서·PDR 코어·보정·앱 lifecycle을 소유하는 headless 세션 | `IndoorNavigationDriver` |
 | [`floor_map_matcher.dart`](floor_map_matcher.dart) | PDR 위치·경로를 보행 가능한 `FloorGraph` edge에 맞춤 | `FloorMapMatcher`, `MapMatchedFloorPoint`, `MapMatchState` |
-| [`corridor_position_tracker.dart`](corridor_position_tracker.dart) | 직선 위치·heading 보정과 교차로 회전 확정을 세션 상태로 유지 | `CorridorPositionTracker`, `CorridorTrackingState` |
+| [`corridor_position_tracker.dart`](corridor_position_tracker.dart) | 빔 전진·1등 선출·publish. 아래 `corridor/` 넷을 조립한다 | `CorridorPositionTracker`, `CorridorTrackingState` |
+| [`corridor/corridor_network.dart`](corridor/corridor_network.dart) | 그래프 질의와 방위 계산 — 어느 간선이 후보이고 어디에 투영되는가 | `CorridorNetwork`, `CorridorNode`, `CorridorEdge`, `EdgeProjection` |
+| [`corridor/corridor_hypothesis.dart`](corridor/corridor_hypothesis.dart) | 가설 하나의 비용·감쇠·전이 | `Hypothesis` |
+| [`corridor/corridor_observation.dart`](corridor/corridor_observation.dart) | 호출자와 주고받는 값 | `CorridorObservation`, `CorridorTrackingResult`, `TimedPreviewStep` |
+| [`corridor/corridor_tracker_config.dart`](corridor/corridor_tracker_config.dart) | 튜닝값과 실측 근거 | `CorridorTrackerConfig` |
 | [`corridor_tracking_session.dart`](corridor_tracking_session.dart) | snapshot 누적값에서 새 관측만 tracker에 전달 | `CorridorTrackingSession` |
 | [`guidance_trail_session.dart`](guidance_trail_session.dart) | 재탐색과 독립적으로 길안내 시작 이후 실제 보행 궤적을 누적 | `GuidanceTrailSession` |
-| [`escalator_transition_detector.dart`](escalator_transition_detector.dart) | 기압 변화 + 에스컬레이터 노드 근접으로 층 이동 판정 | `EscalatorTransitionDetector`, `EscalatorTransition`, `EscalatorDetectorConfig` |
+| [`escalator_transition_detector.dart`](escalator_transition_detector.dart) | 기압 변화 + 에스컬레이터 노드 근접으로 층 이동 판정. 아래 둘을 `export`한다 | `EscalatorTransitionDetector` |
+| [`escalator_detector_config.dart`](escalator_detector_config.dart) | 임계값 34개와 실측 근거 | `EscalatorDetectorConfig` |
+| [`escalator_detector_events.dart`](escalator_detector_events.dart) | 바깥으로 내보내는 값 | `EscalatorPhase`, `EscalatorPhaseChange`, `EscalatorTransition`, `EscalatorDetectionEvent` |
 | [`escalator_node_naming.dart`](escalator_node_naming.dart) | 에스컬레이터 노드 이름에서 탑승/도착과 상대 층을 파싱 | `EscalatorNodeName`, `EscalatorDirection`, `EscalatorNodeRole` |
 | [`indoor_location_estimate.dart`](indoor_location_estimate.dart) | GPS 기반 절대 추정점을 PDR과 별개로 보존·검증(아래 "GPS 추정점과 PDR의 결합") | `IndoorLocationEstimate`, `IndoorLocationEstimateController` |
 

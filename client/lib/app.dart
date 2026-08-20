@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'service_locator.dart';
 import 'routing/app_routes.dart';
@@ -122,6 +123,16 @@ class _NavigationAppState extends State<NavigationApp>
     return MaterialApp(
       title: 'Navigation Client',
       theme: AppTheme.light,
+      // 로케일을 안 주면 MaterialLocalizations가 영어로 떨어져 시각이
+      // '1:45 PM'으로 찍힌다. 한국어 앱에서 그 표기는 낯설고, 시각을 쓰는 곳이
+      // 계획 카드·진행 바·대중교통 카드 셋이라 카드마다 문자열을 만들면
+      // 세 벌이 따로 썩는다.
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const [Locale('ko')],
       home: widget.home,
       initialRoute: widget.home == null ? AppRoutes.outdoorMap : null,
       routes: routes,

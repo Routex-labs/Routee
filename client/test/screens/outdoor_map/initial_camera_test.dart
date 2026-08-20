@@ -13,13 +13,13 @@ void main() {
     bool alreadyCentered = false,
     bool followingUser = false,
     bool indoorEntered = false,
-    bool storeFocusOwnsCamera = false,
+    bool initialCameraClaimed = false,
     bool mapReady = true,
   }) => shouldCenterOnFirstFix(
     alreadyCentered: alreadyCentered,
     followingUser: followingUser,
     indoorEntered: indoorEntered,
-    storeFocusOwnsCamera: storeFocusOwnsCamera,
+    initialCameraClaimed: initialCameraClaimed,
     mapReady: mapReady,
   );
 
@@ -47,7 +47,7 @@ void main() {
     // 기다리는 중이고 실내 모드는 아직 꺼져 있어, indoorEntered가 이 자리를
     // 대신하지 못한다. 막지 않으면 카메라가 사용자 위치로 갔다가 매장으로
     // 다시 가 두 번 튄다(실기기 로그로 확인).
-    expect(call(storeFocusOwnsCamera: true), isFalse);
+    expect(call(initialCameraClaimed: true), isFalse);
   });
 
   test('지도가 아직 준비되지 않았으면 옮기지 않는다', () {

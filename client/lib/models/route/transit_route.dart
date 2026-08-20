@@ -46,6 +46,11 @@ enum TransitMode {
   bool get isWalk => this == TransitMode.walk;
 }
 
+/// 같은 구간을 함께 지나는 노선 하나. [name]은 번호(`5623`, `9호선`),
+/// [type]은 종류(`지선`, `급행`)다. **번호는 있고 종류는 없을 수 있다** —
+/// 정류장 번호(ID)는 응답에 아예 없으므로 여기에도 없다.
+typedef TransitVehicle = ({String name, String? type});
+
 /// 대중교통 경로의 한 구간(도보 한 토막, 버스 한 번, 지하철 한 번).
 class TransitLeg {
   const TransitLeg({
@@ -58,6 +63,8 @@ class TransitLeg {
     this.startName,
     this.endName,
     this.stationCount = 0,
+    this.stopNames = const [],
+    this.vehicles = const [],
   });
 
   /// TMAP `legs[]` 한 건.
@@ -104,6 +111,10 @@ class TransitLeg {
         : const <String, dynamic>{};
     final mode = TransitMode.fromKakao(props['type']);
     final stops = _kakaoStopNames(props['stops']);
+    // 도보에도 stops가 둘 붙어 오지만(예: "신논현" → "신논현역") 그건 걷는 구간의
+    // 양 끝일 뿐 지나는 정류장이 아니다. 상세 화면에 찍히지 않게 여기서 잘라낸다.
+    final passing = mode.isWalk ? const <String>[] : stops;
+    final vehicles = _kakaoVehicles(props['vehicles']);
 
     var points = const <LatLng>[];
     final path = json['path'];
@@ -116,15 +127,16 @@ class TransitLeg {
       sectionTimeSeconds: _int(props['time']) ?? 0,
       distanceMeters: _number(props['distance']) ?? 0,
       points: points,
-      routeName: _kakaoRouteName(props['vehicles']),
+      routeName: _kakaoRouteName(vehicles),
       // 카카오는 노선 고유색을 주지 않는다. null이면 화면이 수단별 기본색으로
       // 떨어지므로(widgets/transit_style.dart) 지하철 호선 색 구분만 사라진다.
       routeColorHex: null,
+      // 구간 이름은 도보에도 필요하므로 잘라내기 전 목록에서 읽는다.
       startName: stops.isEmpty ? null : stops.first,
       endName: stops.length < 2 ? null : stops.last,
-      // 도보 구간에도 stops가 둘 붙어 온다(예: "신논현" → "신논현역"). 그대로
-      // 세면 걸어가는 구간에 "1정거장"이 찍히므로 도보는 0으로 못박는다.
-      stationCount: mode.isWalk || stops.length <= 1 ? 0 : stops.length - 1,
+      stationCount: passing.length <= 1 ? 0 : passing.length - 1,
+      stopNames: passing,
+      vehicles: vehicles,
     );
   }
 
@@ -146,6 +158,15 @@ class TransitLeg {
 
   /// 이 구간에서 지나는 정거장 수. 도보 구간은 0이다.
   final int stationCount;
+
+  /// 승차지점부터 하차지점까지 지나는 정류장 이름, 순서대로. **카카오만 준다** —
+  /// TMAP 경로와 도보 구간은 빈 목록이다([stationCount]는 그래도 채워진다).
+  final List<String> stopNames;
+
+  /// 이 구간을 함께 지나는 노선 전부. **카카오만 준다** — TMAP 경로와 도보
+  /// 구간은 빈 목록이다. 목록 한 줄에는 [shortLabel]이 첫 노선만 쓰지만,
+  /// 상세 화면은 이걸로 `5623`·`461`을 전부 늘어놓는다.
+  final List<TransitVehicle> vehicles;
 
   /// 목록 한 줄에 적을 짧은 이름. 노선명이 있으면 그것을, 없으면 수단 이름을 쓴다.
   ///
@@ -218,28 +239,34 @@ class TransitLeg {
     return names;
   }
 
-  /// 카카오 `vehicles[]`를 TMAP과 같은 `종류:번호` 한 줄로 만든다.
-  ///
-  /// **같은 구간을 지나는 노선을 전부 묶어 준다** — 여의도 앞 한 정거장에
-  /// `지선 5623`, `간선 461` … 7개가 함께 왔다. 목록 칩에 7개를 늘어놓을 수는
-  /// 없으니 첫 노선만 쓰고 나머지는 "외 N대"로 접는다. 접두사를 `:`로 붙이는
-  /// 것은 TMAP이 `간선:472`로 주던 규칙과 맞춘 것이다 — [shortLabel]이 이
-  /// 접두사를 떼어내므로 좁은 칩에서는 번호가 먼저 읽힌다.
-  static String? _kakaoRouteName(Object? raw) {
-    if (raw is! List || raw.isEmpty) return null;
-    String? kind;
-    String? number;
-    var counted = 0;
+  /// 카카오 `vehicles[]`를 노선 목록으로. **같은 구간을 지나는 노선이 전부
+  /// 온다** — 여의도 앞 한 정거장에 `지선 5623`, `간선 461` … 7개가 함께 왔다.
+  /// 번호(`name`) 없는 항목은 화면에 찍을 것이 없으므로 버린다.
+  static List<TransitVehicle> _kakaoVehicles(Object? raw) {
+    if (raw is! List) return const [];
+    final vehicles = <TransitVehicle>[];
     for (final vehicle in raw) {
       if (vehicle is! Map<String, dynamic>) continue;
-      counted++;
-      if (number != null) continue;
-      kind = _text(vehicle['type']);
-      number = _text(vehicle['name']);
+      final name = _text(vehicle['name']);
+      if (name == null) continue;
+      vehicles.add((name: name, type: _text(vehicle['type'])));
     }
-    if (number == null) return null;
-    final label = counted > 1 ? '$number외 ${counted - 1}대' : number;
-    return kind == null ? label : '$kind:$label';
+    return vehicles;
+  }
+
+  /// 노선 목록을 TMAP과 같은 `종류:번호` 한 줄로 접는다.
+  ///
+  /// 목록 칩에 7개를 늘어놓을 수는 없으니 첫 노선만 쓰고 나머지는 "외 N대"로
+  /// 접는다(전부 필요하면 [vehicles]를 직접 읽는다). 접두사를 `:`로 붙이는
+  /// 것은 TMAP이 `간선:472`로 주던 규칙과 맞춘 것이다 — [shortLabel]이 이
+  /// 접두사를 떼어내므로 좁은 칩에서는 번호가 먼저 읽힌다.
+  static String? _kakaoRouteName(List<TransitVehicle> vehicles) {
+    if (vehicles.isEmpty) return null;
+    final first = vehicles.first;
+    final label = vehicles.length > 1
+        ? '${first.name}외 ${vehicles.length - 1}대'
+        : first.name;
+    return first.type == null ? label : '${first.type}:$label';
   }
 
   static String? _colorHex(Object? raw) {

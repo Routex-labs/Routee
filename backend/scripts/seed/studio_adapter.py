@@ -449,6 +449,9 @@ def build_seed_dict(
                 "name": floor["name"],
                 "level": floor["level"],
                 "footprint_local_m": footprint,
+                # 못 걷는 면(구멍·기둥·조경·에스컬레이터 도형). 표시 전용이라
+                # 비어 있어도 길찾기는 정상이다.
+                "non_walkable_polygons_local_m": studio.get("non_walkable_polygons_local_m") or None,
             },
             "map_calibration_version": studio.get("coordinate_system", {}).get("calibration_version", "unversioned"),
         },

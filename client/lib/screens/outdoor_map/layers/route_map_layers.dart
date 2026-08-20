@@ -21,10 +21,16 @@ const kOutdoorRouteSourceId = 'outdoor-route';
 const kOutdoorWalkedRouteSourceId = 'outdoor-walked-route';
 const kOutdoorTransferRouteSourceId = 'outdoor-transfer-route';
 
+/// 고르지 않은 자동차 후보 경로. 계획 경로와 **소스를 나눈다** — 같은 소스에
+/// 두고 속성으로 가르면 후보를 바꿀 때마다 본선의 색·굵기 표현식이 다시
+/// 계산돼 선 전체가 한 번 깜빡인다(대중교통 후보와 같은 이유).
+const kOutdoorRouteAltSourceId = 'outdoor-route-alt';
+
 /// 경로 묶음의 **맨 아래** 레이어. 실내 MVT 오버레이가 `belowLayerId:`로 이
 /// 레이어 아래에 삽입되므로, 이 id가 곧 "도면은 경로선 아래"라는 z-순서 계약이다.
 const kOutdoorRouteCasingLayerId = 'outdoor-route-casing';
 
+const _routeAltLayerId = 'outdoor-route-alt-line';
 const _routeLineLayerId = 'outdoor-route-line';
 const _routeWalkLayerId = 'outdoor-route-walk';
 const _routeIndoorLayerId = 'outdoor-route-indoor';
@@ -75,6 +81,26 @@ Future<void> registerRouteLayers(MapLibreMapController controller) async {
       false,
     ],
   );
+  // 자동차 후보는 **casing 위, 본선 아래**다. casing보다 아래에 두면 실내
+  // 도면(casing 아래로 삽입된다)이 후보를 덮고, 본선보다 위에 두면 겹치는
+  // 구간에서 회색이 파란 선을 지운다.
+  await controller.addSource(
+    kOutdoorRouteAltSourceId,
+    GeojsonSourceProperties(data: emptyGeoJsonCollection()),
+  );
+  await controller.addLineLayer(
+    kOutdoorRouteAltSourceId,
+    _routeAltLayerId,
+    const LineLayerProperties(
+      lineColor: kRouteCompletedColor,
+      lineWidth: 3.5,
+      lineOpacity: 0.75,
+      lineCap: 'round',
+      lineJoin: 'round',
+    ),
+    enableInteraction: false,
+  );
+
   // 자동차만 실선이다. 운전 경로는 도로를 그대로 따라가므로 선이 곧 길이지만,
   // 걷는 구간은 횡단보도·건물 앞 광장처럼 "이 근처로 가라"에 가까워 점선이 맞다.
   await controller.addLineLayer(

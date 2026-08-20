@@ -165,7 +165,7 @@ lane을 만드는 방법은 본뜰 원본이 어디 있느냐로 갈린다.
 
 ### 화면 검증
 
-백엔드와 Flutter를 AGENTS.md의 UTF-8 foreground 창 규칙대로 띄우고 1F를 먼저
+백엔드와 Flutter를 `docs/guide/session-rules.md`의 UTF-8 foreground 창 규칙대로 띄우고 1F를 먼저
 확인한 뒤 12개 층으로 확대했다. 삐뚤어진 각도, 위아래 열 단차, 6F 겹침, B6에서
 아이콘이 면 밖에 뜨는 문제를 이 과정에서 잡았다.
 

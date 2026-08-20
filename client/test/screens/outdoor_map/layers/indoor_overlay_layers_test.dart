@@ -2,7 +2,18 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
 
 import 'package:navigation_client/screens/outdoor_map/layers/indoor_overlay_layers.dart';
+import 'package:navigation_client/map/icon/category_map_icon.dart';
 import 'package:navigation_client/map/style/category_map_filter.dart';
+import 'package:navigation_client/map/style/floor_facility_style.dart';
+import 'package:navigation_client/map/style/label_style.dart';
+import 'package:navigation_client/map/style/palette.dart';
+
+/// `#RRGGBB`의 상대 밝기. 팔레트가 회색조 한 계열이라 채널 평균으로 충분하다 —
+/// 여기서 가리는 것은 "어느 쪽이 더 밝은가" 하나다.
+int _luminance(String hex) {
+  final value = int.parse(hex.substring(1), radix: 16);
+  return ((value >> 16 & 0xFF) + (value >> 8 & 0xFF) + (value & 0xFF)) ~/ 3;
+}
 
 /// 실기기에서 건물이 **불투명한 검정 덩어리**로 덮이던 회귀를 막는 테스트.
 ///
@@ -34,6 +45,7 @@ void main() {
     final cases = <String, FillLayerProperties>{
       '실내 footprint': indoorFootprintProps(fadeExpr),
       '실내 매장 fill': indoorStoresFillProps(fadeExpr),
+      '못 걷는 면': indoorNonWalkableProps(fadeExpr),
       '수직이동 구조물': indoorVerticalTransportProps(fadeExpr),
       '건물 폴리곤': buildingFillProps(0.15),
       'dim scrim': dimScrimProps(0),
@@ -55,6 +67,33 @@ void main() {
 
     test('실내 footprint는 흰색이다', () {
       expect(wireJson(indoorFootprintProps(fadeExpr))['fill-color'], '#FFFFFF');
+    });
+
+    test('못 걷는 면은 통로와 매장 사이 밝기이고 경계선을 갖는다', () {
+      // **값이 아니라 순서를 못 박는다.** 팔레트에 hex를 베껴 두면 한쪽만
+      // 고쳐지는 날이 온다. 지켜야 하는 것은 "통로 > 못 걷는 면 > 매장" 순서와
+      // "구분은 경계선이 만든다"는 규칙이다(`docs/client/map-style-rules.md`).
+      final json = wireJson(indoorNonWalkableProps(fadeExpr));
+      expect(json['fill-color'], mapNonWalkableFill);
+      expect(json['fill-outline-color'], isNotNull);
+      expect(json['fill-outline-color'], isNot(json['fill-color']));
+      // 매장과 같아지면 걸을 수 없는 곳이 매장처럼 읽힌다.
+      expect(json['fill-color'], isNot(mapStoreFill));
+      expect(
+        _luminance(mapFootprintFill),
+        greaterThan(_luminance(mapNonWalkableFill)),
+        reason: '통로가 가장 밝아야 한다 — 밝을수록 걷는 곳',
+      );
+      expect(
+        _luminance(mapNonWalkableFill),
+        greaterThan(_luminance(mapStoreFill)),
+        reason: '배경이 매장보다 진하면 빈 공간이 먼저 눈에 들어온다',
+      );
+      // 경계선은 매장 경계선보다 옅다 — 배경이 매장보다 또렷하면 안 된다.
+      expect(
+        _luminance(mapNonWalkableOutline),
+        greaterThan(_luminance(mapStoreOutline)),
+      );
     });
 
     test('건물 폴리곤은 검정이 아닌 테마 색이다', () {
@@ -93,6 +132,34 @@ void main() {
       expect(json['text-optional'], isFalse);
       expect(json['icon-optional'], isFalse);
       expect(json['icon-allow-overlap'], isFalse);
+    });
+
+    test('선택 매장은 크기 대신 기존 아이콘의 색만 바꾼다', () {
+      const selectedId = 'store-osulloc';
+      final json = wireJson(
+        indoorStoresLabelProps(
+          fadeExpr,
+          null,
+          1,
+          highlightedStoreId: selectedId,
+        ),
+      );
+
+      expect(json['text-size'], mapLabelFixedTextSize);
+      expect(json['icon-size'], indoorMarkerIconSize(1));
+      final iconImage = json['icon-image'] as List<Object?>;
+      expect(iconImage[0], 'case');
+      expect(iconImage[1], [
+        '==',
+        ['get', 'id'],
+        selectedId,
+      ]);
+      expect(
+        iconImage.toString(),
+        contains(selectedStoreCategoryIconImageName('카페')),
+      );
+      expect(iconImage.toString(), contains(storeCategoryIconImageName('카페')));
+      expect(iconImage, isNot(contains(mapLabelFixedTextSize * 1.35)));
     });
 
     test('카테고리를 골라도 text-field는 살아 있다', () {

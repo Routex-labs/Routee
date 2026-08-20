@@ -40,15 +40,14 @@ final _subwayStation = OutdoorPoi(
   distanceMeters: 300,
 );
 
-/// **판정을 못 내리는** GPS 표본(정확도 60 m > [decisiveAccuracyMeters] 20 m).
+/// 건물에서 확실히 떨어진 좌표.
 ///
-/// 바깥 검색에는 기준점이 필요한데(`outdoorSearchCenter`), 그렇다고 정확한
-/// 좌표를 넣으면 건물 안/밖 판정이 서면서 실내 상태가 통째로 흔들린다 —
-/// 그게 바로 집에서 실내 기능을 못 잡아 두는 이유다. 정확도를 무너뜨리면
-/// 판정은 `unclear`로 비켜 가고 기준점만 남는다.
-Position _unclearFix() => Position(
-  latitude: 37.5665,
-  longitude: 126.9779,
+/// 한때 건물 안 좌표에 오차 60 m를 달아 "판정이 안 서는 표본"으로 썼는데,
+/// **진입이 오차를 안 보게 된 뒤로 그 표본이 곧 자동 진입**이 됐다. 지금은
+/// 거리로 밖을 만든다(`docs/client/indoor-entry-rules.md` 1절).
+Position _outsideFix() => Position(
+  latitude: 37.5680,
+  longitude: 126.9800,
   timestamp: DateTime(2024, 1, 1),
   accuracy: 60,
   altitude: 0,
@@ -136,16 +135,6 @@ void main() {
     await drain(tester);
   }
 
-  String fieldText(WidgetTester tester, String key) {
-    final field = tester.widget<TextField>(
-      find.descendant(
-        of: find.byKey(Key(key)),
-        matching: find.byType(TextField),
-      ),
-    );
-    return field.controller?.text ?? '';
-  }
-
   testWidgets('건물 안에서 위치 지정 전에 "도착"을 눌러도 길찾기 바가 뜬다', (
     WidgetTester tester,
   ) async {
@@ -171,13 +160,16 @@ void main() {
     await drain(tester);
 
     expect(
-      find.byKey(const Key('route-draft-destination')),
+      find.byKey(const Key('route-planner')),
       findsOneWidget,
       reason: '도착을 눌렀는데 길찾기 바가 뜨지 않아 출발지를 채울 자리가 없다',
     );
     expect(
-      fieldText(tester, 'route-draft-destination'),
-      '강의실 101',
+      find.descendant(
+        of: find.byKey(const Key('route-planner')),
+        matching: find.text('강의실 101'),
+      ),
+      findsOneWidget,
       reason: '길찾기 바는 떴는데 방금 고른 도착지가 안 적혀 있다',
     );
   });
@@ -188,9 +180,9 @@ void main() {
     // 두 시트 중 한쪽만 고치면 같은 증상이 다른 문으로 그대로 남는다.
     await tester.pumpWidget(MaterialApp(theme: AppTheme.light, home: const MapShellScreen()));
     await drain(tester);
-    // 바깥 검색에는 기준점이 필요하다. 판정이 서지 않는 표본이라 실내 상태는
-    // 그대로 유지된다.
-    positions.add(_unclearFix());
+    // 바깥 검색에는 기준점이 필요하다. 건물 밖 좌표라 자동 진입이 걸리지 않고,
+    // 실내 상태는 아래 [enterIndoor]가 직접 켠다.
+    positions.add(_outsideFix());
     await drain(tester);
     await enterIndoor(tester);
 
@@ -219,11 +211,11 @@ void main() {
     await drain(tester);
 
     expect(
-      find.byKey(const Key('route-draft-destination')),
+      find.byKey(const Key('route-planner')),
       findsOneWidget,
       reason: '바깥 목적지로 도착을 눌렀는데 길찾기 바가 뜨지 않았다',
     );
-    expect(fieldText(tester, 'route-draft-destination'), '여의도역');
+    expect(find.text('여의도역'), findsOneWidget);
   });
 
   testWidgets('야외로 나가면 실내 출발지가 칸에서도 사라진다', (WidgetTester tester) async {
@@ -249,8 +241,11 @@ void main() {
     await drain(tester);
 
     expect(
-      fieldText(tester, 'route-draft-origin'),
-      '강의실 101',
+      find.descendant(
+        of: find.byKey(const Key('route-planner')),
+        matching: find.text('강의실 101'),
+      ),
+      findsOneWidget,
       reason: '테스트 전제(출발지 칸이 그 매장으로 채워짐)가 성립하지 않았다',
     );
 
@@ -263,8 +258,8 @@ void main() {
     await drain(tester);
 
     expect(
-      fieldText(tester, 'route-draft-origin'),
-      isEmpty,
+      find.text('현재 위치'),
+      findsOneWidget,
       reason: '야외에서는 쓸 수 없는 출발지가 칸에 남아, 화면과 계산이 어긋난다',
     );
   });

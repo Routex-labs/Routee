@@ -85,7 +85,11 @@ extension OutdoorMapRouteLayers on OutdoorMapBodyState {
   Future<void> _syncTransitLayer() async {
     final controller = _mapController;
     if (controller == null || !_styleReady) return;
-    await syncTransitLayer(controller, _transitItinerary);
+    await syncTransitLayer(
+      controller,
+      _transitItinerary,
+      alternatives: _transitAlternatives,
+    );
   }
 
   Future<void> _syncRouteLayer() {
@@ -96,9 +100,34 @@ extension OutdoorMapRouteLayers on OutdoorMapBodyState {
     return _routeLayerWriteQueue;
   }
 
+  /// 고르지 않은 자동차 후보를 회색으로 깐다.
+  ///
+  /// 그릴 조건(`_route != null && _routeIsDriving`)을 **그리는 쪽에** 둔다 —
+  /// 수단을 바꾸거나 경로를 비우면 지우는 자리를 따로 만들지 않아도 저절로
+  /// 사라진다. 후보는 상태를 새로 두지 않고 [unselectedDirectionsRoutes]로
+  /// 그때그때 뽑는다.
+  Future<void> _syncRouteAltLayer(MapLibreMapController controller) async {
+    final alternatives = _route == null || !_routeIsDriving
+        ? const <DirectionsRoute>[]
+        : unselectedDirectionsRoutes(
+            _directionsRouteOptions,
+            _selectedDirectionsOptionIndex,
+          );
+    await controller.setGeoJsonSource(
+      kOutdoorRouteAltSourceId,
+      alternatives.isEmpty
+          ? emptyGeoJsonCollection()
+          : geoJsonCollection([
+              for (final alternative in alternatives)
+                geoJsonLineFeature(alternative.points, style: 'drive'),
+            ]),
+    );
+  }
+
   Future<void> _syncRouteLayerNow() async {
     final controller = _mapController;
     if (controller == null || !_styleReady) return;
+    await _syncRouteAltLayer(controller);
     final transferSegment = _indoorMultiFloorRoute?.segmentForFloor(
       _activeFloor ?? '',
     );

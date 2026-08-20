@@ -252,7 +252,10 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     // 자리에서 걸어 나감이 끈 빗장이 **영구히** 걸린 채로 남는다.
     //
     // 진단 칩 **뒤에** 둔다. 칩의 무장 표시는 이 판정을 내릴 때의 값이어야 한다.
-    if (shouldRearmGpsEntry(judgement)) _gpsEntryArmed = true;
+    if (shouldRearmGpsEntry(judgement)) {
+      _gpsEntryArmed = true;
+      _sawOutsideSinceLaunch = true;
+    }
     switch (judgement.verdict) {
       case GpsBuildingVerdict.inside:
         if (_indoorEntered || !_gpsEntryArmed) return;
@@ -263,6 +266,15 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
         // 동안 좌표가 또 들어와도 위 `_indoorEntered` 검사에 걸리지 않으므로,
         // 겹침 방지는 [_runIndoorTransition]이 맡는다.
         _indoorEnteredByGps = true;
+        if (!_sawOutsideSinceLaunch) {
+          // **앱을 건물 안에서 켰다.** 전환할 야외 화면이 없으니 문 연출은 뜻이
+          // 없고, 대신 앱도 사용자도 모르는 것을 묻는다 — 지금 몇 층인지, 어느
+          // 매장 앞인지. 걸어 들어온 사람에게는 묻지 않는다(그쪽은 문을 통과한
+          // 층이 곧 답이다).
+          _setIndoorEntered(true);
+          unawaited(_askEntryFloorThenTrack(position));
+          return;
+        }
         unawaited(
           _runIndoorTransition(IndoorTransitionDirection.enter, () {
             _setIndoorEntered(true);
@@ -479,13 +491,42 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     return PdrLocalPoint(dx, dy);
   }
 
-  /// 좌표열 전체가 화면에 들어오도록 카메라를 맞춘다. 도보 경로와 대중교통
-  /// 경로가 같은 여백 규칙을 쓰도록 뽑아 두었다 — 값이 갈리면 안내를 바꿀
-  /// 때마다 경로가 화면에서 다른 크기로 잡힌다.
-  void _fitCameraToPoints(List<ll.LatLng> points) {
+  /// 좌표열 전체가 **가려지지 않는 띠**에 들어오도록 카메라를 맞춘다.
+  ///
+  /// 아래를 덮는 하단 카드는 여기서 직접 잰다 — 자동차 후보 3줄이면 카드가
+  /// 392px까지 자라 상수로는 못 따라간다. [bottomSheetFraction]은 이 fit **뒤에**
+  /// 열려 아직 트리에 없는 시트 몫이라 부르는 쪽이 알려 준다(0이면 시트 없음).
+  void _fitCameraToPoints(
+    List<ll.LatLng> points, {
+    double bottomSheetFraction = 0,
+  }) {
     final controller = _mapController;
     if (controller == null || !_styleReady) return;
-    unawaited(animateCameraToPoints(controller, points));
+    // 카드는 방금 setState로 바뀌었다. 한 프레임 뒤라야 **새** 카드를 잰다.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _mapController != controller || !_styleReady) return;
+      final viewport = MediaQuery.sizeOf(context);
+      unawaited(
+        animateCameraToPoints(
+          controller,
+          points,
+          viewport: viewport,
+          // 상태 표시줄은 기기마다 달라 상수로 못 박는다.
+          topInsetPx: MediaQuery.paddingOf(context).top + routeFitTopInsetPx,
+          bottomInsetPx: math.max(
+            _bottomCardHeightPx(),
+            viewport.height * bottomSheetFraction,
+          ),
+        ),
+      );
+    });
+  }
+
+  /// 지금 화면 아래를 덮고 있는 카드(ETA·대중교통 요약)의 높이(논리 px).
+  /// 트리에 없으면 0 — 가릴 것이 없다는 뜻이다.
+  double _bottomCardHeightPx() {
+    final box = _etaCardKey.currentContext?.findRenderObject() as RenderBox?;
+    return box == null || !box.hasSize ? 0 : box.size.height;
   }
 
   String? _pickStartNodeIdInBuildingGraph({
@@ -624,73 +665,6 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
   ///
   /// **각 레이어의 전체 속성을 매번 다시 넘긴다.** opacity만 넘기면 안 된다 —
   /// 이유는 indoor_overlay_layers.dart 상단 주석 참고.
-  /// 선택 확대를 **카메라 이동과 같은 시간에 걸쳐** 진행한다.
-  ///
-  /// 크기는 layout 속성이라 MapLibre transition이 안 걸려 손으로 보간한다.
-  /// 시작 시점·간격·이징의 근거는
-  /// `docs/client/kakao-map-indoor-observation.md` S절.
-  Future<void> _animateSelectionScale({required bool selected}) async {
-    _selectionScaleTimer?.cancel();
-    final from = _selectionScale;
-    final to = selected ? kSelectedLabelScale : 1.0;
-    if ((from - to).abs() < 0.001) return;
-
-    final started = DateTime.now();
-    final completer = Completer<void>();
-    _selectionScaleTimer = Timer.periodic(OutdoorMapBodyState._selectionScaleStep, (
-      timer,
-    ) async {
-      final elapsed = DateTime.now().difference(started);
-      final t = (elapsed.inMilliseconds / _storeFocusDuration.inMilliseconds)
-          .clamp(0.0, 1.0);
-      // easeOutCubic — 카메라 이징과 같은 성격이라 둘이 따로 놀지 않는다.
-      final eased = 1 - math.pow(1 - t, 3).toDouble();
-      _selectionScale = from + (to - from) * eased;
-      await _applySelectionScale();
-      if (t >= 1.0) {
-        timer.cancel();
-        if (!completer.isCompleted) completer.complete();
-      }
-    });
-    return completer.future;
-  }
-
-  /// 지금 배수를 라벨 두 레이어에 반영한다. **핀은 여기서 건드리지 않는다** —
-  /// 핀은 자리가 확정된 뒤에야 나타나므로 시작 시점이 라벨과 다르다
-  /// ([_animatePinIn]).
-  Future<void> _applySelectionScale() async {
-    if (_mapController == null || !_styleReady) return;
-    await _syncIndoorOverlayFade(scope: IndoorOverlaySyncScope.labels);
-  }
-
-  /// 확정된 자리에서 핀을 자라나게 한다(0.55배 → 1배).
-  ///
-  /// 자리를 잡은 **뒤에** 도는 것이 핵심이다. 근사 자리에 먼저 세워 두고 나중에
-  /// 옮기면 그게 곧 순간이동이다.
-  Future<void> _animatePinIn() async {
-    _pinIntroTimer?.cancel();
-    final controller = _mapController;
-    if (controller == null || !_styleReady) return;
-    final started = DateTime.now();
-    await setSelectedPinScale(controller, OutdoorMapBodyState._pinIntroFrom);
-    _pinIntroTimer = Timer.periodic(OutdoorMapBodyState._selectionScaleStep, (
-      timer,
-    ) async {
-      final t = (DateTime.now().difference(started).inMilliseconds / 220)
-          .clamp(0.0, 1.0);
-      final eased = 1 - math.pow(1 - t, 3).toDouble();
-      const from = OutdoorMapBodyState._pinIntroFrom;
-      final scale = from + (1.0 - from) * eased;
-      final live = _mapController;
-      if (live == null) {
-        timer.cancel();
-        return;
-      }
-      await setSelectedPinScale(live, scale);
-      if (t >= 1.0) timer.cancel();
-    });
-  }
-
   Future<void> _syncIndoorOverlayFade({
     IndoorOverlaySyncScope scope = IndoorOverlaySyncScope.all,
   }) async {
@@ -703,9 +677,8 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
       categorySelection: widget.categorySelection,
       devicePixelRatio: _devicePixelRatio,
       symbolSortKey: _storeLabelSortKeyExpression(),
-      // 고른 매장의 이름·아이콘을 함께 키운다(핀만 키우면 어중간해진다).
+      // 고른 매장은 크기를 흔들지 않고 기존 아이콘의 색만 포인트 색으로 바꾼다.
       highlightedStoreId: _highlightedStoreId,
-      selectionScale: _selectionScale,
       scope: scope,
     );
   }
@@ -837,6 +810,19 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
   /// [ignoreZoomArming]은 **자기 게이트를 따로 가진 호출자**가 쓴다.
   /// [_autoIndoorEntryArmed]는 zoom 트리거 전용 플래그라, 이걸로 다른 경로까지
   /// 막으면 건물 직접 탭과 GPS 재무장이 조용히 죽는다.
+  /// 건물 정보 시트가 "실내 지도 보기"로 진입을 시킬 때. 건물을 직접 탭하던
+  /// 조작과 **같은 자리로 들어간다** — 오버레이를 켜고 카메라를 도면에 맞춘다.
+  ///
+  /// 줌 무장([_autoIndoorEntryArmed])은 무시한다. 사용자가 명시적으로 누른
+  /// 것이라, zoom 트리거용 플래그로 막으면 눌러도 아무 일이 없다.
+  ///
+  /// **전환 연출은 붙이지 않는다.** 시트를 눌러 도면을 여는 조작이지 건물로
+  /// 걸어 들어간 것이 아니다(`docs/client/indoor-transition-choreography.md` 6절).
+  void enterIndoorFromSheet() {
+    _triggerIndoorEntry(ignoreZoomArming: true);
+    if (_indoorEntered) unawaited(_fitCameraToActiveFloor());
+  }
+
   void _triggerIndoorEntry({bool ignoreZoomArming = false}) {
     if (!ignoreZoomArming && !_autoIndoorEntryArmed) return;
     _autoIndoorEntryArmed = false;
@@ -882,6 +868,12 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     // 사용자가 건물을 직접 탭해 연 도면까지 GPS가 제멋대로 닫는다
     // ([_applyBuildingVerdict]의 outside 갈래).
     if (!value) _indoorEnteredByGps = false;
+    // **정말로 나갔을 때만** 층 질문을 다시 열어 둔다. 도면만 접은 사용자는 같은
+    // 자리에 그대로 있어서, 다시 펼 때마다 묻는 것은 답을 아는 질문을 되묻는 것이다.
+    if (!value && leftBuilding) {
+      _entryFloorAsked = false;
+      _nearbyStoreAsked = false;
+    }
     // 실내 안내를 켜고 끄는 유일한 지점이다.
     //
     // 예전에는 오버레이가 꺼져도 복도 보정이 계속 돌았다 — 화면에 안 보일 뿐
@@ -1033,6 +1025,14 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
           () => renderStoreCategoryIconPng(category),
         ),
       );
+      final selectedImageName = selectedStoreCategoryIconImageName(category);
+      await controller.addImage(
+        selectedImageName,
+        await cachedIconPng(
+          selectedImageName,
+          () => renderStoreCategoryIconPng(category, selected: true),
+        ),
+      );
     }
     _facilityIconImagesRegistered = true;
   }
@@ -1100,8 +1100,7 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
   /// 아니라 글자 상자라 폴리곤 경계에 딱 붙으면 판정에서 빠질 수 있다.
   static const double _labelProbePadPx = 60;
 
-  /// 되읽기가 실패했을 때 쓸 **근사** 앵커. 두 핀(선택·출구)이 같은 규칙을 써야
-  /// 한 화면에서 서로 다른 기준으로 어긋나지 않는다.
+  /// 출구 라벨 되읽기가 실패했을 때 쓸 **근사** 앵커.
   ///
   /// 혼자 쓰는 폴리곤에서는 centroid가 `label_point`와 사실상 같다(더현대 1F
   /// 출구 5개에서 0.04~0.13 m). **나눠 쓰는 폴리곤만 예외로** `entrance`를
@@ -1133,15 +1132,11 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     try {
       final probe = await _labelProbeRect(controller, store, near);
       if (probe == null) return null;
-      final rendered = await controller.queryRenderedFeaturesInRect(
-        probe,
-        [
-          _indoorIds.sharedStoresLabel,
-          _indoorIds.storesLabel,
-          _indoorIds.facilityLabel,
-        ],
-        null,
-      );
+      final rendered = await controller.queryRenderedFeaturesInRect(probe, [
+        _indoorIds.sharedStoresLabel,
+        _indoorIds.storesLabel,
+        _indoorIds.facilityLabel,
+      ], null);
       for (final feature in rendered) {
         final map = feature as Map;
         if ((map['properties'] as Map?)?['id'] != store.id) continue;
@@ -1224,10 +1219,15 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     return clamped;
   }
 
-  /// 강조 매장 자리에 핀을 세운다. null 또는 미매치면 비운다.
+  /// 고른 매장을 **폴리곤 칠 + 아이콘 색** 두 가지로 표시한다.
   ///
-  /// **폴리곤이 아니라 점을 쓴다.** 폴리곤을 칠하던 시절에는 폴리곤이 없는
-  /// 시설(점만 있는 화장실 등)을 고르면 아무 일도 일어나지 않았다.
+  /// 아이콘은 "이거 하나"를 콕 집고, 칠은 "여기까지"를 말한다 — 둘이 다른 일을
+  /// 해서 함께 쓴다. 별도 핀은 세우지 않는다: 같은 장소에 기존 아이콘과 핀이
+  /// 함께 서면 무엇이 실제 POI이고 무엇이 선택 장식인지 위계가 갈라진다.
+  ///
+  /// 폴리곤이 없는 매장(점만 있는 시설)은 칠할 것이 없어 아이콘 색만 바뀐다 —
+  /// 칠 하나만 쓰던 시절 그런 자리에서 **아무 일도 안 일어나던** 것이 아이콘
+  /// 색을 함께 두는 이유다.
   Future<void> _syncHighlightLayer() async {
     final controller = _mapController;
     if (controller == null || !_styleReady) return;
@@ -1236,46 +1236,12 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     final store = (storeId == null || plan == null)
         ? null
         : plan.stores.where((s) => s.id == storeId).firstOrNull;
-    if (store == null) {
-      _highlightAnchorFinal = false;
-      _cameraSettled = false;
-      await syncPointSource(controller, kOutdoorHighlightSourceId, null);
-    } else {
-      final fallback = _labelAnchorFor(
-        store,
-        storeLabelShareCounts(plan!.stores),
-      );
-      final exact = await _renderedLabelAnchor(store, fallback);
-      // **정확해지기 전에는 세우지 않는다.** 근사로 먼저 세웠다가 카메라가 멈춘 뒤
-      // 옮기면 다 온 다음 핀이 순간이동하는 것으로 보인다. 라벨이 아직 안 그려진
-      // 동안만 비우고, [_handleCameraIdle]이 다시 불러 그때 세운다.
-      //
-      // **카메라가 멈춘 뒤에도 못 찾으면 근사로라도 세운다.** 안 그러면 라벨을
-      // 끝내 못 찾는 매장에서 핀이 영영 안 뜬다 — 자리가 조금 어긋나는 것보다
-      // 아무것도 없는 편이 나쁘다.
-      if (exact == null && !_highlightAnchorFinal && !_cameraSettled) {
-        await syncPointSource(controller, kOutdoorHighlightSourceId, null);
-      } else {
-        final placing = !_highlightAnchorFinal;
-        _highlightAnchorFinal = true;
-        await syncPointSource(
-          controller,
-          kOutdoorHighlightSourceId,
-          exact ?? fallback,
-        );
-        // 처음 세우는 순간에만 자라나게 한다. 이후 갱신에서 다시 돌면 깜빡인다.
-        if (placing) unawaited(_animatePinIn());
-      }
-    }
-    // **여기서 크기를 바꾸지 않는다.** 확대는 카메라와 같은 박자로 굴러야 하므로
-    // [_animateSelectionScale]이 맡는다 — 여기서 한 번에 바꾸면 글자가 먼저
-    // 커지고 그다음 화면이 움직이는, 사용자가 지적한 그 순서가 된다.
-    // 선택이 풀린 경우만 즉시 되돌린다(되돌릴 카메라 이동이 없다).
-    if (store == null && _selectionScale != 1.0) {
-      _selectionScaleTimer?.cancel();
-      _selectionScale = 1.0;
-      await _applySelectionScale();
-    }
+    await syncPolygonSource(
+      controller,
+      kOutdoorHighlightSourceId,
+      store?.polygon,
+    );
+    await _syncIndoorOverlayFade(scope: IndoorOverlaySyncScope.labels);
   }
 
   /// 현재 층의 지상 출입구에 방위 핀을 세운다.

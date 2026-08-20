@@ -63,8 +63,10 @@ backend/
 │   ├── fonts/           # MapLibre SDF 글리프 (Pretendard)
 │   ├── studio/          # 스튜디오 원본 데이터
 │   ├── query_synonyms.json             # 자연어 질의 별칭 → 표준어
-│   ├── store_categories.json          # 매장 id → 카테고리 (category_code 근거)
-│   └── store_category_by_name.json    # 매장명 → 카테고리 (브랜드명 분류, 폴백)
+│   ├── official_floor_guide.json      # 공식 층별안내 스냅샷 (분류의 원본)
+│   ├── category_section_map.json      # 공식 섹션 → 우리 분류 매핑표·예외
+│   ├── store_categories.json          # 매장 id → 카테고리 (생성물)
+│   └── store_category_by_name.json    # 매장명 → 카테고리 (생성물, 폴백)
 ├── data/                # 런타임 SQLite DB (gitignore, 재생성 가능)
 ├── requirements.txt     # 서버·테스트 필수 의존성
 ├── requirements-dev.txt # 평가 노트북 전용 선택 의존성

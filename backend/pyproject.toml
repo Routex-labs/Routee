@@ -44,6 +44,11 @@ extend-immutable-calls = [
 # 새 하위 폴더(tests/e2e 등)나 tests/ 바로 아래 파일이 조용히 실행에서 빠진다 —
 # "테스트는 있는데 CI가 안 돌리는" 상태를 구조적으로 막기 위한 설정이다.
 testpaths = ["tests"]
+# 느린 테스트를 매 실행 로그에 남긴다. 이게 없으면 "CI가 왜 이렇게 오래 도는가"를
+# 물을 때마다 로그 타임스탬프를 손으로 재게 된다 — 실제로 한 번 그렇게 쟀고,
+# 그때 테스트 하나가 스위트의 75%를 쓰고 있었다(docs/backend/query-load-profile.md).
+# 상위 15개면 그런 쏠림이 바로 드러난다.
+addopts = "--durations=15"
 
 [tool.mypy]
 python_version = "3.12"

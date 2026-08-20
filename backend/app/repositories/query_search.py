@@ -16,7 +16,7 @@ from functools import lru_cache
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 
 from app.core.config import API_ROOT
 from app.geo.georeference import GeoTransform
@@ -392,7 +392,25 @@ def _load_stores(
     *,
     current_floor_id: str | None = None,
 ) -> list[tuple[Store, Floor]]:
-    statement = select(Store, Floor).join(Floor, Store.floor_id == Floor.id).where(Floor.building_id == building_id)
+    # 도형 JSON 셋을 미룬다. 질의 경로는 이름·카테고리·search_facets만 보는데,
+    # 이 셋은 매장 외곽선·층 외곽선이라 행마다 가장 큰 JSON이다.
+    #
+    # 실측(동의어 321건 전수, 매장 1,640건): 이 셋을 함께 읽으면 `json.loads`가
+    # 210만 번 돌아 235초 중 **180초**를 쓴다. 랭킹 로직 자체는 5.7초다.
+    # 미루면 남는 JSON은 search_facets 하나뿐이라 역직렬화가 1/4로 준다.
+    #
+    # `defer`라 접근하면 그때 한 번 더 읽는다 — 이 모듈은 세 컬럼을 쓰지 않고,
+    # 다른 경로가 같은 Store를 쓰더라도 필요한 시점에 lazy로 채워진다.
+    statement = (
+        select(Store, Floor)
+        .join(Floor, Store.floor_id == Floor.id)
+        .where(Floor.building_id == building_id)
+        .options(
+            defer(Store.polygon),
+            defer(Floor.footprint_local_m),
+            defer(Floor.non_walkable_polygons_local_m),
+        )
+    )
 
     if current_floor_id is not None:
         statement = statement.where((Floor.name == current_floor_id) | (Floor.id == current_floor_id))
@@ -966,9 +984,19 @@ def discover(
     if len(candidates) > MAX_DISCOVERY_MATCHES:
         axis, options = _pick_question(candidates, intent_basis.get("intents"))
         if axis is not None:
-            # 질문 축이 intents면 그 축의 선택지가 이긴다(뒤 키가 앞을 덮는다) —
-            # 같은 축을 두 벌로 들고 있으면 matched_facets가 어느 쪽 근거인지 흐려진다.
-            basis = {**intent_basis, axis: [option["value"] for option in options]}
+            # 질문 축이 intents여도 **질의가 가리킨 intent를 덮지 않는다.** 덮으면
+            # 사용자가 친 말이 reason에서 사라진다 — `신발` 질의에 "의류 관련
+            # 매장이에요"만 남는 식이다([_query_matched_intents] 주석의 실패 조건).
+            #
+            # 오래 안 드러났던 이유는 intents가 질문 축이 되는 일이 드물어서다.
+            # `신발`의 후보는 전부 `의류`도 함께 갖고 있어 구분력이 없었고 축은
+            # styles로 떨어졌다. 신발 브랜드를 `슈즈` 소분류로 모으자 `의류`가
+            # 전 후보를 덮지 않게 되면서 이 자리가 처음 밟혔다.
+            option_values = [option["value"] for option in options]
+            basis = {
+                **intent_basis,
+                axis: [*intent_basis.get(axis, ()), *option_values],
+            }
             # 초기 후보는 그 축의 태그가 있는 매장에서 고른다 — 미태깅 매장이 섞이면
             # 질문의 근거(reason)가 비어 보인다. 태그된 후보가 없으면 전체에서 고른다.
             preview = [row for row in candidates if _facets(row[0]).get(axis)]

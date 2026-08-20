@@ -33,36 +33,27 @@ Future<StorePolygon?> showStoreClusterSheet(
             // 수 없어, 손잡이를 두면 할 수 없는 조작을 약속하게 된다.
             const SizedBox(height: RoutexSpacing.componentPadding),
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
-              child: Text(
-                '이 자리의 매장 ${stores.length}곳',
-                style: Theme.of(context).textTheme.titleMedium,
+              padding: const EdgeInsets.symmetric(
+                horizontal: RoutexSpacing.contentGap,
               ),
+              child: RoutexSectionHeader(title: '이 자리의 매장 ${stores.length}곳'),
             ),
             Flexible(
               child: ListView.separated(
                 shrinkWrap: true,
                 itemCount: stores.length,
                 separatorBuilder: (_, _) =>
-                    const Divider(height: 1, indent: 56),
+                    const RoutexDivider(role: RoutexDividerRole.row),
                 itemBuilder: (context, index) {
                   final store = stores[index];
                   final category = store.category;
-                  return ListTile(
-                    onTap: () => Navigator.of(context).pop(store),
-                    leading: Icon(
-                      category != null
-                          ? categoryIconFor(category)
-                          : Icons.store,
-                      size: 20,
-                      color: category != null
-                          ? categoryColorFor(category)
-                          : Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                    title: Text(store.name),
-                    subtitle: store.subcategory != null
-                        ? Text(store.subcategory!)
-                        : null,
+                  return RoutexListCell(
+                    title: store.name,
+                    subtitle: store.subcategory,
+                    leadingIcon: category != null
+                        ? categoryIconFor(category)
+                        : RoutexIcons.place,
+                    onPressed: () => Navigator.of(context).pop(store),
                   );
                 },
               ),

@@ -64,21 +64,26 @@ void main() {
     await drain(tester);
 
     expect(
-      find.byKey(const Key('route-draft-origin')),
+      find.byKey(const Key('route-planner')),
       findsOneWidget,
       reason: '테스트 전제(상단 초안 바가 뜸)가 성립하지 않았다',
     );
   }
 
   /// 후보 목록의 "현재 위치" 고정 행. 출발지 칸이 활성일 때만 붙는다. 상단 초안
-  /// 바에도 같은 문구가 있으므로 목록 항목(ListTile)으로 좁힌다.
+  /// 바에도 같은 문구가 있으므로 후보 목록의 고정 키로 좁힌다.
   Finder currentLocationRow() =>
-      find.descendant(of: find.byType(ListTile), matching: find.text('현재 위치'));
+      find.byKey(const Key('route-field-current-location'));
 
   testWidgets('출발 칸을 누르면 후보가 출발지 기준으로 열린다', (WidgetTester tester) async {
     await openRouteDraft(tester);
 
-    await tester.tap(find.byKey(const Key('route-draft-origin')));
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const Key('route-planner')),
+        matching: find.text('현재 위치'),
+      ),
+    );
     await drain(tester);
 
     expect(
@@ -96,14 +101,19 @@ void main() {
       ),
     );
     expect(originField.controller?.text, isEmpty);
-    expect(originField.decoration?.hintText, '현재 위치');
+    expect(originField.decoration?.hintText, '출발지를 입력하세요');
   });
 
   testWidgets('도착 칸을 누르면 후보가 도착지 기준으로 열린다', (WidgetTester tester) async {
     // 기본 흐름이 뒤집히지 않는지 함께 고정한다.
     await openRouteDraft(tester);
 
-    await tester.tap(find.byKey(const Key('route-draft-destination')));
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const Key('route-planner')),
+        matching: find.text('강의실 101'),
+      ),
+    );
     await drain(tester);
 
     expect(

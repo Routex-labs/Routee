@@ -1,15 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:navigation_client/theme/app_theme.dart';
 import 'package:navigation_client/domain/guidance/route_guidance.dart';
+import 'package:navigation_client/theme/app_theme.dart';
 import 'package:navigation_client/widgets/eta_card.dart';
+import 'package:routex_design_system/routex_design_system.dart';
 
-/// 안내 배너가 한 줄로 필요한 것만 말하는지에 대한 테스트.
-///
-/// 걸으면서 보는 화면에서 실제로 쓰는 정보는 **다음에 무엇을 할지와 몇 미터
-/// 남았는지** 둘뿐이다. 그 거리는 총 남은거리가 아니라 다음 조작까지의
-/// 거리여야 한다 — 두 값을 섞으면 사용자는 적힌 만큼 걷고도 모퉁이가 안 나오는
-/// 화면을 본다.
+/// Runtime Kit의 계획 카드·안내 배너에 앱 경로 값이 올바르게 연결되는지 확인한다.
 void main() {
   Widget wrap(Widget child) => MaterialApp(
     theme: AppTheme.light,
@@ -23,126 +19,142 @@ void main() {
         distanceToActionM: toAction,
       );
 
-  group('안내 중 한 줄 배너', () {
-    testWidgets('지시 문구와 다음 조작까지 거리를 적는다', (WidgetTester tester) async {
-      await tester.pumpWidget(
-        wrap(
-          EtaCard(
-            // 총 남은거리는 일부러 다르게 준다. 배너가 이걸 쓰면 안 된다.
-            distanceMeters: 480,
-            minutes: 7,
-            instruction: turn(),
-          ),
-        ),
-      );
+  group('안내 중 상단 배너', () {
+    testWidgets('다음 행동과 그 행동까지의 거리를 적는다', (tester) async {
+      await tester.pumpWidget(wrap(GuidanceBanner(instruction: turn())));
 
       expect(find.text('오른쪽 통로로 이동'), findsOneWidget);
-      // 공백 없이 붙인다. 검색 결과·장소 상세와 같은 포매터를 쓰므로 한 화면
-      // 안에서 "92m"과 "92 m"이 섞이지 않는다.
       expect(find.text('92m'), findsOneWidget);
-      expect(
-        find.textContaining('480'),
-        findsNothing,
-        reason: '총 남은거리를 적으면 다음 모퉁이까지의 거리와 섞인다',
-      );
     });
 
-    testWidgets('총 소요·총 남은거리 줄을 없앴다', (WidgetTester tester) async {
+    testWidgets('도착 직전에는 소수점 한 자리까지 보여 준다', (tester) async {
       await tester.pumpWidget(
-        wrap(EtaCard(distanceMeters: 480, minutes: 7, instruction: turn())),
-      );
-
-      expect(find.textContaining('약 7분'), findsNothing);
-      expect(find.textContaining('남음'), findsNothing);
-    });
-
-    testWidgets('종료 콜백이 있으면 나갈 버튼이 있다', (WidgetTester tester) async {
-      var closed = false;
-      await tester.pumpWidget(
-        wrap(
-          EtaCard(
-            distanceMeters: 480,
-            minutes: 7,
-            instruction: turn(),
-            onClose: () => closed = true,
-          ),
-        ),
-      );
-
-      // 안내 중에는 지도 위 chrome이 접혀 있어 이 버튼이 유일한 탈출구다.
-      await tester.tap(find.byKey(const Key('eta-card-close')));
-      expect(closed, isTrue);
-    });
-
-    testWidgets('종료 콜백이 없으면 버튼도 없다', (WidgetTester tester) async {
-      // 건물 입구까지 자동으로 그린 경로다. 사용자가 시작한 적이 없으니 끝낼
-      // 것도 없고, 그래서 chrome도 접히지 않는다(shouldFoldGuidanceChrome).
-      await tester.pumpWidget(
-        wrap(EtaCard(distanceMeters: 480, minutes: 7, instruction: turn())),
-      );
-
-      expect(find.byKey(const Key('eta-card-close')), findsNothing);
-    });
-
-    testWidgets('도착 직전에는 소수점 한 자리까지 보여 준다', (WidgetTester tester) async {
-      // 정수로만 반올림하면 마지막 몇 걸음 동안 "0 m"가 붙어 있어 안내가 멈춘
-      // 것처럼 보인다.
-      await tester.pumpWidget(
-        wrap(
-          EtaCard(
-            distanceMeters: 4,
-            minutes: 1,
-            instruction: turn(toAction: 3.4),
-          ),
-        ),
+        wrap(GuidanceBanner(instruction: turn(toAction: 3.4))),
       );
 
       expect(find.text('3.4m'), findsOneWidget);
     });
 
-    testWidgets('1 km가 넘으면 km로 적는다', (WidgetTester tester) async {
-      // 카드가 자기 포매팅을 따로 들고 있으면 여기만 "1200m"으로 남는다.
+    testWidgets('1 km가 넘으면 km로 적는다', (tester) async {
       await tester.pumpWidget(
-        wrap(
-          EtaCard(
-            distanceMeters: 4800,
-            minutes: 60,
-            instruction: turn(toAction: 1200),
-          ),
-        ),
+        wrap(GuidanceBanner(instruction: turn(toAction: 1200))),
       );
 
       expect(find.text('1.2km'), findsOneWidget);
     });
+
+    testWidgets('경로 이탈은 조작 지시 대신 재탐색 상태를 말한다', (tester) async {
+      await tester.pumpWidget(
+        wrap(
+          const GuidanceBanner(
+            instruction: RouteGuidanceInstruction(
+              action: RouteGuidanceAction.wrongWay,
+              primaryText: '반대 방향',
+              distanceToActionM: 0,
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('경로를 벗어났습니다'), findsOneWidget);
+      expect(find.text('새 경로를 자동으로 찾고 있습니다'), findsOneWidget);
+    });
   });
 
-  group('안내가 없을 때(자동 경로)', () {
-    testWidgets('무엇을 향한 값인지 함께 적는다', (WidgetTester tester) async {
-      // 건물 입구까지 같은 경로에는 지시 문구가 없다. 화면에 남는 정보가 거리
-      // 하나뿐이면 무엇을 향한 거리인지 알 수 없다.
+  group('안내 전 계획 카드', () {
+    testWidgets('무엇을 향하는지와 소요·거리를 함께 적는다', (tester) async {
       await tester.pumpWidget(
         wrap(const EtaCard(distanceMeters: 480, minutes: 7, label: '건물 입구까지')),
       );
 
       expect(find.text('건물 입구까지'), findsOneWidget);
-      // 수치 줄은 RichText 스팬이라 기본 finder에 안 걸린다.
       expect(find.textContaining('7분', findRichText: true), findsOneWidget);
       expect(find.textContaining('480m', findRichText: true), findsOneWidget);
+      expect(find.text('안내 종료'), findsNothing);
+    });
+
+    testWidgets('routeOptions을 건네면 요약 위에 그린다', (tester) async {
+      await tester.pumpWidget(
+        wrap(
+          const EtaCard(
+            distanceMeters: 3900,
+            minutes: 8,
+            label: '목적지까지',
+            routeOptions: Text('옵션 영역'),
+          ),
+        ),
+      );
+
+      expect(find.text('옵션 영역'), findsOneWidget);
+    });
+
+    testWidgets('extraMetric을 건네면 소요·거리 옆에 함께 적는다', (tester) async {
+      await tester.pumpWidget(
+        wrap(
+          EtaCard(
+            distanceMeters: 3900,
+            minutes: 8,
+            label: '목적지까지',
+            extraMetric: const RoutexTripMetric(value: '무료', label: '통행료'),
+          ),
+        ),
+      );
+
+      expect(find.textContaining('무료', findRichText: true), findsOneWidget);
+      expect(find.textContaining('통행료', findRichText: true), findsOneWidget);
+    });
+
+    testWidgets('한 시간을 넘으면 분이 아니라 시간으로 적는다', (tester) async {
+      // 도보로 272분이 실제로 나온다. 분만 적으면 사용자가 나눗셈을 해야 한다.
+      await tester.pumpWidget(
+        wrap(const EtaCard(distanceMeters: 20000, minutes: 272)),
+      );
+
+      expect(find.text('4시간 32분'), findsOneWidget);
+      expect(find.text('272분'), findsNothing);
+    });
+
+    testWidgets('headline은 도착 시각이 아니라 소요 시간이다', (tester) async {
+      await tester.pumpWidget(
+        wrap(const EtaCard(distanceMeters: 3900, minutes: 8)),
+      );
+
+      // 소요가 metrics 줄(RichText)이 아니라 제 몫의 Text로 올라와 있다.
+      expect(find.text('8분'), findsOneWidget);
+      // 시각 표기(`오전`/`오후`)는 계획 카드에서 사라졌다.
+      expect(find.textContaining('오전', findRichText: true), findsNothing);
+      expect(find.textContaining('오후', findRichText: true), findsNothing);
+      // 목적지 라벨은 남는다 — title은 건드리지 않았다.
+      expect(find.text('목적지까지'), findsOneWidget);
     });
   });
 
-  testWidgets('EtaCard shows the distance and minutes', (
-    WidgetTester tester,
-  ) async {
+  testWidgets('안내 중에는 남은 값과 종료 동작을 보여 준다', (tester) async {
+    var closed = false;
     await tester.pumpWidget(
-      MaterialApp(
-        theme: AppTheme.light,
-        home: const EtaCard(distanceMeters: 150, minutes: 2),
+      wrap(
+        EtaCard(
+          distanceMeters: 150,
+          minutes: 2,
+          guidanceStarted: true,
+          onClose: () => closed = true,
+        ),
       ),
     );
 
-    expect(find.text('목적지까지'), findsOneWidget);
-    expect(find.textContaining('2분', findRichText: true), findsOneWidget);
-    expect(find.textContaining('150m', findRichText: true), findsOneWidget);
+    expect(find.text('2분'), findsOneWidget);
+    expect(find.text('150m'), findsOneWidget);
+    await tester.tap(find.text('안내 종료'));
+    expect(closed, isTrue);
+  });
+
+  testWidgets('안내 중에는 도착 예정 시각이 그대로 남는다', (tester) async {
+    await tester.pumpWidget(
+      wrap(
+        const EtaCard(distanceMeters: 150, minutes: 2, guidanceStarted: true),
+      ),
+    );
+
+    expect(find.text('도착 예정'), findsOneWidget);
   });
 }

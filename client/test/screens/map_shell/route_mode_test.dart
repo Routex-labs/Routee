@@ -10,8 +10,12 @@ import 'package:navigation_client/repositories/place/destination_repository.dart
 import 'package:navigation_client/repositories/building/mock_building_repository.dart';
 import 'package:navigation_client/repositories/place/mock_destination_repository.dart';
 import 'package:navigation_client/screens/map_shell/map_shell_screen.dart';
+import 'package:navigation_client/screens/map_shell/widgets/chrome/map_bottom_bar.dart';
+import 'package:navigation_client/screens/map_shell/widgets/chrome/map_overlay_scroll_row.dart';
 import 'package:navigation_client/widgets/eta_card.dart';
+import 'package:navigation_client/widgets/directions_route_options_panel.dart';
 import 'package:navigation_client/screens/map_shell/widgets/search/route_field_results.dart';
+import 'package:navigation_client/state/recent_route_points_controller.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// 길찾기가 **상단 바 안에서** 끝나는지에 대한 회귀 테스트.
@@ -19,10 +23,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// 한동안 길찾기는 전체 화면(`screens/route_planner/`)이었다. 지도를 새로 만들지
 /// 않으려고 오버레이로 얹었지만 화면이 통째로 바뀌는 것은 마찬가지라, 목적지를
 /// 고치려면 지도를 잃고 그 화면을 다시 열어야 했다. 지금은 상단 바가 출발/도착
-/// 두 칸이 되고 그 아래에 이동 수단 줄이 붙는다.
+/// 두 위치가 되고 그 아래에 이동 수단 줄이 붙는다.
 void main() {
   late BuildingRepository originalBuildingRepository;
   late DestinationRepository originalDestinationRepository;
+  late RecentRoutePointsController originalRecents;
 
   final repository = MockBuildingRepository();
 
@@ -53,8 +58,11 @@ void main() {
     await debugModeController.reload();
     originalBuildingRepository = buildingRepository;
     originalDestinationRepository = destinationRepository;
+    originalRecents = recentRoutePointsController;
     buildingRepository = repository;
     destinationRepository = MockDestinationRepository(repository);
+    recentRoutePointsController = RecentRoutePointsController();
+    await recentRoutePointsController.ready;
     requestStartupPermissions = () async => {};
     await repository.getAllBuildings();
   });
@@ -62,6 +70,7 @@ void main() {
   tearDown(() {
     buildingRepository = originalBuildingRepository;
     destinationRepository = originalDestinationRepository;
+    recentRoutePointsController = originalRecents;
     requestStartupPermissions = defaultRequestStartupPermissions;
     watchPosition = defaultWatchPosition;
   });
@@ -72,7 +81,9 @@ void main() {
     addTearDown(positions.close);
     watchPosition = () => positions.stream;
 
-    await tester.pumpWidget(MaterialApp(theme: AppTheme.light, home: const MapShellScreen()));
+    await tester.pumpWidget(
+      MaterialApp(theme: AppTheme.light, home: const MapShellScreen()),
+    );
     await drain(tester);
     positions.add(fix());
     await drain(tester);
@@ -83,7 +94,7 @@ void main() {
     matching: find.byType(TextField),
   );
 
-  testWidgets('길찾기를 누르면 두 칸과 이동 수단 줄이 상단에 뜬다', (
+  testWidgets('길찾기를 누르면 플래너가 뜨고 끝점 확정 뒤 이동 수단이 나타난다', (
     WidgetTester tester,
   ) async {
     await pumpShell(tester);
@@ -93,29 +104,32 @@ void main() {
     await tester.tap(find.byTooltip('길찾기'));
     await drain(tester);
 
-    expect(find.byKey(const Key('route-draft-origin')), findsOneWidget);
+    expect(find.byKey(const Key('route-planner')), findsOneWidget);
+    expect(find.text('현재 위치'), findsOneWidget);
     expect(find.byKey(const Key('route-draft-destination')), findsOneWidget);
-    expect(find.byKey(const ValueKey('travel-mode-bar')), findsOneWidget);
-    // 수단이 나란히 있다. 테스트 환경에는 카카오 키가 없어 대중교통은 빠지므로
-    // (그 규칙은 travel_mode_bar_test가 따로 지킨다) 나머지 둘로 확인한다.
+    expect(find.text('자동차'), findsNothing);
+    expect(find.text('도보'), findsNothing);
+
+    await tester.enterText(destinationField(), '강의실');
+    await drain(tester);
+    await tester.tap(find.text('강의실 101').first);
+    await drain(tester);
+
+    // 테스트 환경에는 카카오 키가 없어 대중교통은 빠진다. 두 끝점이 확정된
+    // 뒤에만 나머지 수단이 나타난다.
     expect(find.text('자동차'), findsOneWidget);
     expect(find.text('도보'), findsOneWidget);
-
-    // 수단 줄은 두 칸보다 **위**다. "어떻게 갈지"를 먼저 정하고 목적지를 넣는
-    // 순서이며, 아래에 두면 두 칸과 후보 목록 사이에 끼어 시선을 가로막는다.
     expect(
-      tester.getRect(find.byKey(const ValueKey('travel-mode-bar'))).bottom,
-      lessThanOrEqualTo(
-        tester.getRect(find.byKey(const Key('route-draft-origin'))).top,
-      ),
+      tester.getRect(find.text('도보')).top,
+      greaterThan(tester.getRect(find.text('현재 위치')).bottom),
     );
   });
 
   testWidgets('야외에서 아직 아무것도 안 쳤으면 빈 후보 카드를 남기지 않는다', (
     WidgetTester tester,
   ) async {
-    // 야외 + 도착 칸이면 지름길 두 줄("지도에서 선택"·"현재 위치")이 모두 빠지고
-    // 빈 검색어의 후보도 없다. 그런데도 카드를 그리면 이동 수단 줄 아래에 아무
+    // 야외 + 빈 도착 칸에는 별도 지름길이나 빈 검색 후보가 없다. 그런데도
+    // 카드를 그리면 위치 행 아래에 아무
     // 내용 없는 흰 막대가 떠 있게 된다.
     await pumpShell(tester);
     await tester.tap(find.byTooltip('길찾기'));
@@ -126,9 +140,7 @@ void main() {
     expect(tester.getSize(find.byType(RouteFieldResults)).height, 0);
   });
 
-  testWidgets('도착지를 그 자리에서 쳐서 고르면 경로가 그려진다', (
-    WidgetTester tester,
-  ) async {
+  testWidgets('도착지를 그 자리에서 쳐서 고르면 경로가 그려진다', (WidgetTester tester) async {
     await pumpShell(tester);
     await tester.tap(find.byTooltip('길찾기'));
     await drain(tester);
@@ -140,11 +152,16 @@ void main() {
     await drain(tester);
 
     expect(find.byType(EtaCard), findsOneWidget);
-    // 고른 값이 그 칸에 그대로 남아, 다시 눌러 고칠 수 있다.
+    expect(find.byType(MapBottomBar), findsNothing);
+    expect(find.byType(MapOverlayScrollRow), findsNothing);
     expect(
-      tester.widget<TextField>(destinationField()).controller?.text,
-      '강의실 101',
+      tester.getBottomLeft(find.byType(EtaCard)).dy,
+      tester.getSize(find.byType(Scaffold).first).height,
+      reason: '안내 시작 전 경로 요약도 화면 하단에 붙어야 한다',
     );
+    // 고른 값이 그 칸에 그대로 남아, 다시 눌러 고칠 수 있다.
+    expect(find.byKey(const Key('route-draft-destination')), findsNothing);
+    expect(find.text('강의실 101'), findsWidgets);
   });
 
   testWidgets('X를 누르면 길찾기 바와 경로가 함께 사라진다', (WidgetTester tester) async {
@@ -157,7 +174,7 @@ void main() {
     await drain(tester);
     expect(find.byType(EtaCard), findsOneWidget);
 
-    await tester.tap(find.byKey(const Key('route-draft-clear')));
+    await tester.tap(find.byTooltip('경로 계획 닫기'));
     await drain(tester);
 
     expect(find.byKey(const Key('route-draft-origin')), findsNothing);
@@ -166,17 +183,65 @@ void main() {
     expect(find.byTooltip('길찾기'), findsOneWidget);
   });
 
-  testWidgets('출발 칸을 누르면 "현재 위치"로 되돌릴 길이 목록에 있다', (
+  testWidgets('자동차 모드에서 후보가 여러 개면 목록에서 고를 수 있다', (
     WidgetTester tester,
   ) async {
+    await pumpShell(tester);
+    await tester.tap(find.byTooltip('길찾기'));
+    await drain(tester);
+    await tester.enterText(destinationField(), '강의실');
+    await drain(tester);
+    await tester.tap(find.text('강의실 101').first);
+    await drain(tester);
+
+    await tester.tap(find.text('자동차'));
+    await drain(tester);
+
+    expect(find.byType(EtaCard), findsOneWidget);
+    expect(find.text('추천'), findsOneWidget);
+    expect(find.text('최단거리'), findsOneWidget);
+
+    await tester.tap(find.text('최단거리'));
+    await drain(tester);
+
+    expect(find.byType(EtaCard), findsOneWidget);
+    expect(find.text('최단거리'), findsOneWidget);
+  });
+
+  testWidgets('도보로 바꾸면 자동차 후보 목록이 남지 않는다', (WidgetTester tester) async {
+    await pumpShell(tester);
+    await tester.tap(find.byTooltip('길찾기'));
+    await drain(tester);
+    await tester.enterText(destinationField(), '강의실');
+    await drain(tester);
+    await tester.tap(find.text('강의실 101').first);
+    await drain(tester);
+
+    await tester.tap(find.text('자동차'));
+    await drain(tester);
+
+    // 자동차 후보가 여러 개 뜬 상태에서 시작한다(기존 테스트와 같은 전제).
+    expect(find.text('추천'), findsOneWidget);
+    expect(find.text('최단거리'), findsOneWidget);
+    expect(find.byType(DirectionsRouteOptionsPanel), findsOneWidget);
+
+    await tester.tap(find.text('도보'));
+    await drain(tester);
+
+    // 도보로 바뀌면 방금 본 자동차 후보 패널이 그대로 남아 있으면 안 된다.
+    expect(find.byType(DirectionsRouteOptionsPanel), findsNothing);
+    expect(find.text('최단거리'), findsNothing);
+  });
+
+  testWidgets('출발 칸을 누르면 "현재 위치"로 되돌릴 길이 목록에 있다', (WidgetTester tester) async {
     await pumpShell(tester);
     await tester.tap(find.byTooltip('길찾기'));
     await drain(tester);
 
     await tester.tap(
       find.descendant(
-        of: find.byKey(const Key('route-draft-origin')),
-        matching: find.byType(TextField),
+        of: find.byKey(const Key('route-planner')),
+        matching: find.text('현재 위치'),
       ),
     );
     await drain(tester);
@@ -187,8 +252,7 @@ void main() {
       find.byKey(const Key('route-field-current-location')),
       findsOneWidget,
     );
-    // 야외에서는 "지도에서 선택"을 주지 않는다 — 이름 없는 좌표가 잡히는 줄이라
-    // 매장 이름으로 고르는 줄과 나란히 두면 같은 무게로 읽힌다.
+    // 지도 탭은 위치 행 편집 자체에 연결되므로 별도 지름길을 만들지 않는다.
     expect(find.byKey(const Key('route-field-pick-on-map')), findsNothing);
   });
 }

@@ -6,6 +6,8 @@ import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'support/entry_floor_prompt_helper.dart';
+
 import 'package:navigation_client/theme/app_theme.dart';
 import 'package:routex_design_system/routex_design_system.dart';
 import 'package:navigation_client/app.dart';
@@ -130,13 +132,15 @@ void main() {
     //
     // 상단 햄버거는 모드 신호가 아니다. 항상 보이는 앱 메뉴다.
     expect(find.byType(FloorSelector), findsNothing);
-    expect(find.byKey(const Key('map-top-bar-menu')), findsOneWidget);
+    expect(find.byTooltip('메뉴'), findsOneWidget);
   });
 
   testWidgets('outdoor map body renders map after position arrives', (
     WidgetTester tester,
   ) async {
-    await tester.pumpWidget(MaterialApp(theme: AppTheme.light, home: const OutdoorMapBody()));
+    await tester.pumpWidget(
+      MaterialApp(theme: AppTheme.light, home: const OutdoorMapBody()),
+    );
 
     // OutdoorMapBody는 위치 신호를 기다리는 동안에도 지도를 그리며,
     // 로딩 스피너로 화면을 가리지 않는다. 첫 pump가 끝나면 fake 스트림이
@@ -188,10 +192,7 @@ void main() {
     // **누를 수 없다.** 사용자가 할 수 있는 일이 없는 상태라 행동을 붙이지
     // 않는다. 붙이면 건물 로드 실패 알림("다시 시도")과 구분되지 않는다.
     expect(
-      find.ancestor(
-        of: find.text('GPS 신호 약함'),
-        matching: find.byType(InkWell),
-      ),
+      find.ancestor(of: find.text('GPS 신호 약함'), matching: find.byType(InkWell)),
       findsNothing,
     );
     expect(
@@ -227,7 +228,9 @@ void main() {
         _fakePositionAtEntrance,
       ]);
 
-      await tester.pumpWidget(MaterialApp(theme: AppTheme.light, home: const MapShellScreen()));
+      await tester.pumpWidget(
+        MaterialApp(theme: AppTheme.light, home: const MapShellScreen()),
+      );
 
       // 접근 표본 → 진입 표본 순으로 흘러야 판정이 서므로, 두 건이 모두 도착할
       // 때까지 프레임을 진행한다.
@@ -239,13 +242,17 @@ void main() {
       // 채운 뒤에야 결과가 뜨면 이미 끝난 작업을 계속 보여주는 셈이다).
       // 이 fixture의 mock 층에는 navigation_graph가 없어 결과가 즉시 나오므로,
       // 여기서 보이는 것은 진행 문구가 아니라 수동 지정 안내다.
+      //
+      // 다만 그 작업은 **층을 답한 뒤에** 시작한다 — 자동 진입이 "몇 층에
+      // 계신가요?"를 먼저 띄운다.
+      await dismissEntryFloorPrompt(tester);
       expect(find.textContaining('위치 지정으로 직접 지정해주세요'), findsOneWidget);
 
       await tester.pumpAndSettle();
       // 실내 진입 오버레이가 켜지면 야외 지도 위에 세로 층 선택기(FloorSelector)
       // 가 나타난다. 상단 햄버거(앱 메뉴)는 모드와 무관하게 늘 그 자리에 있다.
       expect(find.byType(FloorSelector), findsOneWidget);
-      expect(find.byKey(const Key('map-top-bar-menu')), findsOneWidget);
+      expect(find.byTooltip('메뉴'), findsOneWidget);
     },
   );
 
@@ -271,14 +278,16 @@ void main() {
       );
       watchPosition = () => Stream.value(passingByPosition);
 
-      await tester.pumpWidget(MaterialApp(theme: AppTheme.light, home: const MapShellScreen()));
+      await tester.pumpWidget(
+        MaterialApp(theme: AppTheme.light, home: const MapShellScreen()),
+      );
       await tester.pump();
       await tester.pump();
 
       // 오버레이가 켜지지 않았으므로 층 선택기는 없어야 한다. 햄버거(앱 메뉴)는
       // 오버레이 상태와 무관하게 남는다.
       expect(find.byType(FloorSelector), findsNothing);
-      expect(find.byKey(const Key('map-top-bar-menu')), findsOneWidget);
+      expect(find.byTooltip('메뉴'), findsOneWidget);
     },
   );
 
@@ -288,7 +297,9 @@ void main() {
     final controller = StreamController<Position>();
     watchPosition = () => controller.stream;
 
-    await tester.pumpWidget(MaterialApp(theme: AppTheme.light, home: const OutdoorMapBody()));
+    await tester.pumpWidget(
+      MaterialApp(theme: AppTheme.light, home: const OutdoorMapBody()),
+    );
 
     controller.add(_fakePosition);
     // MapLibre 이관 후 _handlePosition이 비동기 _syncCurrentLayer / _updateRoute
@@ -311,7 +322,9 @@ void main() {
   ) async {
     watchPosition = () => Stream.error(Exception('위치를 가져올 수 없음'));
 
-    await tester.pumpWidget(MaterialApp(theme: AppTheme.light, home: const OutdoorMapBody()));
+    await tester.pumpWidget(
+      MaterialApp(theme: AppTheme.light, home: const OutdoorMapBody()),
+    );
     await tester.pump();
 
     // 위치 실패 시에도 지도 body는 폴백 좌표로 렌더되고 GPS 신호 약함 배지가
@@ -325,7 +338,12 @@ void main() {
     WidgetTester tester,
   ) async {
     final key = GlobalKey<OutdoorMapBodyState>();
-    await tester.pumpWidget(MaterialApp(theme: AppTheme.light, home: OutdoorMapBody(key: key)));
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light,
+        home: OutdoorMapBody(key: key),
+      ),
+    );
     await tester.pumpAndSettle();
     // ignore: invalid_use_of_visible_for_testing_member
     key.currentState!.enterIndoorForTest();
@@ -367,18 +385,21 @@ void main() {
 
     // 유일한 진입점은 상단 바 햄버거 → 앱 메뉴다. 여기서만 지금 디버그 모드가
     // 켜져 있다는 사실이 드러나야 한다.
-    await tester.tap(find.byKey(const Key('map-top-bar-menu')));
+    await tester.tap(find.byTooltip('메뉴'));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('app-menu-debug')), findsOneWidget);
     expect(find.byIcon(Icons.bug_report_outlined), findsOneWidget);
     expect(find.text('사용 중 · PDR 제어와 진단 레이어가 지도에 표시됩니다'), findsOneWidget);
   });
 
-  testWidgets('실내 진입 오버레이에서 층 chip으로 층을 바꾼다', (
-    WidgetTester tester,
-  ) async {
+  testWidgets('실내 진입 오버레이에서 층 chip으로 층을 바꾼다', (WidgetTester tester) async {
     final mapKey = GlobalKey<OutdoorMapBodyState>();
-    await tester.pumpWidget(MaterialApp(theme: AppTheme.light, home: OutdoorMapBody(key: mapKey)));
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light,
+        home: OutdoorMapBody(key: mapKey),
+      ),
+    );
     await tester.pumpAndSettle();
     // ignore: invalid_use_of_visible_for_testing_member
     mapKey.currentState!.enterIndoorForTest();
@@ -418,7 +439,9 @@ void main() {
     );
     destinationRepository = repository;
 
-    await tester.pumpWidget(MaterialApp(theme: AppTheme.light, home: const MapShellScreen()));
+    await tester.pumpWidget(
+      MaterialApp(theme: AppTheme.light, home: const MapShellScreen()),
+    );
     await tester.pumpAndSettle();
     await searchFromTopBar(tester, 'MLB');
 
@@ -441,7 +464,9 @@ void main() {
     );
     destinationRepository = repository;
 
-    await tester.pumpWidget(MaterialApp(theme: AppTheme.light, home: const MapShellScreen()));
+    await tester.pumpWidget(
+      MaterialApp(theme: AppTheme.light, home: const MapShellScreen()),
+    );
     await tester.pumpAndSettle();
     await searchFromTopBar(tester, '밥 먹을 곳');
 
@@ -465,7 +490,9 @@ void main() {
     );
     destinationRepository = repository;
 
-    await tester.pumpWidget(MaterialApp(theme: AppTheme.light, home: const MapShellScreen()));
+    await tester.pumpWidget(
+      MaterialApp(theme: AppTheme.light, home: const MapShellScreen()),
+    );
     await tester.pumpAndSettle();
     await searchFromTopBar(tester, 'MLB');
 
@@ -493,14 +520,21 @@ void main() {
     );
     destinationRepository = repository;
 
-    await tester.pumpWidget(MaterialApp(theme: AppTheme.light, home: const MapShellScreen()));
+    await tester.pumpWidget(
+      MaterialApp(theme: AppTheme.light, home: const MapShellScreen()),
+    );
     await tester.pumpAndSettle();
 
     await tester.tap(find.byType(TextField));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), '밥 먹을');
     // receiveAction(엔터)을 일부러 보내지 않는다. 시간만 흘린다.
+    // 먼저 부모 setState를 그려 SearchPanel이 debounce timer를 설치하게 한다.
+    await tester.pump();
     await tester.pump(const Duration(milliseconds: 350));
+    await tester.pump();
+    // 경량 검색과 건물 목록은 서로 다른 await 구간이다. 둘 다 끝나야
+    // 400ms 의미 검색 timer가 설치되므로 microtask를 한 프레임 더 비운다.
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 450));
     await tester.pumpAndSettle();
@@ -516,7 +550,9 @@ void main() {
     // TextField는 상단 바의 것 하나뿐이어야 한다.
     destinationRepository = _FallbackDestinationRepository();
 
-    await tester.pumpWidget(MaterialApp(theme: AppTheme.light, home: const MapShellScreen()));
+    await tester.pumpWidget(
+      MaterialApp(theme: AppTheme.light, home: const MapShellScreen()),
+    );
     await tester.pumpAndSettle();
 
     expect(find.byType(TextField), findsOneWidget);
@@ -536,7 +572,9 @@ void main() {
   testWidgets('카테고리 열에 AI 검색 pill이 더는 없다', (WidgetTester tester) async {
     destinationRepository = _FallbackDestinationRepository();
 
-    await tester.pumpWidget(MaterialApp(theme: AppTheme.light, home: const MapShellScreen()));
+    await tester.pumpWidget(
+      MaterialApp(theme: AppTheme.light, home: const MapShellScreen()),
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('AI 검색'), findsNothing);
@@ -546,7 +584,9 @@ void main() {
     // 매장과 건물을 같은 결과 패널에 함께 얹는다.
     destinationRepository = _FallbackDestinationRepository();
 
-    await tester.pumpWidget(MaterialApp(theme: AppTheme.light, home: const MapShellScreen()));
+    await tester.pumpWidget(
+      MaterialApp(theme: AppTheme.light, home: const MapShellScreen()),
+    );
     await tester.pumpAndSettle();
     await searchFromTopBar(tester, '데모');
 
@@ -569,7 +609,9 @@ void main() {
     );
     destinationRepository = repository;
 
-    await tester.pumpWidget(MaterialApp(theme: AppTheme.light, home: const MapShellScreen()));
+    await tester.pumpWidget(
+      MaterialApp(theme: AppTheme.light, home: const MapShellScreen()),
+    );
     await tester.pumpAndSettle();
     // 실내 오버레이가 켜져야 현재 층(_activeIndoorFloor)이 잡힌다.
     tester

@@ -286,7 +286,7 @@ B안대로 `hours` 전용 구조체를 만들고 "지금 영업 중"은 화면�
 adb에서 떨어진다). **HTTP로 우회한다.**
 
 ```powershell
-# 1) 백엔드 (UTF-8 프렐류드 + PYTHONUTF8은 AGENTS.md 참고)
+# 1) 백엔드 (UTF-8 프렐류드 + PYTHONUTF8은 docs/guide/session-rules.md 참고)
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8001
 
 # 2) APK 전송용 서버 — client/build/app/outputs/flutter-apk 에서

@@ -8,17 +8,31 @@ part of '../outdoor_map_screen.dart';
 
 extension OutdoorMapGuidance on OutdoorMapBodyState {
   /// 사용자가 **직접 고른** 목적지로 안내 중인지. 안내 chrome(검색창·카테고리
-  /// 줄·층 선택기·하단 바)을 접을지의 유일한 판정 기준이다.
+  /// 줄·하단 바)을 접을지의 판정 기준이다. **층 선택기만 한 발 먼저 접는다** —
+  /// [_guidancePlanned].
   ///
   /// 판정 규칙과 그렇게 나눈 이유는 [shouldFoldGuidanceChrome]에 있다. 요약하면
   /// **접는 조건은 종료 버튼이 있는 조건과 같아야 한다** — 아래 ETA 카드 두
   /// 분기가 `onClose`를 다는 조건과 이 getter가 정확히 맞물려야 하고, 어느
   /// 한쪽을 고치면 그 함수를 통해 다른 쪽도 같이 바뀐다.
-  bool get _guidanceActive => shouldFoldGuidanceChrome(
-    hasUserDestination: _userDestination != null,
-    hasIndoorRouteDestination: _indoorRouteDestination != null,
-    hasComputedRoute: _route != null,
-  );
+  bool get _guidanceActive => _guidanceStarted && _guidancePlanned;
+
+  /// 하단에 **"안내 시작" 카드가 떠 있는지.** [_guidanceActive]에서 "이미
+  /// 시작했는가"만 뺀 값이라, 시작 버튼을 누르기 전부터 참이다.
+  ///
+  /// 층 선택기는 이 시점부터 접는다. 카드가 뜬 뒤로 층은 사용자가 고르는 것이
+  /// 아니라 경로가 정하고, 사용자는 "이쪽으로 가면 되는구나"를 가리는 것 없이
+  /// 봐야 한다.
+  ///
+  /// **목적지 없이 자동으로 그린 걷기 경로는 여기 안 든다** — 그 카드에는
+  /// 애초에 "안내 시작"이 없다([shouldFoldGuidanceChrome]).
+  bool get _guidancePlanned =>
+      _transitItinerary != null ||
+      shouldFoldGuidanceChrome(
+        hasUserDestination: _userDestination != null,
+        hasIndoorRouteDestination: _indoorRouteDestination != null,
+        hasComputedRoute: _route != null,
+      );
 
   void _notifyRouteStateIfChanged() {
     final visible = _hasAnyRouteVisible;
@@ -137,14 +151,30 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
         _arrivalRouteClearTimer = null;
         return;
       case ArrivalAutoClearDecision.schedule:
-        _arrivalRouteClearTimer = Timer(arrivalAutoClearDelay, () {
-          _arrivalRouteClearTimer = null;
-          if (!mounted) return;
-          // 경로·핀·하단 배너를 정리한다. 도착 카드는 남는다 — 그것이 지금
-          // 화면에서 유일하게 "끝났다"고 말하는 것이다.
-          _clearIndoorRoute();
-        });
+        _arrivalRouteClearTimer = Timer(
+          arrivalAutoClearDelay,
+          clearRouteAfterArrival,
+        );
     }
+  }
+
+  /// 도착 안내를 읽을 시간이 지난 뒤 경로·핀·하단 배너를 정리한다. 도착 카드는
+  /// 남는다 — 그것이 지금 화면에서 유일하게 "끝났다"고 말하는 것이다.
+  ///
+  /// **안내 세션은 끝내지 않는다.** 끝내면 접어 뒀던 상단 chrome이 펴져 방금
+  /// 지운 경로의 이동 수단 줄이 되살아나고(대중교통으로 왔으면 대중교통이 선택된
+  /// 채 경로만 없다), 실내→야외 이음매에서는 출구에서 `안내 시작`이 다시 뜬다
+  /// ([showRouteTo]의 continueGuidance). 세션을 끝내는 것은 도착 카드의
+  /// `안내 종료`뿐이다([_confirmArrival]).
+  ///
+  /// 타이머 콜백을 이름 있는 자리로 뺀 것은 테스트가 PDR 없이 이 순간을 부를 수
+  /// 있어야 하기 때문이다. **테스트 전용 뒷문이 아니라 실제 타이머가 부르는
+  /// 자리**라 `...ForTest`를 붙이지 않는다.
+  @visibleForTesting
+  void clearRouteAfterArrival() {
+    _arrivalRouteClearTimer = null;
+    if (!mounted) return;
+    _clearIndoorRoute(endGuidance: false);
   }
 
   /// GPS가 지금 이 사람을 **건물 밖이라고 분명히 말하는가.**
@@ -168,7 +198,7 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
   /// 미리 보던 실내 경로에서 **실제 안내를 시작한다.**
   ///
   /// 여기서야 출발지 매장에 앵커를 찍는다. 미리 보는 동안 찍지 않는 이유는
-  /// [_indoorRoutePreview]에 적었다 — 그 사람은 아직 거기 서 있지 않다.
+  /// [_indoorRoutePreviewOrigin]에 적었다 — 그 사람은 아직 거기 서 있지 않다.
   ///
   /// **건물 밖에서 누르면 아무것도 바꾸지 않는다.** 앵커를 찍어 봐야 다음 GPS 틱이
   /// 곧바로 뒤집어 도면과 경로가 아무 말 없이 사라진다. 그래서 화면은 그대로 두고
@@ -185,8 +215,8 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
       return;
     }
     setState(() {
-      _indoorRoutePreview = false;
       _indoorRoutePreviewOrigin = null;
+      _guidanceStarted = true;
     });
     await _anchorAtStoreOrigin(
       floor: floor,
@@ -194,6 +224,92 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
       storePoint: origin.point,
       storeName: origin.name,
     );
+    _notifyRouteStateIfChanged();
+  }
+
+  /// 안내 시작 판정에 쓸, 지금 지도에 그려진 야외 경로의 좌표열.
+  ///
+  /// 실내 경로만 살아 있으면 빈 목록이다 — 실내는 [_startIndoorGuidance]가
+  /// 자기 가드를 이미 갖고 있어서 여기서 다시 막지 않는다.
+  List<ll.LatLng> get _guidanceStartRoutePoints {
+    final route = _route;
+    if (route != null) return route.points;
+    final transit = _transitItinerary;
+    if (transit == null) return const [];
+    return [for (final leg in transit.legs) ...leg.points];
+  }
+
+  /// 마지막으로 받은 GPS를 위경도로. 아직 못 받았으면 null이다.
+  ll.LatLng? get _positionPoint {
+    final position = _position;
+    if (position == null) return null;
+    return ll.LatLng(position.latitude, position.longitude);
+  }
+
+  /// 계획 카드의 `안내 시작`을 모든 이동수단에서 같은 상태 전이로 처리한다.
+  ///
+  /// **경로에서 멀면 아무것도 바꾸지 않는다.** 실내가 건물 밖에서 그렇게 하는
+  /// 것과 같은 이유다([_startIndoorGuidance]) — 카메라를 GPS로 끌고 가 봐야
+  /// 보던 경로가 화면에서 사라질 뿐이다. 도보도 함께 막는다. 카메라를 안 옮겨도
+  /// 안내 상태로 들어가면 엉뚱한 위치에서 진행 판정이 돌기 시작한다.
+  Future<void> _startCurrentGuidance() async {
+    if (_indoorRoutePreviewOrigin != null) {
+      await _startIndoorGuidance();
+      return;
+    }
+    if (_guidanceStarted || !_hasAnyRouteVisible) return;
+    // 좌표를 못 얻는 경로(실내 구간만 살아 있는 경우)에는 가드를 걸지 않는다.
+    // 잴 수 없는 것을 막으면 지금 되던 흐름이 조용히 죽는다.
+    final points = _guidanceStartRoutePoints;
+    if (points.length >= 2) {
+      // 위치를 아직 못 받은 것과 경로에서 먼 것은 **다른 사건이다.** 둘 다 막지만
+      // 문구를 같이 쓰면, GPS를 기다리는 중인 사용자가 경로를 잘못 잡았다고 읽고
+      // 엉뚱한 곳을 고치러 간다.
+      final position = _positionPoint;
+      if (position == null) {
+        _showSnack('현재 위치를 확인하는 중입니다.');
+        return;
+      }
+      if (!canStartGuidanceFrom(
+        routePoints: points,
+        position: position,
+        maxOffsetM: guidanceStartMaxOffsetM,
+      )) {
+        _showSnack('경로 근처에 있을 때 안내를 시작할 수 있습니다.');
+        return;
+      }
+    }
+    setState(() {
+      _guidanceStarted = true;
+    });
+    _notifyRouteStateIfChanged();
+    if (_routeIsDriving) await startFollowingCurrentLocation();
+  }
+
+  /// 안내만 끈다 — 경로선·후보·목적지는 남는다. **뒤로가기가 부른다.**
+  ///
+  /// `_dismissUserDestinationFromEtaCard`(parts/route.dart)와 다르다. 그쪽은
+  /// 경로까지 지우고 `onGuidanceDismissed`로 상단 길찾기 상태까지 비운다.
+  /// 여기서는 경로가 남으므로 그 신호를 **부르지 않는다** — 부르면 경로만 남고
+  /// 길찾기 바가 사라져, 다른 후보를 고를 문이 닫힌다.
+  void stopGuidanceKeepingRoute() {
+    if (!_guidanceStarted) return;
+    setState(() {
+      _guidanceStarted = false;
+      // 걸어온 자취를 함께 지운다. 안 지우면 계획 화면에 절반이 회색인 경로가 뜬다.
+      _clearCompletedRouteHistory();
+    });
+    _stopFollowingUser();
+    _notifyRouteStateIfChanged();
+    // 계획 화면의 약속은 "경로 전체가 보인다"다. 따라가기만 풀면 카메라가
+    // 사용자에게 확대된 채로 남아 어느 후보가 어느 선인지 대조할 수 없다.
+    final itinerary = _transitItinerary;
+    final route = _route;
+    if (itinerary != null) {
+      _fitCameraToPoints(itinerary.points);
+    } else if (route != null) {
+      _fitCameraToRoute(route);
+    }
   }
 
   /// 도착 카드의 `안내 종료`. 남은 여정을 통째로 정리한다.

@@ -43,7 +43,27 @@ void main() {
     const ids = IndoorOverlayIds();
     expect(ids.layersTopFirst.first, ids.storeFacilityIcon);
     expect(ids.layersTopFirst.last, ids.footprint);
-    expect(ids.layersTopFirst.length, 9);
+    expect(ids.layersTopFirst.length, 10);
+  });
+
+  test('못 걷는 면은 매장 fill 바로 위·카테고리 강조 바로 아래다', () {
+    // 이 한 자리를 벗어나면 화면이 둘 중 하나로 깨진다 — 매장 fill 아래로
+    // 내려가면 지하 주차칸 폴리곤에 기둥 면적의 40%가 가리고(그 위 흰 바닥까지
+    // 내려가면 2026-08-15 되돌림 2번의 "픽셀 0"), 카테고리 강조 위로 올라가면
+    // 강조·수직이동 색이 회색에 덮인다. 위 테스트는 목록의 첫·마지막만 보므로
+    // 가운데가 바뀌어도 안 걸린다.
+    const ids = IndoorOverlayIds();
+    final order = ids.layersTopFirst;
+    expect(
+      order.indexOf(ids.storesFill),
+      order.indexOf(ids.nonWalkableFill) + 1,
+      reason: '매장 fill 바로 위가 아니다',
+    );
+    expect(
+      order.indexOf(ids.nonWalkableFill),
+      order.indexOf(ids.categoryHighlightFill) + 1,
+      reason: '카테고리 강조 바로 아래가 아니다',
+    );
   });
 
   test('베이스 이름은 kebab-case이고 밑줄로 시작하지 않는다', () {

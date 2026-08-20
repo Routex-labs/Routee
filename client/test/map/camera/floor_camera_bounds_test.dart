@@ -408,5 +408,32 @@ void _focusZoomTests() {
     test('기준과 같으면 그대로다', () {
       expect(focusZoomFor(currentZoom: 19.0, keepZoom: false), 19.0);
     });
+
+    // 매장 폴리곤을 실제로 잰 배율이면 "이미 더 가까우면 유지"가 반대로 해롭다.
+    // 크게 당겨 놓고 앵커 매장을 누르면 한 귀퉁이만 보인 채로 남는다.
+    test('폴리곤을 잰 배율이면 더 가까이 있어도 물러선다', () {
+      expect(
+        focusZoomFor(
+          currentZoom: 20.5,
+          keepZoom: false,
+          storeFocusZoom: 18.2,
+          storeFitsViewport: true,
+        ),
+        18.2,
+      );
+    });
+
+    test('폴리곤을 잰 배율이어도 keepZoom이 이긴다', () {
+      // 카테고리를 훑는 중이면 매장 크기와 무관하게 화면을 흔들지 않는다.
+      expect(
+        focusZoomFor(
+          currentZoom: 20.5,
+          keepZoom: true,
+          storeFocusZoom: 18.2,
+          storeFitsViewport: true,
+        ),
+        20.5,
+      );
+    });
   });
 }

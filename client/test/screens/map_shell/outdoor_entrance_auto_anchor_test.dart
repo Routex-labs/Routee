@@ -20,6 +20,8 @@ import 'package:navigation_client/repositories/place/mock_destination_repository
 import 'package:navigation_client/screens/map_shell/map_shell_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../support/entry_floor_prompt_helper.dart';
+
 /// 자동 실내 진입이 "진입한 입구"를 기준으로 실내 위치를 잡고 센서 추적까지
 /// 시작하는지에 대한 회귀 테스트.
 ///
@@ -140,6 +142,10 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
     positions.add(atEntrance());
     await tester.pump(const Duration(milliseconds: 50));
+    await drain(tester);
+    // 자동 진입은 "몇 층에 계신가요?"를 먼저 띄우고, **답을 받은 뒤에** 앵커를
+    // 찍는다. 걷지 않으면 아래 검증이 기다리는 안내가 영영 안 온다.
+    await dismissEntryFloorPrompt(tester);
     await drain(tester);
   }
 

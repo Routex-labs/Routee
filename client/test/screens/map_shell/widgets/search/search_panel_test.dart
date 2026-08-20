@@ -43,7 +43,10 @@ void main() {
       const name = '나이키 나이키키즈';
       final ranges = nameHighlightRanges(name, '나이키');
 
-      expect(ranges.map((range) => slice(name, range)).toList(), ['나이키', '나이키']);
+      expect(ranges.map((range) => slice(name, range)).toList(), [
+        '나이키',
+        '나이키',
+      ]);
     });
 
     // 의미 검색("밥 먹을 곳" → "정돈프리미엄")은 이름에 검색어가 없는 결과를
@@ -72,7 +75,9 @@ void main() {
       buildingRepository = originalBuilding;
     });
 
-    Widget buildSubject({Map<String, NodeReach>? reachByNodeId}) => MaterialApp(theme: AppTheme.light, home: Scaffold(
+    Widget buildSubject({Map<String, NodeReach>? reachByNodeId}) => MaterialApp(
+      theme: AppTheme.light,
+      home: Scaffold(
         body: SizedBox(
           height: 400,
           child: SearchPanel(
@@ -214,7 +219,9 @@ void main() {
       buildingRepository = originalBuilding;
     });
 
-    Widget buildSubject({Map<String, NodeReach>? reachByNodeId}) => MaterialApp(theme: AppTheme.light, home: Scaffold(
+    Widget buildSubject({Map<String, NodeReach>? reachByNodeId}) => MaterialApp(
+      theme: AppTheme.light,
+      home: Scaffold(
         body: SizedBox(
           height: 600,
           child: SearchPanel(
@@ -357,7 +364,9 @@ void main() {
       recentSearchesController = controller;
     }
 
-    Widget buildSubject() => MaterialApp(theme: AppTheme.light, home: Scaffold(
+    Widget buildSubject() => MaterialApp(
+      theme: AppTheme.light,
+      home: Scaffold(
         body: SizedBox(
           height: 400,
           child: SearchPanel(
@@ -419,7 +428,7 @@ void main() {
       await tester.tap(
         find.descendant(
           of: find.byKey(const Key('recent-나이키')),
-          matching: find.byIcon(Icons.close),
+          matching: find.byTooltip('나이키 삭제'),
         ),
       );
       await tester.pumpAndSettle();
@@ -466,7 +475,9 @@ void main() {
       String query, {
       bool indoor = true,
       Map<String, NodeReach>? reachByNodeId,
-    }) => MaterialApp(theme: AppTheme.light, home: Scaffold(
+    }) => MaterialApp(
+      theme: AppTheme.light,
+      home: Scaffold(
         body: SizedBox(
           height: 500,
           child: SearchPanel(
@@ -705,7 +716,9 @@ void main() {
       addTearDown(submitTick.dispose);
 
       await tester.pumpWidget(
-        MaterialApp(theme: AppTheme.light, home: Scaffold(
+        MaterialApp(
+          theme: AppTheme.light,
+          home: Scaffold(
             body: SizedBox(
               height: 500,
               child: ListenableBuilder(
@@ -765,7 +778,9 @@ void main() {
       addTearDown(submitTick.dispose);
 
       await tester.pumpWidget(
-        MaterialApp(theme: AppTheme.light, home: Scaffold(
+        MaterialApp(
+          theme: AppTheme.light,
+          home: Scaffold(
             body: SizedBox(
               height: 500,
               child: ListenableBuilder(
@@ -829,7 +844,9 @@ void main() {
       addTearDown(submitTick.dispose);
 
       await tester.pumpWidget(
-        MaterialApp(theme: AppTheme.light, home: Scaffold(
+        MaterialApp(
+          theme: AppTheme.light,
+          home: Scaffold(
             body: SizedBox(
               height: 500,
               child: ListenableBuilder(
@@ -934,7 +951,9 @@ void main() {
     Widget buildSubject(
       String query, {
       Map<String, NodeReach>? reachByNodeId,
-    }) => MaterialApp(theme: AppTheme.light, home: Scaffold(
+    }) => MaterialApp(
+      theme: AppTheme.light,
+      home: Scaffold(
         body: SizedBox(
           height: 500,
           child: SearchPanel(
@@ -1077,7 +1096,9 @@ void main() {
       );
       await pumpWhileTyping(tester);
 
-      final tiles = tester.widgetList<RoutexListCell>(find.byType(RoutexListCell)).toList();
+      final tiles = tester
+          .widgetList<RoutexListCell>(find.byType(RoutexListCell))
+          .toList();
       expect(
         (tiles.first.key as ValueKey<String>?)?.value,
         'suggestion-PO-타임-3F',
@@ -1104,7 +1125,9 @@ void main() {
     Widget buildSubject(
       String query, {
       Map<String, NodeReach>? reachByNodeId,
-    }) => MaterialApp(theme: AppTheme.light, home: Scaffold(
+    }) => MaterialApp(
+      theme: AppTheme.light,
+      home: Scaffold(
         body: SizedBox(
           height: 600,
           child: SearchPanel(
@@ -1179,7 +1202,9 @@ void main() {
       await settleAmbiguous(tester);
 
       expect(find.text('가까운 순'), findsOneWidget);
-      final tiles = tester.widgetList<RoutexListCell>(find.byType(RoutexListCell)).toList();
+      final tiles = tester
+          .widgetList<RoutexListCell>(find.byType(RoutexListCell))
+          .toList();
       expect(
         [for (final t in tiles) (t.key as ValueKey<String>?)?.value],
         [
@@ -1202,7 +1227,9 @@ void main() {
       await tester.tap(find.text('이름 맞춤 순').last);
       await tester.pumpAndSettle();
 
-      final tiles = tester.widgetList<RoutexListCell>(find.byType(RoutexListCell)).toList();
+      final tiles = tester
+          .widgetList<RoutexListCell>(find.byType(RoutexListCell))
+          .toList();
       expect(
         [for (final t in tiles) (t.key as ValueKey<String>?)?.value],
         [
@@ -1323,7 +1350,9 @@ void main() {
     Widget buildSubject(
       String query, {
       Map<String, NodeReach>? reachByNodeId,
-    }) => MaterialApp(theme: AppTheme.light, home: Scaffold(
+    }) => MaterialApp(
+      theme: AppTheme.light,
+      home: Scaffold(
         body: SizedBox(
           height: 700,
           child: SearchPanel(
@@ -1401,7 +1430,9 @@ void main() {
       );
       await settle(tester);
 
-      final tiles = tester.widgetList<RoutexListCell>(find.byType(RoutexListCell)).toList();
+      final tiles = tester
+          .widgetList<RoutexListCell>(find.byType(RoutexListCell))
+          .toList();
       // 첫 행은 서버 결과라 Key가 없는 _storeTile이다.
       expect((tiles.first.key as ValueKey<String>?)?.value, isNull);
       expect(
@@ -1524,7 +1555,9 @@ void main() {
     Widget buildSubject({
       bool indoor = true,
       Future<List<CategoryCount>>? categoryEntries,
-    }) => MaterialApp(theme: AppTheme.light, home: Scaffold(
+    }) => MaterialApp(
+      theme: AppTheme.light,
+      home: Scaffold(
         body: SizedBox(
           height: 600,
           child: SearchPanel(
@@ -1648,7 +1681,9 @@ void main() {
     Widget buildSubject({
       required ValueChanged<Building> onBuildingPicked,
       bool indoorContextActive = false,
-    }) => MaterialApp(theme: AppTheme.light, home: Scaffold(
+    }) => MaterialApp(
+      theme: AppTheme.light,
+      home: Scaffold(
         body: SizedBox(
           height: 400,
           child: SearchPanel(

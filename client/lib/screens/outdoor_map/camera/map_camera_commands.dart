@@ -109,16 +109,65 @@ Future<void> animateCameraToFitBox(
   );
 }
 
-/// 좌표열 전체가 화면에 들어오도록 맞춘다. 도보 경로와 대중교통 경로가 같은
-/// 여백 규칙을 쓰도록 뽑아 두었다 — 값이 갈리면 안내를 바꿀 때마다 경로가
-/// 화면에서 다른 크기로 잡힌다.
+/// 경로 전체를 담을 때 화면 가장자리에서 비워 두는 여백(논리 px).
+///
+/// 아래 기본값은 **하단 카드 하한**이다 — 후보가 하나인 계획 카드를 실측하면
+/// 124px이고, 그보다 높아지는 화면(자동차 후보 3줄=392, 대중교통 요약=262,
+/// 후보 시트=화면의 55%)은 부르는 쪽이 **잰 값**을 넘긴다. 위 기본값은 길찾기
+/// 플래너 실측(117px)에 여유를 얹은 값이고, 상태 표시줄 높이는 부르는 쪽이
+/// `MediaQuery.paddingOf`로 더한다 — 기기마다 다르다.
+/// 좌우는 **줌을 정하는 변**이라 좁게 잡는다. 대중교통 경로는 납작하다 —
+/// 실측 예: 가로 17 km × 세로 6 km. 세로로 긴 화면에서는 가로가 먼저 차서
+/// 줌이 거기서 정해지고, 좌우 여백을 키운 만큼 경로가 통째로 작아진다.
+/// 40이면 세로에 빈 공간이 크게 남아 "축소된 것처럼" 보였다.
+const routeFitSideInsetPx = 16.0;
+const routeFitTopInsetPx = 120.0;
+const routeFitBottomInsetPx = 180.0;
+
+/// 여백을 다 빼고도 남겨야 하는 세로 띠(논리 px). 여백 합이 화면을 넘으면
+/// MapLibre가 `화면 - 여백`(<= 0)으로 줌을 계산해 카메라가 튄다.
+const routeFitMinBandPx = 120.0;
+
+/// 경로 개요에 쓸 여백(논리 px). **화면마다 가려지는 높이가 다르다** — 하단
+/// 카드 하나뿐인 화면과 시트가 55%를 덮는 화면이 같은 여백을 쓸 수 없다.
+///
+/// 다만 규칙 자체는 여기 하나다. 인자는 "무엇이 얼마나 덮고 있나"만 말하고,
+/// 하한과 자르기는 여기서 정한다 — 값이 갈리면 안내를 바꿀 때마다 경로가
+/// 화면에서 다른 크기로 잡힌다. 검증 기준은
+/// `test/screens/outdoor_map/camera/route_fit_padding_test.dart`.
+({double left, double top, double right, double bottom}) routeFitPadding({
+  required Size viewport,
+  required double topInsetPx,
+  required double bottomInsetPx,
+}) {
+  // 잰 값이 하한보다 작아도 여기까지는 비운다. 카드가 아직 안 그려졌거나
+  // 못 잰 프레임에서 0이 들어와도 경로가 카드 뒤로 들어가지 않게 한다.
+  final wantTop = math.max(topInsetPx, routeFitTopInsetPx);
+  final wantBottom = math.max(bottomInsetPx, routeFitBottomInsetPx);
+  // 위아래를 다 빼고도 이만큼은 남긴다. 작은 폰 + 큰 글자 배율에서 실제로
+  // 넘길 수 있고, 넘기면 MapLibre가 0 이하 크기로 줌을 계산한다.
+  final roomV = math.max(0.0, viewport.height - routeFitMinBandPx);
+  final top = math.min(wantTop, roomV);
+  final bottom = math.min(wantBottom, roomV - top);
+  final side = math.min(
+    routeFitSideInsetPx,
+    math.max(0.0, (viewport.width - routeFitMinBandPx) / 2),
+  );
+  return (left: side, top: top, right: side, bottom: bottom);
+}
+
+/// 좌표열 전체가 [viewport]에 들어오도록 맞춘다. 여백 규칙은 [routeFitPadding]
+/// 하나이고, [topInsetPx]·[bottomInsetPx]로 **가려지는 높이만** 알려 준다.
 ///
 /// 점이 2개 미만이거나 경계 상자가 한 점으로 수렴하면(모든 좌표가 같음) 줌
 /// 계산이 발산하므로 아무것도 하지 않는다.
 Future<void> animateCameraToPoints(
   MapLibreMapController controller,
-  List<ll.LatLng> points,
-) async {
+  List<ll.LatLng> points, {
+  required Size viewport,
+  double topInsetPx = routeFitTopInsetPx,
+  double bottomInsetPx = routeFitBottomInsetPx,
+}) async {
   if (points.length < 2) return;
   var minLat = double.infinity;
   var maxLat = double.negativeInfinity;
@@ -131,16 +180,21 @@ Future<void> animateCameraToPoints(
     maxLng = p.longitude > maxLng ? p.longitude : maxLng;
   }
   if (maxLat - minLat < 1e-7 && maxLng - minLng < 1e-7) return;
+  final padding = routeFitPadding(
+    viewport: viewport,
+    topInsetPx: topInsetPx,
+    bottomInsetPx: bottomInsetPx,
+  );
   await controller.animateCamera(
     CameraUpdate.newLatLngBounds(
       LatLngBounds(
         southwest: LatLng(minLat, minLng),
         northeast: LatLng(maxLat, maxLng),
       ),
-      left: 40,
-      top: 110,
-      right: 40,
-      bottom: 180,
+      left: padding.left,
+      top: padding.top,
+      right: padding.right,
+      bottom: padding.bottom,
     ),
   );
 }

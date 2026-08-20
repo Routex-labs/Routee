@@ -30,6 +30,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
@@ -50,16 +52,13 @@ dependencies:
     path: ../packages/indoor_pdr_core
   pointer_interceptor: ^0.10.1+2
 
-  # 제품 UI의 semantic token과 공통 컴포넌트. 아래 SHA는 공급 저장소의 `v0.2.21`
-  # release다. tag 이름이 아니라 **전체 커밋 SHA**를 적는 이유는 tag가 나중에
-  # 옮겨질 수 있어서다 — 브랜치나 로컬 sibling 경로도 같은 이유로 쓰지 않는다.
-  # 공급 저장소가 움직이는 순간 같은 앱 커밋이 개발자마다 다른 화면을 그리고,
-  # lockfile이 그 사실을 숨긴다. ref를 올릴 때는 이 줄과 pubspec.lock을 같은
-  # 커밋에서 함께 바꾼다.
+  # 제품 UI의 semantic token과 공통 컴포넌트. 아래 SHA는 디자인시스템 PR #8의
+  # 검증된 커밋이다. 브랜치나 로컬 sibling 경로를 쓰지 않아 개발자·CI가 항상
+  # 같은 화면을 빌드하게 한다. PR #8 병합 뒤에도 이 객체 SHA는 그대로 유효하다.
   routex_design_system:
     git:
       url: https://github.com/Routex-labs/routex-design-system.git
-      ref: 1e08e6118c634040950221fad8c77184a311b34d
+      ref: 104f0fce777d9e2596b281e6a8ed8c98b3e13b77
       path: packages/routex_design_system
   url_launcher: ^6.3.2
   # 공유 링크 수신. cold start의 최초 URI와 실행 중 URI stream을 함께 준다.

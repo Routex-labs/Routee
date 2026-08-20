@@ -227,6 +227,14 @@ void main() {
     // 첫 step이 도보가 아니다 — 카카오는 첫 승차지점까지의 도보를 주지 않는다.
     expect(subwayRoute.legs.first.mode, TransitMode.subway);
     expect(subwayRoute.legs.first.stationCount, 4); // 정류장 5건 - 1
+    // 중간 정류장은 버리지 않는다 — 상세 화면이 순서대로 늘어놓는다.
+    expect(subwayRoute.legs.first.stopNames, [
+      '여의도',
+      '노량진',
+      '동작',
+      '고속터미널',
+      '신논현',
+    ]);
     expect(subwayRoute.legs.first.shortLabel, '9호선'); // "급행:" 접두사를 뗀다
     expect(subwayRoute.legs.first.routeColorHex, isNull); // 카카오는 색을 안 준다
 
@@ -234,6 +242,7 @@ void main() {
     final walk = subwayRoute.legs[1];
     expect(walk.mode, TransitMode.walk);
     expect(walk.stationCount, 0);
+    expect(walk.stopNames, isEmpty); // 걷는 구간에 정류장을 찍으면 안 된다
     expect(walk.points, hasLength(2));
     expect(walk.points.first, const LatLng(37.5045, 127.0251));
   });
@@ -253,6 +262,9 @@ void main() {
     );
 
     expect(busRoute.legs.single.shortLabel, '5623외 6대');
+    // 접었어도 원본 7대는 남아 있어야 한다 — 상세 화면이 번호 칩으로 쓴다.
+    expect(busRoute.legs.single.vehicles, hasLength(7));
+    expect(busRoute.legs.single.vehicles.last, (name: '7007-1', type: '지선'));
     // 요금 필드가 통째로 없는 경로가 실제로 온다. 0으로 채우면 "공짜"가 된다.
     expect(busRoute.fare, isNull);
   });

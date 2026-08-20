@@ -76,3 +76,60 @@ TransitLeg _walkLeg({
     endName: endName,
   );
 }
+
+/// 채워야 할 도보 한 구간. 좌표는 **소수 5자리(약 1m)로 반올림해** 담는다 —
+/// 부동소수 끝자리가 달라 같은 정류장을 두 번 부르는 일을 막고, 그래서 조회
+/// 결과를 담는 Map의 키로 그대로 쓸 수 있다(직접 만들어 조회해도 맞물린다).
+class TransitWalkGap {
+  TransitWalkGap({required LatLng from, required LatLng to})
+    : from = _snapTo1m(from),
+      to = _snapTo1m(to);
+
+  final LatLng from;
+  final LatLng to;
+
+  @override
+  bool operator ==(Object other) =>
+      other is TransitWalkGap && other.from == from && other.to == to;
+
+  @override
+  int get hashCode => Object.hash(from, to);
+}
+
+/// 후보 목록 전체에서 실제로 불러야 할 도보 구간을 **중복 없이** 뽑는다.
+/// 부르는 일은 화면이 하고, 여기서는 무엇을 부를지만 정한다.
+///
+/// 순서는 후보 순서 그대로, 한 후보 안에서는 앞 도보 → 뒤 도보다. 중복을 지운
+/// 뒤 [maxGaps]개까지만 남긴다 — 잘리는 것은 **뒤쪽 후보**이고, 잘린 구간은
+/// `fillTransitWalkLegs`에 null이 들어가 직선으로 떨어질 뿐 목록은 그대로 뜬다.
+/// TMAP 경로안내 그룹이 하루 1,000건을 공유해서 그냥 다 부르면 자동차까지 죽는다.
+///
+/// 이미 도보로 시작·끝나는 후보와 좌표가 빈 leg는 뽑지 않는다 — 불러도
+/// `fillTransitWalkLegs`가 붙이지 않으므로 호출이 통째로 낭비다.
+List<TransitWalkGap> transitWalkGaps(
+  List<TransitItinerary> itineraries, {
+  required LatLng origin,
+  required LatLng destination,
+  int maxGaps = 10,
+}) {
+  // Set 리터럴은 넣은 순서를 지킨다 — 같은 입력이면 같은 순서로 나와야 한다.
+  final gaps = <TransitWalkGap>{};
+  for (final itinerary in itineraries) {
+    if (itinerary.legs.isEmpty) continue;
+    final first = itinerary.legs.first;
+    final last = itinerary.legs.last;
+    if (!first.mode.isWalk && first.points.isNotEmpty) {
+      gaps.add(TransitWalkGap(from: origin, to: first.points.first));
+    }
+    if (!last.mode.isWalk && last.points.isNotEmpty) {
+      gaps.add(TransitWalkGap(from: last.points.last, to: destination));
+    }
+  }
+  return gaps.take(maxGaps).toList();
+}
+
+/// 소수 5자리 ≒ 1m. 이보다 가까운 두 좌표는 걸어서 같은 자리다.
+LatLng _snapTo1m(LatLng point) => LatLng(
+  (point.latitude * 1e5).round() / 1e5,
+  (point.longitude * 1e5).round() / 1e5,
+);

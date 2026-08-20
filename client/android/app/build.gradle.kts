@@ -55,4 +55,8 @@ dependencies {
     // Android 전용 RoNIN 비교 경로의 온디바이스 추론 런타임.
     // iOS/Flutter 의존성에는 포함하지 않아 실험 범위를 Android로 제한한다.
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.27.0")
+    // FusedOrientationProvider(21.1.0+). 벤더 TYPE_ROTATION_VECTOR 대신 구글이
+    // 원시 센서에서 다시 융합한 자세를 heading에만 쓴다. 실측 근거는
+    // docs/pdr/pdr-dev-integration.md "Android 방향 소스를 FOP로 옮긴 근거".
+    implementation("com.google.android.gms:play-services-location:21.3.0")
 }

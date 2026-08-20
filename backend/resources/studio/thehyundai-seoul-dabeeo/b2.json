@@ -13,6 +13,12 @@
     "map_version": "180.4",
     "credentials_persisted": false
   },
+  "non_walkable_source": {
+    "provider": "dabeeo_official_map",
+    "map_id": "MP-qe6m98422alw0347",
+    "map_version": "182.8",
+    "mode": "non_walkable_only"
+  },
   "coordinate_system": {
     "type": "dabeeo_map_units_scaled",
     "calibration_version": "dabeeo-official-v180.4",
@@ -8674,13 +8680,15 @@
       }
     }
   ],
+  "non_walkable_polygons_local_m": [],
   "manual_review_candidates": [],
   "counts": {
     "nodes": 128,
     "edges": 153,
     "transfers": 63,
     "stores": 87,
-    "polygons": 87
+    "polygons": 87,
+    "non_walkable": 0
   },
   "building_footprint_local_m": [
     {

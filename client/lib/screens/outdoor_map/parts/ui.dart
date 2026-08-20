@@ -7,7 +7,15 @@
 part of '../outdoor_map_screen.dart';
 
 extension OutdoorMapUi on OutdoorMapBodyState {
-  void _showSnack(String message) => _showSnackGuarded(message, replace: false);
+  void _showSnack(String message, {Duration? duration}) =>
+      _showSnackGuarded(message, replace: false, duration: duration);
+
+  /// **읽고 나서 할 일이 없는** 한 줄 안내가 떠 있는 시간.
+  ///
+  /// 기본 4초는 "되돌리기가 붙은 알림"의 시간이라([RoutexFeedbackTiming]) 손이
+  /// 닿을 여유까지 재 둔 값이다. 누를 것이 없는 안내를 그만큼 붙들면 하단 바를
+  /// 그 시간 내내 가린다 — 사용자는 그동안 다른 조작을 못 한다.
+  static const _briefSnackDuration = RoutexFeedbackTiming.toastVisibility;
 
   /// 지금 떠 있는 안내를 걷어내고 새 안내를 띄운다.
   ///
@@ -25,18 +33,66 @@ extension OutdoorMapUi on OutdoorMapBodyState {
   /// 된다(replace 계열은 이전 것을 걷어내고 새로 띄우므로 특히 그렇다). 시각
   /// 기억 대신 "지금 그 문구가 떠 있는가"를 기준으로 거른다 — 닫힌 뒤의 정당한
   /// 재표시는 막지 않고, 테스트의 가짜 시계와도 어긋나지 않는다.
-  void _showSnackGuarded(String message, {required bool replace}) {
+  void _showSnackGuarded(
+    String message, {
+    required bool replace,
+    Duration? duration,
+  }) {
     if (!mounted) return;
     if (_visibleSnackMessage == message) return;
     final messenger = ScaffoldMessenger.of(context);
     if (replace) messenger.hideCurrentSnackBar();
     _visibleSnackMessage = message;
     messenger
-        .showSnackBar(SnackBar(content: Text(message)))
+        .showSnackBar(
+          SnackBar(
+            content: Text(message),
+            duration: duration ?? const Duration(seconds: 4),
+            // **하단 바 위로 띄운다.** 기본 SnackBar는 화면 맨 아래에 붙어
+            // "위치 지정"·"위치 보정" 버튼을 통째로 덮는데, 이 안내들이 하필
+            // 그 버튼을 누르라고 말하는 문장이다 — 읽고 나서 누를 것을 자기가
+            // 가리고 있었다. ETA 카드가 뜨면 버튼과 함께 그만큼 더 올라간다.
+            behavior: SnackBarBehavior.floating,
+            margin: EdgeInsets.only(
+              left: RoutexSpacing.componentPadding,
+              right: RoutexSpacing.componentPadding,
+              bottom:
+                  mapShellBottomChromePx +
+                  (_hasAnyRouteVisible ? bottomBarLiftPx : 0),
+            ),
+          ),
+        )
         .closed
         .whenComplete(() {
           if (_visibleSnackMessage == message) _visibleSnackMessage = null;
         });
+  }
+
+  /// 지도 축척 막대. 카메라가 움직일 때마다 값이 바뀌므로 컨트롤러를 직접
+  /// 듣는다 — `trackCameraPosition: true`라 확대/이동마다 notify가 온다.
+  /// `onCameraIdle`만 보면 손가락을 떼기 전까지 옛 값이 남는다.
+  ///
+  /// [fallbackLatitude]는 카메라를 아직 못 읽었을 때 쓴다. 축척은 위도에 따라
+  /// 달라지지만 한 도시 안에서는 차이가 0.1%도 안 돼, 첫 프레임의 근사로 충분하다.
+  Widget _buildScaleBar(double fallbackLatitude) {
+    final controller = _mapController;
+    if (controller == null) return const SizedBox.shrink();
+    return ListenableBuilder(
+      listenable: controller,
+      builder: (_, _) {
+        final camera = controller.cameraPosition;
+        if (camera == null) return const SizedBox.shrink();
+        return MapScaleBar(
+          step: mapScaleStepFor(
+            metersPerPixel: metersPerPixelAt(
+              zoom: camera.zoom,
+              latitude: camera.target.latitude,
+            ),
+            maxWidthPx: kMapScaleBarMaxWidthPx,
+          ),
+        );
+      },
+    );
   }
 
   Widget _buildBody() {
@@ -58,6 +114,9 @@ extension OutdoorMapUi on OutdoorMapBodyState {
     final pdrActive =
         indoorNavigationDriver.currentRuntimeStatus.state !=
         PdrRuntimeState.idle;
+    final guidance = _guidanceStarted && !_showingArrivalOnly
+        ? _indoorRouteGuidance
+        : null;
     final initialCenter = position == null
         ? fallbackLocation
         : ll.LatLng(position.latitude, position.longitude);
@@ -104,6 +163,23 @@ extension OutdoorMapUi on OutdoorMapBodyState {
         else
           const ColoredBox(color: AppColors.surface),
 
+        if (guidance != null)
+          Positioned(
+            top: 0,
+            left: 12,
+            right: 12,
+            child: SafeArea(
+              bottom: false,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: indoorRouteDestination == null
+                    ? null
+                    : () => _showIndoorRouteSteps(indoorRouteDestination),
+                child: GuidanceBanner(instruction: guidance),
+              ),
+            ),
+          ),
+
         // 층 전환이 오래 걸릴 때만 지도 위 중앙에 뜨는 에스컬레이터 모티프.
         // 이전 층 도면이 그대로 보이는 위에 뜬다 — 덮개(베일)는 없다. 실기기
         // 에서 흰 베일이 캡처 플래시처럼 번쩍여 걷어냈고, 모티프는 자체 카드
@@ -132,7 +208,8 @@ extension OutdoorMapUi on OutdoorMapBodyState {
         // 실내까지 어두워지는 문제가 있었다. 지금은 세계를 덮는 outer ring +
         // 건물 footprint를 hole로 뚫은 폴리곤을 스크림 레이어로 그리고, 실내
         // 오버레이 아래에 삽입해 건물 안쪽만 밝게 스포트라이트된다.
-        // **낮은 강도로 둔다.** 예전에는 단색 노랑 알약에 같은 색 글로우까지
+
+        // GPS 배지는 **낮은 강도로 둔다.** 예전에는 단색 노랑 알약에 같은 색 글로우까지
         // 얹혀 있어, 지도 위에서 가장 시끄러운 것이 "GPS가 조금 부정확하다"였다.
         // 경로를 벗어났다는 알림([EtaCard]의 wrong-way, 빨강)보다 세면 무엇이
         // 급한지가 뒤집힌다. 연한 배경 + 같은 계열 글자로 내린다.
@@ -150,6 +227,22 @@ extension OutdoorMapUi on OutdoorMapBodyState {
               surface: RoutexBadgeSurface.onMap,
             ),
           ),
+
+        // 축척 막대는 **위치 보정·위치 지정 버튼 바로 위**다. 그 두 버튼과 같은
+        // 오른쪽 끝선(16)에 세워 한 열로 읽히게 하고, ETA 카드가 뜨면 버튼과
+        // 함께 올라간다 — 따로 두면 카드가 막대만 덮는다.
+        AnimatedPositioned(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+          right: RoutexSpacing.componentPadding,
+          bottom:
+              mapShellBottomChromePx +
+              (indoorRouteVisible ? bottomBarLiftPx : 0),
+          child: SafeArea(
+            top: false,
+            child: IgnorePointer(child: _buildScaleBar(initialCenter.latitude)),
+          ),
+        ),
 
         // 건물을 못 불러오면 층 선택기·위치 지정·실내 진입·실내 도면이 통째로
         // 사라진다. 그 이유를 화면에 남기고 재시도 경로를 준다 — 예전에는 이
@@ -238,14 +331,14 @@ extension OutdoorMapUi on OutdoorMapBodyState {
         // 실내 진입 오버레이 — 야외 지도 위 좌측 하단에 세로 층 선택기를 얹어
         // 실내 화면과 동일한 위치·디자인으로 층을 훑을 수 있게 한다.
         //
-        // **안내 중에는 접는다.** 안내가 도는 동안 층은 사용자가 고르는 것이
-        // 아니라 경로가 정한다 — 층이 바뀌는 순간 [_enqueueFloorTransition]이
-        // 도면을 갈아 끼운다. 안내 중에 남겨 두면 사용자가 고른 층과 경로가
-        // 가리키는 층이 어긋난 화면이 생기고, 그 상태를 정리할 규칙이 없다.
-        // 판정이 틀렸을 때의 출구는 안내 종료다(그러면 선택기가 다시 펴진다) —
-        // 판정기가 스스로 아니라고 본 경우는 묻지 않고 화면이 되돌린다.
+        // **"안내 시작" 카드가 뜨는 순간 접는다**([_guidancePlanned]). 카드가
+        // 뜬 뒤로 층은 사용자가 고르는 것이 아니라 경로가 정한다 — 층이 바뀌는
+        // 순간 [_enqueueFloorTransition]이 도면을 갈아 끼운다. 남겨 두면
+        // 사용자가 고른 층과 경로가 가리키는 층이 어긋난 화면이 생기고, 그
+        // 상태를 정리할 규칙이 없다. 판정이 틀렸을 때의 출구는 카드를 닫거나
+        // 안내를 끝내는 것이다(그러면 선택기가 다시 펴진다).
         if (_indoorEntered &&
-            !_guidanceActive &&
+            !_guidancePlanned &&
             _building != null &&
             _activeFloor != null &&
             _building!.floors.isNotEmpty)
@@ -305,26 +398,11 @@ extension OutdoorMapUi on OutdoorMapBodyState {
                 52,
             child: SafeArea(
               top: false,
-              child: Material(
-                color: Colors.white.withValues(alpha: 0.96),
-                elevation: 3,
-                shadowColor: Colors.black.withValues(alpha: 0.16),
-                shape: StadiumBorder(
-                  side: BorderSide(
-                    color: AppColors.indoor.withValues(alpha: 0.2),
-                  ),
-                ),
-                child: IconButton(
-                  key: const Key('debug-force-floor-transition'),
-                  tooltip: '층 전환 시뮬레이션',
-                  onPressed: _debugForceFloorTransition,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints.tightFor(
-                    width: 44,
-                    height: 44,
-                  ),
-                  icon: const Icon(Icons.escalator, size: 20),
-                ),
+              child: RoutexMapControl(
+                key: const Key('debug-force-floor-transition'),
+                label: '층 전환 시뮬레이션',
+                icon: RoutexIcons.escalator,
+                onPressed: _debugForceFloorTransition,
               ),
             ),
           ),
@@ -376,24 +454,20 @@ extension OutdoorMapUi on OutdoorMapBodyState {
             ),
           ),
 
-        // 도착 카드는 지도 한가운데다. 하단 배너와 같은 자리에 두면 도착도
-        // 걷는 중 안내와 같은 무게로 읽혀, 안내가 끝난 줄 모르고 계속 걷는다.
+        // 도착은 Runtime Kit의 전용 표면으로 바뀐다. 안내 중 배너는 아래에서
+        // 구조적으로 빠지므로 같은 자리에 있어도 진행 상태와 섞이지 않는다.
         if (_arrivedDestination case final arrived?)
-          // 카드 바깥은 그대로 지도다 — Center는 자식 밖의 탭을 잡지 않으므로
-          // 도착 뒤에도 주변을 둘러볼 수 있다.
-          Positioned.fill(
-            child: Center(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 32),
-                child: IndoorArrivalCard(
-                  key: _arrivalCardKey,
-                  destinationName: arrived.name,
-                  destinationFloor: arrived.floor,
-                  onConfirm: _confirmArrival,
-                  onConfirmPointerDown: (position) =>
-                      _etaClosePointerDown = position,
-                ),
-              ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: IndoorArrivalCard(
+              key: _arrivalCardKey,
+              destinationName: arrived.name,
+              destinationFloor: arrived.floor,
+              onConfirm: _confirmArrival,
+              onConfirmPointerDown: (position) =>
+                  _etaClosePointerDown = position,
             ),
           ),
 
@@ -406,63 +480,43 @@ extension OutdoorMapUi on OutdoorMapBodyState {
             left: 0,
             right: 0,
             bottom: 0,
-            child: SafeArea(
-              top: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                // 배너를 탭하면 경로 전체 단계 목록이 올라온다. 배너 자체는
-                // "다음 한 수"만 말하므로, 전체를 보고 싶은 사용자가 갈 곳이
-                // 여기뿐이다. 종료 버튼은 Listener가 먼저 받아 탭과 겹치지
-                // 않는다.
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () => _showIndoorRouteSteps(indoorRouteDestination),
-                  child: EtaCard(
-                    key: _etaCardKey,
-                    distanceMeters: indoorEta.distanceM,
-                    // 시간은 비용 기준 — 엘리베이터 대기·탑승 시간이 여기 들어 있다.
-                    minutes:
-                        (indoorEta.costM /
-                                indoorWalkingSpeedMetersPerSecond /
-                                60)
-                            .ceil()
-                            .clamp(1, 999),
-                    label: _indoorEtaLabel(indoorRouteDestination),
-                    instruction: _indoorRouteGuidance,
-                    // 미리 보는 동안은 계획 카드다 — 경로만 그려 두고, 따라가기는
-                    // 이 버튼을 누른 뒤에 시작한다.
-                    onStartGuidance: _indoorRoutePreview
-                        ? () => unawaited(_startIndoorGuidance())
-                        : null,
-                    onClose: _dismissIndoorRouteFromEtaCard,
-                    onClosePointerDown: (position) =>
-                        _etaClosePointerDown = position,
-                  ),
-                ),
-              ),
+            child: EtaCard(
+              key: _etaCardKey,
+              distanceMeters: indoorEta.distanceM,
+              // 시간은 비용 기준 — 엘리베이터 대기·탑승 시간이 여기 들어 있다.
+              minutes:
+                  (indoorEta.costM / indoorWalkingSpeedMetersPerSecond / 60)
+                      .ceil()
+                      .clamp(1, 999),
+              label: _indoorEtaLabel(indoorRouteDestination),
+              guidanceStarted: _guidanceStarted,
+              onStartGuidance: _guidanceStarted
+                  ? null
+                  : () => unawaited(_startCurrentGuidance()),
+              onClose: _dismissIndoorRouteFromEtaCard,
+              onClosePointerDown: (position) => _etaClosePointerDown = position,
             ),
           )
         // 대중교통 안내는 도보 ETA 카드와 **같은 자리**를 쓰고 서로를 밀어낸다.
         // 두 카드가 함께 뜨면 한 화면에서 소요 시간이 두 개가 되어, 지도에
         // 그려진 선이 어느 쪽인지 알 수 없다.
-        else if (_transitItinerary case final itinerary?)
+        //
+        // 후보 목록이 덮고 있는 동안에는 아예 안 그린다([OutdoorMapBody.transitRoutesSheetOpen]).
+        else if (_transitItinerary case final itinerary?
+            when !widget.transitRoutesSheetOpen)
           Positioned(
             left: 0,
             right: 0,
             bottom: 0,
-            child: SafeArea(
-              top: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                child: TransitSummaryCard(
-                  key: _etaCardKey,
-                  itinerary: itinerary,
-                  label: _transitLabel ?? '목적지까지',
-                  onClose: _dismissUserDestinationFromEtaCard,
-                  onClosePointerDown: (position) =>
-                      _etaClosePointerDown = position,
-                ),
-              ),
+            child: TransitSummaryCard(
+              key: _etaCardKey,
+              itinerary: itinerary,
+              label: _transitLabel ?? '목적지까지',
+              onStartGuidance: _guidanceStarted
+                  ? null
+                  : () => unawaited(_startCurrentGuidance()),
+              onClose: _dismissUserDestinationFromEtaCard,
+              onClosePointerDown: (position) => _etaClosePointerDown = position,
             ),
           )
         else if (route != null)
@@ -470,30 +524,25 @@ extension OutdoorMapUi on OutdoorMapBodyState {
             left: 0,
             right: 0,
             bottom: 0,
-            child: SafeArea(
-              top: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                child: EtaCard(
-                  key: _etaCardKey,
-                  distanceMeters: _outdoorEta(route).distanceM,
-                  minutes: _outdoorEta(route).minutes,
-                  label: userDestination != null
-                      ? (_userDestinationLabel ?? '목적지까지')
-                      : '건물 입구까지',
-                  onClose: userDestination != null
-                      ? _dismissUserDestinationFromEtaCard
-                      : null,
-                  // 자동차 계획 상태에서만 붙는다. 누르면 카메라가 현재 위치로
-                  // 내려가고 버튼은 사라진다([startFollowingCurrentLocation]).
-                  onStartGuidance: _offerStartGuidance
-                      ? () => unawaited(startFollowingCurrentLocation())
-                      : null,
-                  onClosePointerDown: userDestination != null
-                      ? (position) => _etaClosePointerDown = position
-                      : null,
-                ),
-              ),
+            child: EtaCard(
+              key: _etaCardKey,
+              distanceMeters: _outdoorEta(route).distanceM,
+              minutes: _outdoorEta(route).minutes,
+              label: userDestination != null
+                  ? (_userDestinationLabel ?? '목적지까지')
+                  : '건물 입구까지',
+              guidanceStarted: _guidanceStarted,
+              routeOptions: _directionsRouteExtras(context, route),
+              extraMetric: _directionsFareMetric(route),
+              onClose: userDestination != null
+                  ? _dismissUserDestinationFromEtaCard
+                  : null,
+              onStartGuidance: userDestination != null && !_guidanceStarted
+                  ? () => unawaited(_startCurrentGuidance())
+                  : null,
+              onClosePointerDown: userDestination != null
+                  ? (position) => _etaClosePointerDown = position
+                  : null,
             ),
           ),
 
@@ -512,5 +561,53 @@ extension OutdoorMapUi on OutdoorMapBodyState {
         ),
       ],
     );
+  }
+
+  /// 후보 패널과 상세보기 버튼을 묶어 [EtaCard.routeOptions]에 얹는다.
+  /// 디자인시스템 카드에 상세보기 전용 슬롯이 없어 우리가 직접 붙인다.
+  Widget? _directionsRouteExtras(BuildContext context, DirectionsRoute route) {
+    final panel = _directionsRouteOptions.length > 1
+        ? DirectionsRouteOptionsPanel(
+            options: _directionsRouteOptions,
+            selectedIndex: _selectedDirectionsOptionIndex,
+            onSelect: (index) => unawaited(selectDirectionsOption(index)),
+          )
+        : null;
+    final detailButton = route.steps.isEmpty
+        ? null
+        : Align(
+            alignment: AlignmentDirectional.centerEnd,
+            child: TextButton(
+              onPressed: () => showDirectionsRouteDetailSheet(
+                context,
+                route: route,
+                destinationLabel: _userDestinationLabel ?? '목적지',
+              ),
+              child: const Text('상세보기'),
+            ),
+          );
+    if (panel == null && detailButton == null) return null;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [?panel, ?detailButton],
+    );
+  }
+
+  /// 통행료가 있으면(0원 포함) 그것을, 없으면 택시비를 세 번째 지표로
+  /// 쓴다. 도보 경로는 둘 다 null이라 아무것도 안 붙는다.
+  RoutexTripMetric? _directionsFareMetric(DirectionsRoute route) {
+    final toll = route.tollFareWon;
+    if (toll != null) {
+      return RoutexTripMetric(
+        value: toll == 0 ? '무료' : formatTransitFare(toll),
+        label: '통행료',
+      );
+    }
+    final taxi = route.taxiFareWon;
+    if (taxi != null) {
+      return RoutexTripMetric(value: formatTransitFare(taxi), label: '택시비');
+    }
+    return null;
   }
 }

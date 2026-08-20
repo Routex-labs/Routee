@@ -51,7 +51,9 @@ void main() {
   /// 다시 pump하면 State가 재사용돼, 검색창이 열린 채로 다음 진입점을 열게
   /// 된다 — 그러면 상단 바에 길찾기 버튼이 없다.
   Future<void> resetShell(WidgetTester tester) async {
-    await tester.pumpWidget(MaterialApp(theme: AppTheme.light, home: const SizedBox()));
+    await tester.pumpWidget(
+      MaterialApp(theme: AppTheme.light, home: const SizedBox()),
+    );
     await tester.pump();
   }
 
@@ -93,7 +95,9 @@ void main() {
     required String name,
   }) async {
     await resetShell(tester);
-    await tester.pumpWidget(MaterialApp(theme: AppTheme.light, home: const MapShellScreen()));
+    await tester.pumpWidget(
+      MaterialApp(theme: AppTheme.light, home: const MapShellScreen()),
+    );
     await drain(tester);
     await tester.enterText(find.byType(TextField).first, query);
     await tester.pump();
@@ -111,16 +115,15 @@ void main() {
     required String name,
   }) async {
     await resetShell(tester);
-    await tester.pumpWidget(MaterialApp(theme: AppTheme.light, home: const MapShellScreen()));
+    await tester.pumpWidget(
+      MaterialApp(theme: AppTheme.light, home: const MapShellScreen()),
+    );
     await drain(tester);
     await tester.tap(find.byTooltip('길찾기'));
     await drain(tester);
     await tester.enterText(find.byType(TextField).last, query);
     await drain(tester);
-    return find
-        .descendant(of: find.byType(ListTile), matching: find.text(name))
-        .evaluate()
-        .isNotEmpty;
+    return find.text(name, findRichText: true).evaluate().isNotEmpty;
   }
 
   testWidgets('건물 안 매장은 두 진입점 모두에서 찾아진다', (WidgetTester tester) async {

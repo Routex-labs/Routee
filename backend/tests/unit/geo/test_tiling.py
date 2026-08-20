@@ -207,6 +207,137 @@ def test_category가_없는_매장도_예외없이_MVT로_인코딩된다():
     assert properties["s2"]["subcategory"] == "여성복"
 
 
+def _void(shape_id: str, x: float, y: float, kind: str = "void") -> dict:
+    return {
+        "id": shape_id,
+        "kind": kind,
+        "polygon_local_m": [
+            {"x": x, "y": y},
+            {"x": x + 0.1, "y": y},
+            {"x": x + 0.1, "y": y + 0.1},
+            {"x": x, "y": y + 0.1},
+        ],
+    }
+
+
+def _non_walkable_layer(shapes, bounds=None) -> dict:
+    layers = build_floor_tile_layers(
+        _building(),
+        stores=[],
+        pois=[],
+        transform=IDENTITY_TRANSFORM,
+        bounds=bounds or tile_bounds(0, 0, 0),
+        non_walkable_local_m=shapes,
+    )
+    return next(layer for layer in layers if layer["name"] == "non_walkable")
+
+
+# 못 걷는 면은 매장(stores)이 아니라 전용 레이어로 나가야 한다. 같은 레이어에
+# 실으면 카테고리 강조 필터·탭 판정이 회색 도형까지 집어간다.
+def test_못_걷는_면은_전용_레이어로_나간다():
+    layer = _non_walkable_layer([_void("OB-1", 0.1, 0.1)])
+
+    feature = layer["features"][0]
+    assert feature["geometry"]["type"] == "Polygon"
+    # 매장 폴리곤과 같은 변환을 타야 도형이 안 밀린다(lng=x+126, lat=y+37).
+    assert feature["geometry"]["coordinates"][0][0] == [126.1, 37.1]
+    # 링은 닫혀 있어야 한다.
+    assert feature["geometry"]["coordinates"][0][0] == feature["geometry"]["coordinates"][0][-1]
+
+
+# 클라이언트가 색을 가를 수 있게 kind를 싣는다. 반대로 매장 식별자(id/name/
+# category)는 실으면 안 된다 — 탭 판정이 properties["id"]로 매장을 되찾는다.
+def test_못_걷는_면_feature에는_kind만_실린다():
+    layer = _non_walkable_layer([_void("OB-1", 0.1, 0.1, kind="pillar")])
+
+    assert layer["features"][0]["properties"] == {"kind": "pillar"}
+
+
+# 도형이 하나도 없는 층(B2)에서도 레이어 자체는 나가야 한다. 층마다 레이어
+# 유무가 갈리면 클라이언트 sourceLayer 배선이 그 층에서만 달라진다.
+@pytest.mark.parametrize("shapes", [None, []])
+def test_도형이_없는_층에도_빈_레이어를_낸다(shapes):
+    assert _non_walkable_layer(shapes)["features"] == []
+
+
+# 거르는 기준은 매장 폴리곤과 같은 bbox 교차다.
+def test_타일_밖의_못_걷는_면은_제외된다():
+    narrow_bounds = TileBounds(west=126.0, south=37.0, east=126.5, north=37.5)
+
+    layer = _non_walkable_layer([_void("near", 0.1, 0.1), _void("far", 1000.0, 1000.0)], bounds=narrow_bounds)
+
+    assert len(layer["features"]) == 1
+
+
+# 못 걷는 면은 **stores 위, store_labels 아래**여야 한다. 목록 순서가 곧
+# 클라이언트 쌓임 순서라, stores 아래로 내려가면 지하 주차칸 폴리곤이 기둥
+# 면적의 40%를 가린다(실측: docs/client/kakao-map-indoor-observation.md 3절).
+# 매장이 덮일 걱정은 임포터의 중심점 규칙이 받는다.
+def test_레이어_순서가_stores_위_store_labels_아래다():
+    layers = build_floor_tile_layers(
+        _building(),
+        stores=[_store_with_category("s1", "패션", "여성복")],
+        pois=[],
+        transform=IDENTITY_TRANSFORM,
+        bounds=tile_bounds(0, 0, 0),
+        non_walkable_local_m=[_void("OB-1", 0.1, 0.1)],
+    )
+
+    names = [layer["name"] for layer in layers]
+    assert names == ["footprint", "stores", "non_walkable", "store_labels", "pois"]
+
+
+# 지난 실패가 "데이터는 갔는데 화면 픽셀이 0"이었으므로, MVT 바이트 왕복까지
+# 살아남는지 단언한다.
+def test_못_걷는_면이_MVT_바이트까지_살아남는다():
+    bounds = tile_bounds(0, 0, 0)
+    layers = build_floor_tile_layers(
+        _building(),
+        stores=[],
+        pois=[],
+        transform=IDENTITY_TRANSFORM,
+        bounds=bounds,
+        non_walkable_local_m=[_void("OB-1", 0.1, 0.1), _void("OB-2", 0.3, 0.3, kind="pillar")],
+    )
+
+    decoded = mapbox_vector_tile.decode(
+        mapbox_vector_tile.encode(
+            layers,
+            default_options={"quantize_bounds": (bounds.west, bounds.south, bounds.east, bounds.north)},
+        )
+    )
+
+    features = decoded["non_walkable"]["features"]
+    assert len(features) == 2
+    assert {feature["properties"]["kind"] for feature in features} == {"void", "pillar"}
+
+
+# 못 걷는 면을 넣어도 기존 레이어의 feature는 하나도 달라지면 안 된다.
+def test_못_걷는_면은_기존_레이어를_바꾸지_않는다():
+    stores = [_store_with_category("s1", "패션", "여성복")]
+    poi = Poi(id="poi-1", floor_id="f1", type="elevator", name="EV1", x_m=5.0, y_m=5.0)
+    without = build_floor_tile_layers(
+        _building(),
+        stores=stores,
+        pois=[poi],
+        transform=IDENTITY_TRANSFORM,
+        bounds=tile_bounds(0, 0, 0),
+    )
+    with_shapes = build_floor_tile_layers(
+        _building(),
+        stores=stores,
+        pois=[poi],
+        transform=IDENTITY_TRANSFORM,
+        bounds=tile_bounds(0, 0, 0),
+        non_walkable_local_m=[_void("OB-1", 0.1, 0.1)],
+    )
+
+    def others(layers: list[dict]) -> dict:
+        return {layer["name"]: layer["features"] for layer in layers if layer["name"] != "non_walkable"}
+
+    assert others(with_shapes) == others(without)
+
+
 # POI 좌표도 동일한 변환을 거치는지 확인한다.
 def test_poi도_wgs84로_변환된다():
     poi = Poi(

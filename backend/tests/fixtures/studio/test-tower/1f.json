@@ -217,10 +217,35 @@
       "bidirectional": true
     }
   ],
+  "non_walkable_polygons_local_m": [
+    {
+      "id": "OB-TEST-VOID",
+      "kind": "void",
+      "polygon_local_m": [
+        {
+          "x": 40.0,
+          "y": 30.0
+        },
+        {
+          "x": 60.0,
+          "y": 30.0
+        },
+        {
+          "x": 60.0,
+          "y": 50.0
+        },
+        {
+          "x": 40.0,
+          "y": 50.0
+        }
+      ]
+    }
+  ],
   "manual_review_candidates": [],
   "counts": {
     "nodes": 8,
-    "edges": 7
+    "edges": 7,
+    "non_walkable": 1
   },
   "building_footprint_local_m": [
     {

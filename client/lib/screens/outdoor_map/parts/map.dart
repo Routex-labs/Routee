@@ -77,8 +77,8 @@ extension OutdoorMapMap on OutdoorMapBodyState {
     await registerCurrentLocationLayers(controller);
     await registerDestinationLayer(controller);
 
-    // 출구 핀 → 선택 매장 핀 순. 둘이 겹치면 지금 고른 것이 위여야 한다.
-    // PDR 마커보다 아래·경로선보다 위다(각 함수 doc 참고).
+    // 출구 핀 → 고른 매장 칠 순. PDR 마커보다 아래·경로선보다 위다
+    // (각 함수 doc 참고).
     await registerGateLayers(controller);
     await registerHighlightLayers(controller);
 
@@ -121,7 +121,7 @@ extension OutdoorMapMap on OutdoorMapBodyState {
     if (_pendingCenterOnPosition &&
         _position != null &&
         _outdoorGpsVisible &&
-        !_storeFocusOwnsCamera) {
+        !_initialCameraClaimed) {
       _pendingCenterOnPosition = false;
       // 첫 좌표 센터링은 여기서 끝났다. 표시해 두지 않으면 다음 좌표가 올 때
       // [_handlePosition]의 갈래가 한 번 더 옮겨 화면이 두 번 튄다.
@@ -315,10 +315,6 @@ extension OutdoorMapMap on OutdoorMapBodyState {
     if (!mounted) return;
     final controller = _mapController;
     if (controller == null) return;
-    // 핀은 **그려진 라벨 좌표**에 맞추는데(그 함수 doc), 카메라가 움직이는
-    // 동안에는 목적지의 라벨이 아직 안 그려져 있어 근사로 떨어진다. 멈춘
-    // 지금이 정확한 좌표를 읽을 수 있는 첫 시점이다.
-    _cameraSettled = true;
     unawaited(_syncHighlightLayer());
     unawaited(_syncGateLayer());
     // 마지막 안전망. 크로스페이드가 도는 중이 아닐 때만(은퇴 목록이 비었을 때)
@@ -384,7 +380,7 @@ extension OutdoorMapMap on OutdoorMapBodyState {
     );
   }
 
-  /// 길찾기 "지도에서 선택" 중 매장이 아닌 곳을 눌렀을 때. 넘겼으면 true.
+  /// 출발·도착 행 편집 중 매장이 아닌 곳을 눌렀을 때. 넘겼으면 true.
   /// 스냅 규칙은 [_onMapPressedForPdr]와 같고, 노드까지 확정해 넘긴다.
   ///
   /// 통로에서 너무 먼 탭은 **false로 흘려보낸다** — 야외에서 그 탭은 대개 "나가겠다"

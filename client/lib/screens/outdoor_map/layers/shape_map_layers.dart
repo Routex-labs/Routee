@@ -1,17 +1,17 @@
-/// 건물 fill·dim scrim·층 외곽선(링)과 선택 매장·출구 핀(점)의 소스·레이어.
+/// 건물 fill·dim scrim·층 외곽선(링)과 출구 핀(점)의 소스·레이어.
 ///
 /// 전부 "링 또는 점 몇 개를 소스에 쓴다"가 전부이고, **무엇을 쓸지는 화면이
 /// 정한다.**
 ///
 /// 레이어 속성은 [indoor_overlay_layers.dart]가 소유한다(전체 교체 규칙이 거기 있다).
-/// 핀 두 종의 도형은 [place_pin.dart]가 굽는다.
+/// 출구 핀의 도형은 [place_pin.dart]가 굽는다.
 library;
 
 import 'package:latlong2/latlong.dart' as ll;
 import 'package:maplibre_gl/maplibre_gl.dart';
 
 import '../../../map/geojson.dart';
-import '../../../map/icon/place_pin.dart';
+import '../../../map/style/palette.dart';
 import '../entry/indoor_entry_zoom.dart';
 import 'indoor_overlay_layers.dart';
 
@@ -29,20 +29,11 @@ const kOutdoorDimScrimFillLayerId = 'outdoor-dim-scrim-fill';
 const kOutdoorFloorOutlineSourceId = 'outdoor-floor-outline';
 const kOutdoorFloorOutlineLayerId = 'outdoor-floor-outline-line';
 
-/// 실내 오버레이에서 매장을 탭했을 때 그 매장 하나에 **파란 핀을 세우는** 전용
-/// 소스·레이어.
-///
-/// **예전에는 폴리곤을 파랑 35%로 칠했다.** 그 방식의 문제가 셋이었다 —
-/// 매장 이름이 배경으로 밀리고, 폴리곤 없는 시설(점만 있는 화장실 등)에서는
-/// 아무 일도 일어나지 않고, 한 폴리곤을 여러 매장이 나눠 쓰는 자리에서 어느
-/// 매장을 골랐는지 칸으로는 말할 수 없었다. 핀은 점 하나만 있으면 되므로 셋이
-/// 함께 사라진다. 근거는 `docs/client/kakao-map-indoor-observation.md` S절.
+/// 실내 오버레이에서 고른 매장 하나만 칠하고 테두리를 두르는 전용 소스·레이어.
+/// 색은 [mapSelectionFill]·[mapSelectionLine] 하나씩만 쓴다.
 const kOutdoorHighlightSourceId = 'outdoor-highlight';
-const _highlightPinLayerId = 'outdoor-highlight-pin';
-
-/// 선택 매장 핀 비트맵의 addImage 등록 키. 디자인을 바꾸면 버전을 올린다 —
-/// 웹 addImage는 같은 이름이 이미 있으면 새 비트맵을 버린다.
-const _highlightPinImageName = 'outdoor-selected-store-pin-v1';
+const _highlightFillLayerId = 'outdoor-highlight-fill';
+const _highlightLineLayerId = 'outdoor-highlight-line';
 
 /// 출구 핀 소스·레이어. 매장 핀과 **소스를 나눈다** — 같은 소스에 넣으면
 /// 아이콘을 고르는 표현식이 필요해지는데, 출구 핀은 방위마다 비트맵이 달라
@@ -53,15 +44,7 @@ const _gatePinLayerId = 'outdoor-gate-pin';
 /// 출구 핀 비트맵 등록 키의 접두사. 뒤에 방위 글자가 붙는다.
 const kGatePinImagePrefix = 'outdoor-gate-pin-v1-';
 
-/// 선택 매장 핀의 iconSize zoom 보간 구간(z16 → z20).
-///
-/// **도착 핀(0.18/0.38)과 같은 크기다.** 화면에 하나뿐이고 "지금 이걸 골랐다"를
-/// 말하는 자리라 작으면 아무 말도 못 한다. 처음엔 0.13/0.28로 뒀다가 실기기에서
-/// 매장 이름보다도 작게 보여 올렸다.
-const _selectedPinIconSizeZ16 = 0.18;
-const _selectedPinIconSizeZ20 = 0.38;
-
-/// 출구 핀은 **한 층에 다섯이라** 선택 핀보다 작다. 같은 크기로 두면 1F 도면이
+/// 출구 핀은 **한 층에 다섯이라** 작게 둔다. 크게 두면 1F 도면이
 /// 핀 다섯 개로 덮인다.
 const _gatePinIconSizeZ16 = 0.12;
 const _gatePinIconSizeZ20 = 0.26;
@@ -114,9 +97,7 @@ Future<void> registerBuildingAndScrimLayers(
 /// 지오메트리를 갖고(그 외에는 빈 소스), 진입 상태에서만 보이므로 진입 전
 /// 램프가 쓰일 일이 없다. 덕분에 상태가 바뀔 때 setLayerProperties를 다시
 /// 부를 필요가 없다(전체 교체 규칙에 걸릴 여지도 사라진다).
-Future<void> registerFloorOutlineLayer(
-  MapLibreMapController controller,
-) async {
+Future<void> registerFloorOutlineLayer(MapLibreMapController controller) async {
   await controller.addSource(
     kOutdoorFloorOutlineSourceId,
     GeojsonSourceProperties(data: emptyGeoJsonCollection()),
@@ -129,38 +110,10 @@ Future<void> registerFloorOutlineLayer(
   );
 }
 
-/// 선택 매장 핀의 비트맵·소스·레이어를 등록한다.
-///
-/// PDR 마커보다 아래·경로선보다 위에 두고, 실내 오버레이 매장 fill이 나중에
-/// `belowLayerId`로 이 아래에 삽입되어 핀이 도면 위에 확실히 얹히도록 순서를
-/// 잡는다.
-Future<void> registerHighlightLayers(MapLibreMapController controller) async {
-  await controller.addImage(
-    _highlightPinImageName,
-    await renderSelectedStorePinIcon(),
-  );
-  await controller.addSource(
-    kOutdoorHighlightSourceId,
-    GeojsonSourceProperties(data: emptyGeoJsonCollection()),
-  );
-  await controller.addSymbolLayer(
-    kOutdoorHighlightSourceId,
-    _highlightPinLayerId,
-    _placePinProps(
-      _highlightPinImageName,
-      sizeZ16: _selectedPinIconSizeZ16,
-      sizeZ20: _selectedPinIconSizeZ20,
-    ),
-    enableInteraction: false,
-  );
-}
-
 /// 출구 핀 소스·레이어를 등록한다. 비트맵은 방위를 알아야 구울 수 있으므로
 /// 여기서 굽지 않는다 — 층 도면이 로드된 뒤 화면이 [kGatePinImagePrefix]로
 /// 등록한다.
 ///
-/// **선택 핀보다 먼저** 불러야 한다. 출구와 선택 매장이 겹칠 때 지금 고른 것이
-/// 위에 와야 한다.
 Future<void> registerGateLayers(MapLibreMapController controller) async {
   await controller.addSource(
     kOutdoorGateSourceId,
@@ -174,6 +127,41 @@ Future<void> registerGateLayers(MapLibreMapController controller) async {
       ['get', 'icon'],
       sizeZ16: _gatePinIconSizeZ16,
       sizeZ20: _gatePinIconSizeZ20,
+    ),
+    enableInteraction: false,
+  );
+}
+
+/// 고른 매장 하나만 칠하는 소스·레이어를 등록한다.
+///
+/// **PDR 마커보다 아래·경로선보다 위다.** 실내 오버레이의 매장 fill은 나중에
+/// `belowLayerId`로 이 아래에 삽입되므로, 칠이 도면 위에 확실히 덮인다.
+///
+/// 라벨 아이콘의 선택 색과 **둘 다 쓴다.** 아이콘은 "이거 하나"를, 이 면은
+/// "여기까지"를 말한다 — 색을 나눈 이유는 [mapSelectionFill].
+Future<void> registerHighlightLayers(MapLibreMapController controller) async {
+  await controller.addSource(
+    kOutdoorHighlightSourceId,
+    GeojsonSourceProperties(data: emptyGeoJsonCollection()),
+  );
+  await controller.addFillLayer(
+    kOutdoorHighlightSourceId,
+    _highlightFillLayerId,
+    const FillLayerProperties(
+      fillColor: mapSelectionFill,
+      fillOpacity: mapSelectionFillOpacity,
+    ),
+    enableInteraction: false,
+  );
+  await controller.addLineLayer(
+    kOutdoorHighlightSourceId,
+    _highlightLineLayerId,
+    const LineLayerProperties(
+      lineColor: mapSelectionLine,
+      // 면을 옅게 둔 만큼 경계는 이 선이 만든다. 1.2px는 옅은 칠 위에서
+      // 있는지 없는지 알 수 없던 굵기다.
+      lineWidth: 2,
+      lineJoin: 'round',
     ),
     enableInteraction: false,
   );
@@ -203,27 +191,6 @@ SymbolLayerProperties _placePinProps(
   iconAllowOverlap: true,
   iconIgnorePlacement: true,
 );
-
-/// 선택 핀의 크기를 [scale]배로 다시 준다(1.0이면 원래 크기).
-///
-/// **크기는 layout 속성이라 MapLibre의 transition이 안 걸린다.** 그래서 화면이
-/// 프레임마다 이 함수를 불러 손으로 보간한다 — 근거는 호출부
-/// (`parts/indoor.dart`의 선택 확대 애니메이션).
-Future<void> setSelectedPinScale(
-  MapLibreMapController controller,
-  double scale,
-) async {
-  try {
-    await controller.setLayerProperties(
-      _highlightPinLayerId,
-      _placePinProps(
-        _highlightPinImageName,
-        sizeZ16: _selectedPinIconSizeZ16 * scale,
-        sizeZ20: _selectedPinIconSizeZ20 * scale,
-      ),
-    );
-  } catch (_) {}
-}
 
 /// 점 여러 개를 **속성과 함께** 넣는다. 빈 목록이면 소스를 비운다.
 ///
@@ -267,7 +234,9 @@ Future<void> syncPolygonSource(
   }
   await controller.setGeoJsonSource(
     sourceId,
-    geoJsonCollection([_polygonFeature([closedRing(ring)])]),
+    geoJsonCollection([
+      _polygonFeature([closedRing(ring)]),
+    ]),
   );
 }
 

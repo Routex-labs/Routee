@@ -286,7 +286,7 @@ text`는 한글을 못 보내지만 검색이 로마자를 한글로 맞춰 주�
 | 출발↔도착 맞바꾸기(⇅)가 안 눌림 | **가설 단계.** `_canSwapRouteEndpoints`가 거짓이면 버튼이 비활성이 되는데, 야외에서 실내 출발지가 비워지고 `_reachByNodeId`도 없으면 그 상태가 된다. 현장에서 "버튼이 흐린지"만 보면 확정된다 |
 | 안내 시작 시 위치가 집으로 순간이동 | **설계된 동작**으로 결론. 위 함정 참고. 건물 안에서도 일어나면 별개 버그다 |
 | 마커 vs 층 전환 덮개 크기 | 현장 항목 08 |
-| 레이어 등록 순서 보장 | 호출 순서 + 주석뿐. `MapLibreMapController`를 흉내 내는 테스트 하네스가 없어 테스트로 못 묶었다. 리팩터 전에도 같은 방식이라 **새로 생긴 위험은 아니다** |
+| 레이어 등록 순서 보장 | `MapLibreMapController`를 흉내 내는 테스트 하네스가 없어 **등록 호출 순서 자체는** 여전히 주석뿐이다. 다만 화면이 깨지는 자리 하나(못 걷는 면이 매장 fill 위·카테고리 강조 아래)는 `indoor_overlay_ids_test.dart`가 목록 순서로 못 박았다 — 근거는 [카카오맵 실내 도면 관찰](client/kakao-map-indoor-observation.md) 3절 |
 | GPS 스트림 재시작이 잦다 | 폰 진단 칩에서 3분 만에 `재시작2`가 찍혔다. **부분적으로 설명됐다** — 테스트를 쓰다 보니 벙어리 감시(12초)가 백오프 초기값(2초)보다 길어서, 스트림이 조용하면 감시 쪽이 재연결 주기를 정한다(`gps_session_test.dart`). 즉 "스트림이 죽는다"가 아니라 "좌표가 12초 넘게 안 온다"일 수 있다. **남은 질문은 왜 안 오는가**이고 그건 현장에서 봐야 한다 |
 
 ## 검증 명령 (CI와 같은 것)
@@ -294,7 +294,7 @@ text`는 한글을 못 보내지만 검색이 로마자를 한글로 맞춰 주�
 ```powershell
 cd client
 flutter analyze                                            # 0건이어야 한다
-flutter test test/                                         # 1,454개
+flutter test test/                                         # 1,560개
 flutter test integration_test/app_test.dart -d windows     # 부팅 테스트(CI는 linux)
 flutter test integration_test/pdr_device_smoke_test.dart -d windows
 ```

@@ -54,7 +54,7 @@ _TILE_CACHE = BoundedTileCache(
 #   재시드는 DB 파일만 바꿀 뿐 리로드를 트리거하지 않는다. 그대로 두면 서버가
 #   시드 이전 타일을 계속 내보낸다.
 #
-#   타일이 그리는 것은 stores·POI·footprint(+geo transform)다. 반면
+#   타일이 그리는 것은 stores·POI·footprint·못 걷는 면(+geo transform)다. 반면
 #   app/graph/revision.py의 graph_revision(nodes, edges)은 길찾기 그래프의
 #   노드·간선만 해싱하므로, 매장 이름/폴리곤 편집 같은 "타일에는 보이지만
 #   그래프에는 없는" 변경을 잡지 못한다. 그래서 타일의 revision으로는 그래프
@@ -192,6 +192,7 @@ def _render_tile_bytes(
         transform=transform,
         bounds=bounds,
         footprint_local_m=floor.footprint_local_m,
+        non_walkable_local_m=floor.non_walkable_polygons_local_m,
         store_label_memo=store_label_memo,
     )
 

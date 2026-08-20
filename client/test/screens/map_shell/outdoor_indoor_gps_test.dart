@@ -10,8 +10,11 @@ import 'package:navigation_client/repositories/place/destination_repository.dart
 import 'package:navigation_client/repositories/building/mock_building_repository.dart';
 import 'package:navigation_client/repositories/place/mock_destination_repository.dart';
 import 'package:navigation_client/screens/map_shell/map_shell_screen.dart';
+import 'package:navigation_client/screens/map_shell/widgets/chrome/map_bottom_bar.dart';
 import 'package:navigation_client/screens/outdoor_map/widgets/floor_selector.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../../support/entry_floor_prompt_helper.dart';
 
 /// 건물 안에서는 GPS를 **화면에 쓰지 않는다**는 규칙에 대한 회귀 테스트.
 ///
@@ -188,6 +191,9 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
     await drain(tester);
     expect(find.byType(FloorSelector), findsOneWidget);
+    // 자동 진입은 "몇 층에 계신가요?"를 먼저 띄운다. 그 화면이 지도를 덮으므로
+    // 아래 하단 바 탭을 시험하려면 먼저 걷어야 한다.
+    await dismissEntryFloorPrompt(tester);
 
     // 자동 진입이 띄운 '건물 감지 중...' 스낵바가 하단 바를 덮고 있으므로,
     // 사라질 때까지(기본 4초 + 퇴장 애니메이션) 프레임을 진행한 뒤에 누른다.
@@ -202,7 +208,15 @@ void main() {
     await tester.tap(find.byIcon(Icons.my_location));
     await tester.pump();
 
-    expect(find.textContaining('아직 현재 위치가 없습니다'), findsOneWidget);
+    // **문장이 아니라 버튼이 말한다.** 눌러야 할 버튼을 말로 가리키는 안내는
+    // 그 버튼을 가리면서 떴다 — 지금은 "위치 지정"이 잠깐 깜빡인다.
+    expect(
+      tester
+          .widget<MapBottomBar>(find.byType(MapBottomBar))
+          .attentionOnPlaceLocation,
+      isTrue,
+    );
+    // GPS 갈래를 탔다면 플러그인 채널이 없어 이 문구가 떴을 것이다.
     expect(find.textContaining('위치를 다시 확인하지 못했습니다'), findsNothing);
   });
 }

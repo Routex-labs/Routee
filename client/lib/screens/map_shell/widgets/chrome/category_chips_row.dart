@@ -12,8 +12,8 @@ import '../../../../map/style/category_map_filter.dart';
 /// pill → 카테고리 목록 시트 → 매장 목록 시트로 두 단계였음).
 ///
 /// 카테고리 enumeration은 건물 전 층의 `stores[].category`를 unique하게 뽑아
-/// 사용자에게 보이는 label 기준 가나다 순으로 정렬한다. HttpBuildingRepository가 층별 응답을
-/// 캐시하므로 첫 로드 이후엔 즉시.
+/// 고정 순서(`domain/category/category_label_order.dart`)로 늘어놓는다.
+/// HttpBuildingRepository가 층별 응답을 캐시하므로 첫 로드 이후엔 즉시.
 class CategoryChipsRow extends StatelessWidget {
   const CategoryChipsRow({
     super.key,

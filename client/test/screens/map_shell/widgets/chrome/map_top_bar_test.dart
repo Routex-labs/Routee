@@ -1,14 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:navigation_client/theme/app_theme.dart';
+import 'package:navigation_client/models/route/route_plan_mode.dart';
 
 import 'package:navigation_client/screens/map_shell/widgets/chrome/map_top_bar.dart';
 
 /// 상단 바의 **두 얼굴**을 고정하는 테스트.
 ///
-/// 평소에는 검색창 한 줄이고, 길찾기 중에는 출발/도착 두 칸이다. 한때 길찾기는
-/// 전체 화면이었고 이 바에는 값만 적힌 요약 행이 떴는데, 그러면 목적지를 고치려고
-/// 누른 자리와 실제로 치는 자리가 서로 다른 화면에 있었다.
+/// 평소에는 검색창 한 줄이고, 길찾기 중에는 Runtime Kit 플래너다. 플래너의 한
+/// 위치를 고칠 때만 그 아래에 실제 입력 줄이 열리고, 확정 뒤에는 다시 플래너의
+/// 출발·도착 요약으로 돌아간다.
 void main() {
   ({
     TextEditingController search,
@@ -33,13 +34,15 @@ void main() {
     );
   }
 
-  testWidgets('길찾기 중에는 출발/도착 두 칸을 그 자리에서 친다', (tester) async {
+  testWidgets('길찾기 중에는 기존 플래너와 활성 입력 한 줄을 쓴다', (tester) async {
     final c = makeControllers(tester);
     c.destination.text = '다이슨';
     final events = <String>[];
 
     await tester.pumpWidget(
-      MaterialApp(theme: AppTheme.light, home: Scaffold(
+      MaterialApp(
+        theme: AppTheme.light,
+        home: Scaffold(
           body: MapTopBar(
             onMenuTap: () {},
             controller: c.search,
@@ -50,6 +53,7 @@ void main() {
             onCancelSearch: () {},
             onDirectionsTap: () => events.add('directions'),
             routeMode: true,
+            routeEditingField: RoutePlanField.destination,
             originController: c.origin,
             destinationController: c.destination,
             onOriginChanged: (value) => events.add('origin:$value'),
@@ -60,8 +64,9 @@ void main() {
       ),
     );
 
-    // 값은 진짜 입력창 안에 있다. 예전처럼 라벨로 그리면 눌러도 커서가 안 잡힌다.
-    expect(find.byType(TextField), findsNWidgets(2));
+    expect(find.byKey(const Key('route-planner')), findsOneWidget);
+    // 플래너를 복제하지 않고, 지금 고치는 위치만 실제 입력 줄로 연다.
+    expect(find.byType(TextField), findsOneWidget);
     expect(find.text('다이슨'), findsOneWidget);
     // 출발지가 비어 있으면 "현재 위치"가 안내문으로만 뜬다 — 글자로 채우면
     // 사용자가 다른 곳을 치기 전에 먼저 지워야 한다.
@@ -75,7 +80,7 @@ void main() {
       ),
       '이솝',
     );
-    await tester.tap(find.byKey(const Key('route-draft-clear')));
+    await tester.tap(find.byTooltip('경로 계획 닫기'));
 
     expect(events, ['destination:이솝', 'clear']);
   });
@@ -84,7 +89,9 @@ void main() {
     final c = makeControllers(tester);
 
     await tester.pumpWidget(
-      MaterialApp(theme: AppTheme.light, home: Scaffold(
+      MaterialApp(
+        theme: AppTheme.light,
+        home: Scaffold(
           body: MapTopBar(
             onMenuTap: () {},
             controller: c.search,
@@ -115,7 +122,9 @@ void main() {
     addTearDown(focusNode.dispose);
 
     await tester.pumpWidget(
-      MaterialApp(theme: AppTheme.light, home: Scaffold(
+      MaterialApp(
+        theme: AppTheme.light,
+        home: Scaffold(
           body: MapTopBar(
             onMenuTap: () {},
             controller: controller,
@@ -131,21 +140,21 @@ void main() {
     );
 
     // 글자가 없을 때 그 자리는 길찾기 버튼이 쓴다 — X가 빈자리를 차지하지 않는다.
-    expect(find.byKey(const Key('map-top-bar-clear')), findsNothing);
-    expect(find.byKey(const Key('map-top-bar-directions')), findsOneWidget);
+    expect(find.byTooltip('검색어 지우기'), findsNothing);
+    expect(find.byTooltip('길찾기'), findsOneWidget);
 
     await tester.enterText(find.byType(TextField), '다이슨');
     await tester.pump();
-    expect(find.byKey(const Key('map-top-bar-clear')), findsOneWidget);
-    expect(find.byKey(const Key('map-top-bar-directions')), findsNothing);
+    expect(find.byTooltip('검색어 지우기'), findsOneWidget);
+    expect(find.byTooltip('길찾기'), findsOneWidget);
 
-    await tester.tap(find.byKey(const Key('map-top-bar-clear')));
+    await tester.tap(find.byTooltip('검색어 지우기'));
     await tester.pump();
 
     expect(controller.text, '');
     // 글자만 지우면 상위의 검색 결과가 그대로 남는다. 빈 문자열을 흘려 그
     // 입력이 걸어 둔 결과까지 되돌리는 것이 이 X의 계약이다.
     expect(changes.last, '');
-    expect(find.byKey(const Key('map-top-bar-clear')), findsNothing);
+    expect(find.byTooltip('검색어 지우기'), findsNothing);
   });
 }

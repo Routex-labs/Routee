@@ -133,6 +133,28 @@ def _store_properties(store: Store) -> dict:
     return properties
 
 
+# 못 걷는 면 도형을 wgs84 feature로 옮긴다. 좌표 경로는 매장 폴리곤과 완전히
+# 같다(_local_polygon_ring → 같은 GeoTransform) — 다른 경로를 타면 같은 층에서
+# 도형만 몇 m 밀린다. 거르는 기준도 매장과 같은 bbox 교차다.
+def _non_walkable_features(
+    shapes: Sequence[dict],
+    transform: GeoTransform,
+    bounds: TileBounds,
+) -> list[dict]:
+    features: list[dict] = []
+    for shape in shapes:
+        ring = _local_polygon_ring(shape.get("polygon_local_m") or [], transform)
+        if len(ring) < 4 or not bounds.intersects(*_polygon_bbox(ring)):
+            continue
+        features.append(
+            {
+                "geometry": {"type": "Polygon", "coordinates": [ring]},
+                "properties": {"kind": shape.get("kind", "non_walkable")},
+            }
+        )
+    return features
+
+
 # 나눠 쓰는 자리의 라벨 점. 칸 계산은 app/geo/shared_polygon.py가 갖고, 여기서는 그
 # 칸의 가운데를 wgs84로 옮기기만 한다. 라벨 feature에 붙는 `shared`는 클라이언트가
 # 충돌 판정을 끈 전용 레이어로 그리라는 표시다(docs/backend/shared-polygon-split.md).
@@ -209,6 +231,9 @@ def build_floor_tile_layers(
     transform: GeoTransform | None,
     bounds: TileBounds,
     footprint_local_m: list[dict] | None = None,
+    # 못 걷는 면 도형 목록(Floor.non_walkable_polygons_local_m). 항목은
+    # {"id", "kind", "polygon_local_m"}이고, 없는 층은 None이다.
+    non_walkable_local_m: list[dict] | None = None,
     # 매장 id → 라벨 좌표(lng, lat) memo. 호출자가 소유·무효화하는 저장소를
     # 넘기면 이미 계산된 매장의 label_point를 건너뛰고, 새로 계산한 값을 채운다.
     #
@@ -319,6 +344,27 @@ def build_floor_tile_layers(
         if bounds.intersects(lng, lat, lng, lat):
             label_features.append(feature)
     layers.append({"name": "stores", "features": store_features})
+
+    # 못 걷는 면(아트리움 보이드·기둥·조경) — **stores 바로 위, store_labels 아래.**
+    #
+    # 이 목록 순서가 클라이언트가 레이어를 꽂는 순서와 같다(뒤에 올수록 위).
+    # stores 아래에 두면 지하 주차 구획이 전부 매장이라 기둥 면적의 40%가
+    # 주차칸에 가린다(실측: docs/client/kakao-map-indoor-observation.md 3절).
+    # 위로 올려도 매장은 안 사라진다 — 매장 중심점을 품는 도형은 임포터가
+    # 이미 뺐고(build_studio_from_dabeeo.py), 라벨·아이콘은 더 위에 있다.
+    #
+    # 도형이 없는 층(B2)에서도 **빈 레이어를 반드시 낸다.** 층마다 레이어 유무가
+    # 갈리면 클라이언트 sourceLayer 배선이 그 층에서만 달라진다.
+    #
+    # properties는 kind만 싣는다 — 매장 id·name·category를 실으면 카테고리 강조
+    # 필터(`['get','category']`)나 탭 판정(`properties['id']`)에 새어 들어간다.
+    layers.append(
+        {
+            "name": "non_walkable",
+            "features": _non_walkable_features(non_walkable_local_m or [], transform, bounds),
+        }
+    )
+
     layers.append({"name": "store_labels", "features": label_features})
 
     # POI는 점이라 bbox 교차가 곧 포함 여부다.

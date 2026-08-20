@@ -11,6 +11,8 @@
 # fallback 페이지가 필요한 이유는 같은 URL을 앱 없는 사람도 누르기 때문이다. 404를
 # 주면 공유받은 사람 절반이 깨진 링크를 본다.
 
+import html
+
 from fastapi import APIRouter, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 
@@ -61,6 +63,12 @@ def place_fallback(building_id: str, place_id: str) -> Response:
     # 알리는 자리이고, 이름·층은 앱이 서버에서 다시 구한다(링크에 표시 이름을 넣지
     # 않는다는 규칙과 같은 이유 — 링크의 글자를 신뢰 가능한 값으로 쓰지 않는다).
     # 조회를 붙이면 삭제된 매장에서 이 페이지가 500을 내며 공유 링크가 통째로 죽는다.
+    #
+    # **두 값은 반드시 이스케이프한다.** 경로 파라미터는 서버가 percent-decode한 뒤
+    # 넘겨주므로 `%3Cimg src=x onerror=...%3E`가 살아 있는 마크업으로 들어온다. 이 주소는
+    # 사람들이 메신저에 붙여 넣는 공개 페이지이고, 같은 출처가 assetlinks.json을 낸다.
+    safe_building_id = html.escape(building_id)
+    safe_place_id = html.escape(place_id)
     return HTMLResponse(
         f"""<!doctype html>
 <html lang="ko">
@@ -80,7 +88,7 @@ def place_fallback(building_id: str, place_id: str) -> Response:
 <main>
   <h1>{_SERVICE_NAME}</h1>
   <p>앱에서 이 장소를 열 수 있습니다.</p>
-  <p><code>{building_id}</code> / <code>{place_id}</code></p>
+  <p><code>{safe_building_id}</code> / <code>{safe_place_id}</code></p>
 </main>
 </body>
 </html>"""

@@ -13,6 +13,12 @@ import '../../../map/style/route_style.dart';
 import '../../../models/route/transit_route.dart';
 import '../../../widgets/transit_style.dart';
 
+/// 고르지 않은 후보 경로. **선택된 경로와 소스를 나눈다** — 같은 소스에 두고
+/// 속성으로 가르면 후보를 바꿀 때마다 색 표현식이 다시 계산돼 선 전체가 한 번
+/// 깜빡인다(위 파일 머리의 도보/대중교통을 나눈 이유와 같다).
+const _transitAltSourceId = 'outdoor-transit-alt';
+const _transitAltLayerId = 'outdoor-transit-alt-line';
+
 const _transitSourceId = 'outdoor-transit';
 const _transitRideLayerId = 'outdoor-transit-ride';
 const _transitWalkLayerId = 'outdoor-transit-walk';
@@ -24,6 +30,26 @@ const _transitBadgeLayerId = 'outdoor-transit-badge-icon';
 /// — 도보 경로 레이어 바로 다음에 불러, 두 안내가 잠깐 겹치는 순간에도
 /// 사용자가 방금 고른 대중교통 선이 가려지지 않게 한다.
 Future<void> registerTransitLayers(MapLibreMapController controller) async {
+  // **후보 먼저.** 등록 순서가 곧 쌓임 순서라, 고른 경로가 늘 그 위에 온다.
+  // 한 색 한 줄로 그린다 — 후보는 "다른 길도 있다"만 말하면 되고, 노선색까지
+  // 쓰면 어느 것이 지금 고른 것인지 색으로 구분되지 않는다.
+  await controller.addSource(
+    _transitAltSourceId,
+    GeojsonSourceProperties(data: emptyGeoJsonCollection()),
+  );
+  await controller.addLineLayer(
+    _transitAltSourceId,
+    _transitAltLayerId,
+    const LineLayerProperties(
+      lineColor: kRouteCompletedColor,
+      lineWidth: 3.5,
+      lineOpacity: 0.75,
+      lineCap: 'round',
+      lineJoin: 'round',
+    ),
+    enableInteraction: false,
+  );
+
   // 색은 feature 속성에서 읽는다(`['get', 'color']`). 구간마다 노선색이 달라
   // 레이어를 노선 수만큼 만들 수는 없고, 만들었다면 경로를 바꿀 때마다
   // 레이어를 지웠다 다시 등록해야 한다.
@@ -121,8 +147,31 @@ Future<void> registerTransitLayers(MapLibreMapController controller) async {
 /// 레이어 두 개(탈것 실선 / 도보 점선)가 그 속성으로 필터해 각자 그린다.
 Future<void> syncTransitLayer(
   MapLibreMapController controller,
-  TransitItinerary? itinerary,
-) async {
+  TransitItinerary? itinerary, {
+  List<TransitItinerary> alternatives = const [],
+}) async {
+  // 후보는 고른 경로와 **독립적으로** 그린다. 고른 것이 없어도 후보만 남기는
+  // 상태는 없으므로, 비울 때는 함께 비운다.
+  await controller.setGeoJsonSource(_transitAltSourceId, {
+    'type': 'FeatureCollection',
+    'features': [
+      if (itinerary != null)
+        for (final candidate in alternatives)
+          // **한붓그리기다.** 구간을 나누지 않고 경로 하나를 선 하나로 잇는다 —
+          // 후보에서 읽어야 하는 것은 "대충 어디로 도는가"뿐이고, 구간마다
+          // 끊으면 회색 조각이 지도에 흩어진다.
+          {
+            'type': 'Feature',
+            'properties': const <String, Object?>{},
+            'geometry': {
+              'type': 'LineString',
+              'coordinates': [
+                for (final p in candidate.points) [p.longitude, p.latitude],
+              ],
+            },
+          },
+    ],
+  });
   if (itinerary == null) {
     await controller.setGeoJsonSource(
       _transitSourceId,
@@ -140,10 +189,7 @@ Future<void> syncTransitLayer(
     if (leg.points.length < 2) continue;
     features.add({
       'type': 'Feature',
-      'properties': {
-        'color': transitLegColorHex(leg),
-        'walk': leg.mode.isWalk,
-      },
+      'properties': {'color': transitLegColorHex(leg), 'walk': leg.mode.isWalk},
       'geometry': {
         'type': 'LineString',
         'coordinates': [
@@ -161,10 +207,7 @@ Future<void> syncTransitLayer(
       'properties': {'icon': icon},
       'geometry': {
         'type': 'Point',
-        'coordinates': [
-          leg.points.first.longitude,
-          leg.points.first.latitude,
-        ],
+        'coordinates': [leg.points.first.longitude, leg.points.first.latitude],
       },
     });
   }

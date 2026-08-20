@@ -1,7 +1,4 @@
-/// 실내 도면 위 장소 핀 두 종 — 선택된 매장(채운 파랑)과 출구(빈 흰색).
-///
-/// **색이 아니라 모양으로 종류를 가른다** — 매장은 채우고 출구는 비운다.
-/// 글씨는 비트맵에 굽고 도형·치수도 [destination_pin.dart]와 같은 것을 쓴다.
+/// 실내 도면 위 출구 핀. 글씨를 비트맵에 굽는다.
 ///
 /// 관찰 캡처와 근거는 `docs/client/kakao-map-indoor-observation.md`.
 library;
@@ -13,12 +10,6 @@ import 'package:flutter/material.dart';
 
 import '../../theme/app_theme.dart';
 import 'destination_pin.dart';
-
-/// 선택된 매장 핀 머리 안의 흰 점 반지름.
-///
-/// 카카오는 채운 핀 가운데에 흰 점을 둔다. 점이 있어야 "이 핀이 무언가를
-/// 가리킨다"가 읽히고, 없으면 그냥 파란 물방울이 된다.
-const _selectedDotRadius = 19.0;
 
 /// 출구 핀 테두리 두께. 안이 비어 있으므로 이 선이 곧 핀의 형태다 —
 /// 도착 핀 외곽선(7)보다 굵게 두지 않으면 축소했을 때 사라진다.
@@ -43,7 +34,14 @@ Path _teardropPath() {
 
   return Path()
     ..moveTo(cx, tipY)
-    ..cubicTo(cx - 11.25, cy + 76.5, cx - 42.75, cy + 45, cx - joinDx, cy + joinDy)
+    ..cubicTo(
+      cx - 11.25,
+      cy + 76.5,
+      cx - 42.75,
+      cy + 45,
+      cx - joinDx,
+      cy + joinDy,
+    )
     ..arcToPoint(
       const Offset(cx + joinDx, cy + joinDy),
       radius: const Radius.circular(kPinHeadRadius),
@@ -67,30 +65,6 @@ Future<Uint8List> _bake(void Function(Canvas) paint) async {
   final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
   return byteData!.buffer.asUint8List();
 }
-
-/// 선택된 매장 핀 — 파랑을 채우고 가운데에 흰 점.
-///
-/// 예전에는 선택을 **폴리곤 fill(파랑 35%)**로 표시했다. 그 방식은 매장 이름을
-/// 배경으로 밀어내고, 폴리곤이 없는 시설에서는 아무 일도 하지 않았다. 핀은
-/// centroid 하나만 있으면 되므로 두 문제가 함께 사라진다.
-Future<Uint8List> renderSelectedStorePinIcon() => _bake((canvas) {
-  final silhouette = _teardropPath();
-  canvas.drawPath(silhouette, Paint()..color = AppColors.primary);
-  // 도면 바닥이 #FFFFFF라 흰 테두리는 아무 일도 하지 않는다(도착 핀과 같은 이유).
-  canvas.drawPath(
-    silhouette,
-    Paint()
-      ..color = AppColors.blue600
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 6
-      ..strokeJoin = StrokeJoin.round,
-  );
-  canvas.drawCircle(
-    const Offset(kPinCanvasWidth / 2, kPinHeadCenterY),
-    _selectedDotRadius,
-    Paint()..color = const Color(0xFFFFFFFF),
-  );
-});
 
 /// 출구 핀 — 흰색을 채우고 파란 테두리를 두른 뒤 [label]을 굽는다.
 ///

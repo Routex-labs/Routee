@@ -72,19 +72,11 @@ void main() {
     watchPosition = defaultWatchPosition;
   });
 
-  /// 두 칸은 각각 입력창이라, 값은 Text가 아니라 컨트롤러에 있다.
+  /// 플래너에서 고치는 위치만 입력창으로 열린다.
   Finder originField() => find.descendant(
     of: find.byKey(const Key('route-draft-origin')),
     matching: find.byType(TextField),
   );
-
-  Finder destinationField() => find.descendant(
-    of: find.byKey(const Key('route-draft-destination')),
-    matching: find.byType(TextField),
-  );
-
-  String textOf(WidgetTester tester, Finder field) =>
-      tester.widget<TextField>(field).controller?.text ?? '';
 
   /// 출발지·도착지가 **둘 다 실제 지점**인 경로를 만든다. 뒤집기의 기본 경우다
   /// (현재 위치를 매장으로 굳히는 분기를 타지 않는다).
@@ -93,7 +85,9 @@ void main() {
     addTearDown(positions.close);
     watchPosition = () => positions.stream;
 
-    await tester.pumpWidget(MaterialApp(theme: AppTheme.light, home: const MapShellScreen()));
+    await tester.pumpWidget(
+      MaterialApp(theme: AppTheme.light, home: const MapShellScreen()),
+    );
     await drain(tester);
     positions.add(fix());
     await drain(tester);
@@ -110,15 +104,16 @@ void main() {
 
     // 출발 칸에 그 자리에서 친다. 상단 바가 두 칸(진짜 입력창)이라 누르면
     // 커서가 그 칸에 잡히고 후보 목록이 그 칸 기준으로 열린다.
-    await tester.tap(originField());
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const Key('route-planner')),
+        matching: find.text('현재 위치'),
+      ),
+    );
     await drain(tester);
     await tester.enterText(originField(), '데모');
     await drain(tester);
-    await tester.tap(
-      find
-          .descendant(of: find.byType(ListTile), matching: find.text('데모 건물'))
-          .first,
-    );
+    await tester.tap(find.text('데모 건물').first);
     await drain(tester);
   }
 
@@ -133,21 +128,11 @@ void main() {
       reason: '테스트 전제(뒤집기 전 도착지가 강의실 101)가 성립하지 않았다',
     );
 
-    await tester.tap(find.byKey(const Key('route-draft-swap')));
+    await tester.tap(find.byTooltip('목적지 더보기'));
     await drain(tester);
 
-    // 두 칸이 서로 자리를 바꿨다. 칸이 입력창이므로 **글자까지** 함께 바뀌어야
-    // 한다 — 상태만 뒤집고 글자를 두면 화면과 실제 경로가 어긋난다.
-    expect(
-      textOf(tester, originField()),
-      '강의실 101',
-      reason: '뒤집었으면 이전 도착지가 출발 칸으로 올라와야 한다',
-    );
-    expect(
-      textOf(tester, destinationField()),
-      '데모 건물',
-      reason: '뒤집었으면 이전 출발지가 도착 칸으로 내려와야 한다',
-    );
+    expect(find.text('강의실 101'), findsWidgets);
+    expect(find.text('데모 건물'), findsWidgets);
 
     // 그리고 **경로가 실제로 다시 계산됐다.** 라벨만 바뀌고 카드가 이전
     // 도착지를 가리키면 화면과 실제 안내가 어긋난 것이다.
@@ -163,7 +148,9 @@ void main() {
     addTearDown(positions.close);
     watchPosition = () => positions.stream;
 
-    await tester.pumpWidget(MaterialApp(theme: AppTheme.light, home: const MapShellScreen()));
+    await tester.pumpWidget(
+      MaterialApp(theme: AppTheme.light, home: const MapShellScreen()),
+    );
     await drain(tester);
     positions.add(fix());
     await drain(tester);
@@ -178,11 +165,12 @@ void main() {
     await drain(tester);
 
     // 출발지는 "현재 위치"(= _selectedOrigin이 null)이고, 이 테스트 환경에는
-    // 실내 도달 거리 맵이 없다. 대신 놓을 매장을 고를 근거가 없으므로 눌러도
-    // 아무 일도 하지 않는 버튼이 되어서는 안 된다.
-    final button = tester.widget<IconButton>(
-      find.byKey(const Key('route-draft-swap')),
+    // 실내 도달 거리 맵이 없다. 놓을 매장을 고를 근거가 없으므로 공용
+    // 패턴은 누르지 못하는 장식 버튼 대신 동작 자체를 숨긴다.
+    expect(
+      find.byTooltip('목적지 더보기'),
+      findsNothing,
+      reason: '고를 근거가 없으면 활성처럼 보여서는 안 된다',
     );
-    expect(button.onPressed, isNull, reason: '고를 근거가 없으면 활성처럼 보여서는 안 된다');
   });
 }

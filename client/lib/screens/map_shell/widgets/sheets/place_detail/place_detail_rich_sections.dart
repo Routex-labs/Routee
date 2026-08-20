@@ -908,4 +908,4 @@ class PlaceDemoInfoSection extends StatelessWidget {
 }
 
 /// 상세 본문의 좌우 여백. 사진처럼 끝까지 채우는 섹션만 이 값을 쓰지 않는다.
-const placeSectionGutter = 20.0;
+const placeSectionGutter = RoutexSpacing.componentPadding;

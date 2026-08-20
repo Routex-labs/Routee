@@ -6,6 +6,7 @@ from sqlalchemy.orm import sessionmaker
 
 import app.models  # noqa: F401  # 모든 모델을 Base.metadata에 등록
 from app.models.base import Base
+from app.models.building import Floor
 from app.models.place import Store
 from scripts.seed.seed_navigation import add_dataset, edge_geometry_and_length
 
@@ -61,12 +62,12 @@ def db_session():
     engine.dispose()
 
 
-def _minimal_dataset(stores: list[dict]) -> dict:
+def _minimal_dataset(stores: list[dict], floor: dict | None = None) -> dict:
     return {
         "building": {
             "id": "test-building",
             "name": "테스트 빌딩",
-            "floor": {"id": "FL-1F", "name": "1F", "level": 1},
+            "floor": floor or {"id": "FL-1F", "name": "1F", "level": 1},
         },
         "nodes": [],
         "edges": [],
@@ -141,3 +142,34 @@ def test_기존_필드_적재는_그대로다(db_session):
     assert store.entrance_x_m == 3.0
     assert store.entrance_y_m == 4.0
     assert store.polygon == [{"x": 0.0, "y": 0.0}]
+
+
+# --- Floor.non_walkable_polygons_local_m 배선 검증 ---
+# 못 걷는 면은 순수 표시용이라 길찾기와 무관하다. seed dict의 값이 컬럼까지
+# 그대로 흐르는지만 본다.
+
+
+def test_못_걷는_면이_있으면_층_컬럼에_그대로_저장된다(db_session):
+    shapes = [{"id": "OB-1", "kind": "void", "polygon_local_m": [{"x": 0.0, "y": 0.0}]}]
+    add_dataset(
+        db_session,
+        _minimal_dataset(
+            [],
+            floor={"id": "FL-1F", "name": "1F", "level": 1, "non_walkable_polygons_local_m": shapes},
+        ),
+    )
+    db_session.flush()
+
+    floor = db_session.scalars(select(Floor).where(Floor.id == "FL-1F")).one()
+
+    assert floor.non_walkable_polygons_local_m == shapes
+
+
+# B2처럼 못 걷는 면이 0개인 층이 실제로 있다. 컬럼이 None이어도 시드가 통과해야 한다.
+def test_못_걷는_면_키가_없으면_None이다(db_session):
+    add_dataset(db_session, _minimal_dataset([]))
+    db_session.flush()
+
+    floor = db_session.scalars(select(Floor).where(Floor.id == "FL-1F")).one()
+
+    assert floor.non_walkable_polygons_local_m is None

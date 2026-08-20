@@ -179,6 +179,83 @@ def floor_footprint(floor: dict) -> list[dict[str, float]]:
     return polygon(best.get("coordinates"))
 
 
+# POI가 안 붙은 도형 중 "걸어다닐 수 없는 면"으로 그릴 것들.
+#
+# 원본은 매장·시설을 POI로 표시하는데, 아트리움 구멍·기둥·조경처럼 **이름이 없는
+# 것**에는 POI를 달지 않는다. 그래서 POI만 훑던 임포터가 이 도형들을 통째로
+# 버리고 있었다 — 실측: 보이드 2~6F 33개(6F 737m², 2~5F 각 1,700~1,810m²),
+# 기둥 B3~B6 763개, 1F 폭포정원 곡선 2개.
+#
+# `kind`는 화면이 색을 가르는 데 쓴다. 자세한 것은
+# `docs/client/kakao-map-indoor-observation.md` V·W절.
+NON_WALKABLE_ATTRIBUTES = {
+    "OB-VOID_AREA": "void",  # 아트리움 구멍. 2F부터 뚫린다(1F·지하는 0개다)
+    "OB-PILLAR": "pillar",  # 지하 주차장 기둥
+    "OB-OTHER_FACILITY": "feature",  # 조경·설치물. 1F WATERFALL GARDEN이 여기다
+    # **에스컬레이터 도형은 POI가 떨어져 나갔다.** v180.4에서는 층마다 16개가
+    # POI를 달고 매장으로 들어왔는데 v182.8에서는 4개만 남았다 — 도형은 그대로
+    # 있고 연결만 끊겼다. 여기서 줍지 않으면 초록 에스컬레이터 그림이 층마다
+    # 12개씩 사라진다(노드는 안 바뀌어 길찾기는 무관하다).
+    "OB-ESCALATOR_UP": "escalator",
+    "OB-ESCALATOR_DOWN": "escalator",
+    "OB-ESCALATOR": "escalator",  # 접미사 없는 코드. 4F에 2개뿐이라 놓치기 쉽다
+}
+
+# 전체 재생성 때만 줍는 속성. `--non-walkable-only`는 매장·노드를 v180.4로 두는데,
+# 그 버전 stores_*.json에는 이미 에스컬레이터 매장이 층당 6~16개 폴리곤과 함께
+# 있다. 실측: v182.8 도형 121개 중 109개가 그 매장 중심점 위에 그대로 겹치고,
+# 남는 12개(5F·4F·B2 각 2, B6 6)도 기존 도형 바로 옆(최근접 0.00m)에 붙는다.
+# 즉 얹으면 초록 에스컬레이터가 회색 조각에 덮인다 — 모드 단위로 통째로 뺀다.
+REGENERATION_ONLY_KINDS = frozenset({"escalator"})
+
+
+# 점이 폴리곤 안에 있나(짝수-홀수 ray casting). 경계 위는 결과가 갈릴 수 있으나
+# 여기 쓰임(매장 중심점)에서는 경계에 정확히 걸리는 사례가 없다.
+def point_in_polygon(ring: list[dict[str, float]], px: float, py: float) -> bool:
+    inside = False
+    n = len(ring)
+    for i in range(n):
+        ax, ay = ring[i]["x"], ring[i]["y"]
+        bx, by = ring[(i + 1) % n]["x"], ring[(i + 1) % n]["y"]
+        if (ay > py) != (by > py) and px < ax + (py - ay) / (by - ay) * (bx - ax):
+            inside = not inside
+    return inside
+
+
+def non_walkable_shapes(
+    floor: dict,
+    blocked_points: list[dict[str, float]],
+    *,
+    skip_kinds: frozenset[str] = frozenset(),
+) -> list[dict]:
+    """POI가 가리키지 않는 도형 중 [NON_WALKABLE_ATTRIBUTES]에 해당하는 것.
+
+    POI가 달린 도형은 이미 매장·시설로 들어가므로 제외한다 — 안 빼면 같은 칸이
+    매장과 "못 걷는 면" 두 벌로 그려진다.
+
+    [blocked_points]는 "가려지면 안 되는 점" 목록이다. 매장 마커·라벨이 찍히는
+    자리(폴리곤이 있는 매장의 centroid_local_m)를 넘기면 그 점을 품는 도형이
+    빠진다 — 임계값 없는 기하 판정이고, 검산 결과는
+    `docs/client/kakao-map-indoor-observation.md`에 있다.
+    """
+    linked = {poi.get("objectId") for poi in (floor.get("pois") or []) if poi.get("objectId")}
+    shapes: list[dict] = []
+    for obj in floor.get("objects") or []:
+        if obj.get("id") in linked:
+            continue
+        kind = NON_WALKABLE_ATTRIBUTES.get(obj.get("attributeCode") or "")
+        if kind is None or kind in skip_kinds:
+            continue
+        shape = polygon(obj.get("coordinates"))
+        # 면이 되려면 점이 셋은 있어야 한다. 원본에 선분만 있는 항목이 섞인다.
+        if len(shape) < 3:
+            continue
+        if any(point_in_polygon(shape, p["x"], p["y"]) for p in blocked_points):
+            continue
+        shapes.append({"id": obj["id"], "kind": kind, "polygon_local_m": shape})
+    return shapes
+
+
 def build_floor(payload: dict, floor: dict, geo: dict) -> tuple[dict, dict]:
     name = text_ko(floor.get("name")) or floor["id"]
     code = floor_code(name)
@@ -287,6 +364,11 @@ def build_floor(payload: dict, floor: dict, geo: dict) -> tuple[dict, dict]:
                 }
             )
 
+    # 폴리곤 없는 매장은 앵커에서 뺀다. centroid가 POI 위치로 폴백하는데,
+    # 2~4F `박선기 작품`·`서혜영 작품`이 아트리움 한가운데 떠 있는 라벨이라
+    # 넣으면 멀쩡한 보이드 4개(241~297m²)가 억울하게 잘려 나간다.
+    anchors = [s["centroid_local_m"] for s in stores if s["polygon_local_m"]]
+    non_walkable = non_walkable_shapes(floor, anchors)
     footprint = floor_footprint(floor)
     graph = {
         "schema_version": "0.1.0",
@@ -331,6 +413,7 @@ def build_floor(payload: dict, floor: dict, geo: dict) -> tuple[dict, dict]:
         "store_polygons_local_m": polygons,
         "store_polygons_imported": True,
         "store_polygon_metadata": metadata,
+        "non_walkable_polygons_local_m": non_walkable,
         "manual_review_candidates": [],
         "counts": {
             "nodes": len(nodes),
@@ -338,6 +421,7 @@ def build_floor(payload: dict, floor: dict, geo: dict) -> tuple[dict, dict]:
             "transfers": len(transfers),
             "stores": len(stores),
             "polygons": len(polygons),
+            "non_walkable": len(non_walkable),
         },
         "building_footprint_local_m": footprint,
     }
@@ -355,6 +439,79 @@ def build_floor(payload: dict, floor: dict, geo: dict) -> tuple[dict, dict]:
         },
     }
     return code, {"graph": graph, "stores": store_payload}
+
+
+# 기존 층 JSON에 "못 걷는 면"만 얹는다. 매장·노드·간선은 한 바이트도 안 건드린다.
+#
+# 왜 전체 재생성을 안 하나: 캐시본은 v182.8이고 저장소는 v180.4다. 전부 갈면
+# 손으로 단 검색 facet 8건이 무효가 되고(B1 매장이 실제로 바뀌었다) 에스컬레이터
+# POI가 떨어져 나가 층당 16개→4개가 된다. 자세한 것은
+# `docs/client/kakao-map-indoor-observation.md` 4절.
+def rewrite_non_walkable(payload: dict) -> None:
+    version = payload.get("versionString")
+    print(f"{'층':5s}{'보이드':>7s}{'기둥':>6s}{'조경':>6s}{'제외':>6s}  합계")
+    for floor in payload.get("floors") or []:
+        name = text_ko(floor.get("name")) or floor["id"]
+        code = floor_code(name)
+        graph_path = OUT / f"{code}.json"
+        stores_path = OUT / f"stores_{code}.json"
+        if not graph_path.exists() or not stores_path.exists():
+            raise SystemExit(f"{code}: 기존 층 JSON이 없다 — 전체 재생성이 먼저다")
+
+        graph = json.loads(graph_path.read_text(encoding="utf-8"))
+        # 층 id가 어긋나면 다른 건물이거나 재편성된 payload다. 조용히 덮어쓰면
+        # 엉뚱한 층에 도형이 얹힌다.
+        if graph["floor"]["id"] != floor["id"]:
+            raise SystemExit(f"{code}: 층 id 불일치 {graph['floor']['id']} != {floor['id']}")
+
+        # 앵커는 stores_{층}.json이 단일 출처다. 같은 파일의 store_polygon_metadata는
+        # 시드가 읽지 않고 실제로 어긋나 있다(3F 기준 97개 vs 109개).
+        stores = json.loads(stores_path.read_text(encoding="utf-8"))["stores"]
+        anchors = [s["centroid_local_m"] for s in stores if s.get("polygon_local_m")]
+        shapes = non_walkable_shapes(floor, anchors, skip_kinds=REGENERATION_ONLY_KINDS)
+
+        graph["non_walkable_polygons_local_m"] = shapes
+        graph["counts"] = {**graph.get("counts", {}), "non_walkable": len(shapes)}
+        # 두 버전이 섞여 있다는 사실을 파일이 스스로 말하게 한다.
+        graph["non_walkable_source"] = {
+            "provider": "dabeeo_official_map",
+            "map_id": payload.get("id"),
+            "map_version": version,
+            "mode": "non_walkable_only",
+        }
+        graph_path.write_text(json.dumps(_ordered(graph), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+        tally = {"void": 0, "pillar": 0, "feature": 0}
+        for shape in shapes:
+            tally[shape["kind"]] = tally.get(shape["kind"], 0) + 1
+        skipped = len(non_walkable_shapes(floor, [], skip_kinds=REGENERATION_ONLY_KINDS)) - len(shapes)
+        print(f"{code:5s}{tally['void']:7d}{tally['pillar']:6d}{tally['feature']:6d}{skipped:6d}  {len(shapes)}")
+    print(f"\n갱신 위치: {OUT} (매장·노드·간선 무변경, non_walkable_source=v{version})")
+
+
+# 전체 재생성이 쓰는 키 순서로 되돌린다. 그냥 대입하면 새 키가 파일 끝에 붙어
+# 나중에 전체 재생성했을 때 통째로 diff가 난다.
+def _ordered(graph: dict) -> dict:
+    order = [
+        "schema_version",
+        "building_id",
+        "floor",
+        "generated_from",
+        "non_walkable_source",
+        "coordinate_system",
+        "nodes",
+        "edges",
+        "vertical_transfer_edges",
+        "store_polygons_local_m",
+        "store_polygons_imported",
+        "store_polygon_metadata",
+        "non_walkable_polygons_local_m",
+        "manual_review_candidates",
+        "counts",
+        "building_footprint_local_m",
+    ]
+    ranked = {key: index for index, key in enumerate(order)}
+    return {key: graph[key] for key in sorted(graph, key=lambda k: (ranked.get(k, len(order)), k))}
 
 
 def main(payload_path: Path) -> None:
@@ -384,6 +541,17 @@ def main(payload_path: Path) -> None:
 
 
 if __name__ == "__main__":
-    import sys
+    import argparse
 
-    main(Path(sys.argv[1]))
+    parser = argparse.ArgumentParser(description="다베오 payload를 Studio 층 JSON으로 변환한다")
+    parser.add_argument("payload", type=Path, help="다베오 /v2/map 응답 JSON")
+    parser.add_argument(
+        "--non-walkable-only",
+        action="store_true",
+        help="기존 층 JSON에 못 걷는 면만 얹는다(매장·노드·간선 무변경)",
+    )
+    args = parser.parse_args()
+    if args.non_walkable_only:
+        rewrite_non_walkable(json.loads(args.payload.read_text(encoding="utf-8")))
+    else:
+        main(args.payload)

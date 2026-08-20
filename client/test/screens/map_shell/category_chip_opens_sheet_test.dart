@@ -41,7 +41,9 @@ void main() {
   });
 
   testWidgets('카테고리 chip을 누르면 매장 목록 시트가 바로 뜬다', (tester) async {
-    await tester.pumpWidget(MaterialApp(theme: AppTheme.light, home: const MapShellScreen()));
+    await tester.pumpWidget(
+      MaterialApp(theme: AppTheme.light, home: const MapShellScreen()),
+    );
     await tester.pumpAndSettle();
     // 카테고리 칩 줄은 셸이 그리고, 건물 안을 보고 있을 때만 뜬다. 예전에는
     // 하단 '실내' 세그먼트를 눌렀는데, 실내가 별도 탭이 아니게 되면서 진입
@@ -72,12 +74,33 @@ void main() {
     expect(find.text('목록'), findsNothing);
   });
 
+  testWidgets('검색이나 경로 위치를 입력하는 동안 지도 카테고리 칩을 숨긴다', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(theme: AppTheme.light, home: const MapShellScreen()),
+    );
+    await tester.pumpAndSettle();
+    tester
+        .state<OutdoorMapBodyState>(find.byType(OutdoorMapBody))
+        // ignore: invalid_use_of_visible_for_testing_member
+        .enterIndoorForTest();
+    await tester.pumpAndSettle();
+
+    expect(find.text('서비스'), findsOneWidget);
+    await tester.tap(find.byTooltip('길찾기'));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('route-draft-destination')), findsOneWidget);
+    expect(find.text('서비스'), findsNothing);
+  });
+
   // 목록이 떠 있는 동안 위쪽 지도를 만질 수 있어야 한다. barrier는 투명해도
   // opaque라 포인터를 전부 흡수하므로, 남아 있으면 "지도는 보이는데 끌리지도
   // 확대되지도 않는" 화면이 된다 — 상세 시트가 이미 겪고 고친 증상이다.
   // ([MapPassThroughSheetRoute])
   testWidgets('목록이 떠 있어도 위쪽 지도로 포인터가 지나간다', (tester) async {
-    await tester.pumpWidget(MaterialApp(theme: AppTheme.light, home: const MapShellScreen()));
+    await tester.pumpWidget(
+      MaterialApp(theme: AppTheme.light, home: const MapShellScreen()),
+    );
     await tester.pumpAndSettle();
     tester
         .state<OutdoorMapBodyState>(find.byType(OutdoorMapBody))
@@ -100,7 +123,9 @@ void main() {
   // 뿐인데 시트가 겹겹이 쌓인 것으로 읽혔다. 상세는 그 매장 하나를 보는 자리이고,
   // 닫으면 지도로 끝난다.
   testWidgets('상세를 닫으면 카테고리 목록으로 돌아가지 않는다', (tester) async {
-    await tester.pumpWidget(MaterialApp(theme: AppTheme.light, home: const MapShellScreen()));
+    await tester.pumpWidget(
+      MaterialApp(theme: AppTheme.light, home: const MapShellScreen()),
+    );
     await tester.pumpAndSettle();
     // 위 테스트와 같은 이유로 세그먼트가 아니라 오버레이를 직접 켠다.
     tester
@@ -117,10 +142,9 @@ void main() {
     expect(find.byType(CategoryStoresSheet), findsNothing);
     expect(find.byType(PlaceDetailSheet), findsOneWidget);
 
-    // **헤더의 뒤로 화살표로 닫는다.** 바깥을 눌러 닫는 경로는 chain 전체를
-    // 접으라는 신호(onCloseAll)라 어느 구현에서도 목록이 안 뜬다 — 그 경로로
-    // 검사하면 이 테스트는 아무것도 지키지 못한다.
-    await tester.tap(find.byIcon(Icons.arrow_back));
+    // 상세는 이제 이름 옆 X가 바로 전체 chain을 닫는 공용 계약이다.
+    // 상세를 닫을 때 이전 카테고리 목록이 다시 올라오지 않아야 한다.
+    await tester.tap(find.byTooltip('닫기'));
     await tester.pumpAndSettle();
 
     expect(find.byType(PlaceDetailSheet), findsNothing);

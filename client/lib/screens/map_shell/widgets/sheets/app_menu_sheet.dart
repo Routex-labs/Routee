@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:routex_design_system/routex_design_system.dart';
 
 import '../../../../core/api_config.dart';
-import '../../../../theme/app_theme.dart';
 import '../../../../widgets/map_overlay_guard.dart';
 
 /// 앱 메뉴에서 고를 수 있는 동작. 시트는 **고른 것만 돌려주고 아무것도 직접
@@ -88,15 +87,10 @@ class AppMenuSheet extends StatelessWidget {
               // 여백은 손잡이가 차지하던 값과 같다.
               const SizedBox(height: RoutexSpacing.componentPadding),
               const Padding(
-                padding: EdgeInsets.fromLTRB(20, 10, 20, 4),
-                child: Text(
-                  '메뉴',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.text,
-                  ),
+                padding: EdgeInsets.symmetric(
+                  horizontal: RoutexSpacing.contentGap,
                 ),
+                child: RoutexSheetHeader(title: '메뉴'),
               ),
 
               const _MenuSectionLabel('찾기'),
@@ -115,7 +109,7 @@ class AppMenuSheet extends StatelessWidget {
                 action: AppMenuAction.directions,
               ),
 
-              const Divider(height: 8, indent: 20, endIndent: 20),
+              const RoutexDivider(role: RoutexDividerRole.section),
               const _MenuSectionLabel('내 위치'),
               if (showPlaceLocation)
                 _MenuTile(
@@ -133,7 +127,7 @@ class AppMenuSheet extends StatelessWidget {
                 action: AppMenuAction.calibrate,
               ),
 
-              const Divider(height: 8, indent: 20, endIndent: 20),
+              const RoutexDivider(role: RoutexDividerRole.section),
               const _MenuSectionLabel('개발자'),
               _MenuTile(
                 itemKey: const Key('app-menu-debug'),
@@ -162,14 +156,10 @@ class _MenuSectionLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 10, 20, 2),
-      child: Text(
-        label,
-        style: const TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w700,
-          color: AppColors.muted,
-        ),
+      padding: const EdgeInsets.symmetric(horizontal: RoutexSpacing.contentGap),
+      child: RoutexSectionHeader(
+        title: label,
+        level: RoutexSectionHeaderLevel.group,
       ),
     );
   }
@@ -187,7 +177,7 @@ class _MenuTile extends StatelessWidget {
 
   /// 항목 자체에 붙는 키. `super.key`로 받으면 상위 Column의 자식 식별에
   /// 쓰여도 테스트가 `find.byKey`로 탭 대상을 잡는 데 문제는 없지만, 여기서는
-  /// 실제로 탭이 걸리는 [ListTile]에 직접 달아 두는 편이 의도가 분명하다.
+  /// 실제로 탭이 걸리는 목록 행에 직접 달아 둔다.
   final Key itemKey;
   final IconData icon;
   final String title;
@@ -197,24 +187,13 @@ class _MenuTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = highlighted ? AppColors.primary : AppColors.muted;
-    return ListTile(
+    return RoutexListCell(
       key: itemKey,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 20),
-      leading: Icon(icon, color: color),
-      title: Text(
-        title,
-        style: const TextStyle(
-          fontSize: 14,
-          fontWeight: FontWeight.w700,
-          color: AppColors.text,
-        ),
-      ),
-      subtitle: Text(
-        subtitle,
-        style: const TextStyle(fontSize: 12, color: AppColors.muted),
-      ),
-      onTap: () => Navigator.of(context).pop(action),
+      title: title,
+      subtitle: subtitle,
+      leadingIcon: icon,
+      selected: highlighted,
+      onPressed: () => Navigator.of(context).pop(action),
     );
   }
 }
@@ -235,19 +214,29 @@ class _BuildInfoLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.routexColors;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+      padding: const EdgeInsetsDirectional.fromSTEB(
+        RoutexSpacing.contentGap,
+        RoutexSpacing.inlineGap,
+        RoutexSpacing.contentGap,
+        RoutexSpacing.controlGap,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             '서버 · $apiBaseUrl',
-            style: const TextStyle(fontSize: 11, color: AppColors.muted),
+            style: RoutexTypography.caption.copyWith(
+              color: colors.contentSecondary,
+            ),
           ),
           const SizedBox(height: 2),
           Text(
             '빌드 · $_buildMode',
-            style: const TextStyle(fontSize: 11, color: AppColors.muted),
+            style: RoutexTypography.caption.copyWith(
+              color: colors.contentSecondary,
+            ),
           ),
         ],
       ),

@@ -165,9 +165,30 @@ void main() {
       );
     });
 
-    test('출발지가 야외 좌표면 실내→야외가 아니다', () {
+    test('도면이 꺼져 있어도 실내 매장이 출발지면 실내→야외다', () {
+      // **1)과 판박이여야 한다는 것이 이 갈래의 규칙이다.** 출발 노드를 이미
+      // 알고 있으면 지금 무엇을 보고 있는지는 갈래를 바꾸지 않는다. 도면을
+      // 요구하면 야외 지도에서 실내 매장을 출발지로 고른 사용자가 outdoor로
+      // 떨어져, 건물을 관통하는 TMAP 보행선을 보게 된다.
+      expect(
+        classifyWalkRoute(
+          origin: indoor(floor: 'B2', nodeId: 'n7'),
+          destination: outdoorPoint(),
+          indoorContextActive: false,
+          indoorStartReady: false,
+        ),
+        WalkRouteKind.indoorToOutdoor,
+      );
+    });
+
+    test('출발지가 야외 좌표면 야외 걷기다', () {
       // 밖의 두 지점 사이 이동이다. 도면이 떠 있다는 것만으로 문을 경유시키면
       // 건물과 상관없는 경로에 실내 구간이 끼어든다.
+      //
+      // **한때 indoorFallback이었다.** 이 테스트가 못 박으려던 것은 "실내→야외가
+      // 아니다"였고 그때의 폴백 값을 그대로 적었는데, 그 값이 요청을 실내
+      // 라우팅에 넘겨 "도착지 노드 정보가 없어…"만 띄웠다(실기기: "서울창업허브
+      // 공덕 → 공덕" 도보). 끝점 어느 쪽에도 실내 정보가 없으면 야외다.
       expect(
         classifyWalkRoute(
           origin: outdoorPoint(),
@@ -175,12 +196,13 @@ void main() {
           indoorContextActive: true,
           indoorStartReady: true,
         ),
-        WalkRouteKind.indoorFallback,
+        WalkRouteKind.outdoor,
       );
     });
 
-    test('출발지가 없고 실내 위치도 없으면 실내→야외가 아니다', () {
-      // 출발점을 정할 근거가 아무것도 없다. 노드도 앵커도 없다.
+    test('출발지가 없고 실내 위치도 없으면 야외 걷기다', () {
+      // 출발점을 정할 근거가 아무것도 없다. 노드도 앵커도 없다 — 실내 위치가
+      // 없다는 것은 그 사람이 아직 밖이라는 뜻이고, 목적지도 밖이다.
       expect(
         classifyWalkRoute(
           origin: null,
@@ -188,7 +210,7 @@ void main() {
           indoorContextActive: true,
           indoorStartReady: false,
         ),
-        WalkRouteKind.indoorFallback,
+        WalkRouteKind.outdoor,
       );
     });
 
@@ -245,6 +267,83 @@ void main() {
           indoorStartReady: true,
         ),
         WalkRouteKind.indoorFallback,
+      );
+    });
+  });
+
+  // 이동 수단 줄(자동차·대중교통·도보)을 띄울지 정하는 판정. 위 갈래 판정과
+  // **같은 모양이어야** 화면에 뜬 버튼과 실제 계산이 어긋나지 않는다.
+  group('이동 수단 줄을 접는 조건', () {
+    test('건물 안에서 건물 안으로 가면 접는다', () {
+      // 수단이 도보 하나로 못박히는 여정이라 고를 것이 없다.
+      expect(
+        isIndoorOnlyWalk(
+          origin: null,
+          destination: indoor(),
+          indoorContextActive: true,
+        ),
+        isTrue,
+      );
+      expect(
+        isIndoorOnlyWalk(
+          origin: indoor(nodeId: 'n0'),
+          destination: indoor(),
+          indoorContextActive: false,
+        ),
+        isTrue,
+      );
+    });
+
+    // 실기기에서 "서울창업허브 → 샤브미담"으로 걸린 회귀다. 도착지만 보고
+    // 접었더니 5km 떨어진 건물 안 매장을 찍는 길에서 대중교통이 사라졌다.
+    test('멀리 있는 야외 출발지면 접지 않는다', () {
+      expect(
+        isIndoorOnlyWalk(
+          origin: outdoorPoint(),
+          destination: indoor(),
+          indoorContextActive: false,
+        ),
+        isFalse,
+      );
+      // 건물 도면을 펴 놓은 채여도, 출발지를 밖으로 직접 골랐으면 야외 여정이다.
+      expect(
+        isIndoorOnlyWalk(
+          origin: outdoorPoint(),
+          destination: indoor(),
+          indoorContextActive: true,
+        ),
+        isFalse,
+      );
+    });
+
+    test('도착지가 실내가 아니면 접지 않는다', () {
+      expect(
+        isIndoorOnlyWalk(
+          origin: indoor(),
+          destination: outdoorPoint(),
+          indoorContextActive: true,
+        ),
+        isFalse,
+      );
+      // 반쪽짜리 후보는 실내 라우팅이 못 태우므로 실내로 치지 않는다.
+      expect(
+        isIndoorOnlyWalk(
+          origin: null,
+          destination: halfIndoor(),
+          indoorContextActive: true,
+        ),
+        isFalse,
+      );
+    });
+
+    test('도착지가 아직 없으면 접지 않는다', () {
+      expect(
+        isIndoorOnlyWalk(
+          origin: null,
+          destination: null,
+          indoorContextActive: true,
+        ),
+        isFalse,
       );
     });
   });

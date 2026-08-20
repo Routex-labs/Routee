@@ -17,9 +17,9 @@ import 'package:navigation_client/repositories/place/mock_destination_repository
 import 'package:navigation_client/screens/outdoor_map/outdoor_map_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// 길찾기 "지도에서 선택"에서 **복도를 눌러** 출발지/도착지를 정할 수 있는지.
+/// 길찾기 위치 행을 편집하며 **복도를 눌러** 출발지/도착지를 정할 수 있는지.
 ///
-/// 지키려는 증상: "지도에서 선택"은 매장 폴리곤만 받았다. 그래서 지도에 보이는
+/// 지키려는 증상: 지도 탭은 매장 폴리곤만 받았다. 그래서 지도에 보이는
 /// 곳 중 매장이 아닌 자리(복도·광장·에스컬레이터 앞)는 아무리 눌러도 반응이
 /// 없었고, 사용자는 기능이 고장 난 것으로 봤다. 정작 하단 바의 "위치 지정"은
 /// 같은 자리를 눌러 위치를 잡아 주므로, 같은 지도에서 같은 손짓이 어떤 때는
@@ -114,7 +114,9 @@ void main() {
     final key = GlobalKey<OutdoorMapBodyState>();
     final picked = <PoiSearchResult>[];
     await tester.pumpWidget(
-      MaterialApp(theme: AppTheme.light, home: Scaffold(
+      MaterialApp(
+        theme: AppTheme.light,
+        home: Scaffold(
           body: OutdoorMapBody(
             key: key,
             pickingOnMap: picking,

@@ -1,140 +1,126 @@
 import 'package:flutter/material.dart';
+import 'package:routex_design_system/routex_design_system.dart';
 
 import '../../../models/route/transit_route.dart';
-import '../../../theme/app_theme.dart';
+import '../../../widgets/transit_route_summary.dart';
 import '../../../widgets/transit_style.dart';
+import '../../../widgets/transit_timeline.dart';
 
-/// 대중교통 경로를 그리는 동안 화면 하단에 놓는 요약 카드. [EtaCard] 자리를
-/// 대신한다 — 둘을 같이 띄우면 서로 다른 소요 시간이 한 화면에 뜬다.
+/// 확정한 대중교통 경로의 하단 요약. **후보 목록 카드와 같은 구간 막대로 말한다.**
 ///
-/// **"도보로 보기" 버튼은 없다** — 이동 수단을 고르는 자리는 [TravelModeBar]
-/// 하나여야 한다. **"안내 종료"는 [EtaCard]와 같은 오른쪽 아래**다(수단마다 자리가
-/// 옮겨 다니면 매번 버튼을 다시 찾아야 한다).
-class TransitSummaryCard extends StatelessWidget {
+/// 환승 횟수·도보 시간을 나열하던 글과 노선 칩 스트립은 걷어냈다 — 막대가 이미
+/// 그림으로 말하는 것을 글로 다시 적으면 카드만 높아지고, 그만큼 지도가 가려진다
+/// (카메라 여백을 `outdoor_map/parts/indoor.dart`의 `_fitCameraToPoints`가 이 카드
+/// 높이로 잰다). 세부는 접어 두고 화살표로 그 자리에서 펼친다.
+class TransitSummaryCard extends StatefulWidget {
   const TransitSummaryCard({
     super.key,
     required this.itinerary,
     required this.label,
     required this.onClose,
+    this.onStartGuidance,
     this.onClosePointerDown,
   });
 
   final TransitItinerary itinerary;
-
-  /// "OO까지"처럼 도착지를 가리키는 문구.
   final String label;
-
   final VoidCallback onClose;
 
-  /// 지도 오버레이 탭 가드가 쓰는 콜백([EtaCard]와 같은 규칙).
+  /// null이면 이미 안내 중이라는 뜻이다 — 그때는 `안내 종료`만 남는다.
+  final VoidCallback? onStartGuidance;
+
   final ValueChanged<Offset>? onClosePointerDown;
 
   @override
+  State<TransitSummaryCard> createState() => _TransitSummaryCardState();
+}
+
+class _TransitSummaryCardState extends State<TransitSummaryCard> {
+  /// 세부 타임라인을 펼쳐 뒀는지. **기본은 접힘** — 펼친 채로 시작하면 확정
+  /// 직후 카메라가 잰 카드 높이만큼 지도가 밀려 경로가 화면 밖으로 나간다.
+  bool _expanded = false;
+
+  /// 펼친 세부가 먹어도 되는 화면 몫. 나머지는 지도로 남는다.
+  static const _detailHeightFraction = 0.4;
+
+  @override
   Widget build(BuildContext context) {
+    final itinerary = widget.itinerary;
+    // 안내 중에도 "지금 출발한다면"으로 계산한다. 지나온 구간을 지우려면 진행
+    // 위치가 필요한데 이 카드는 그것을 모른다 — 도착 시각도 같은 기준이다.
+    final departure = DateTime.now();
     final fare = itinerary.fare;
-    final facts = [
-      itinerary.transferCount == 0 ? '환승 없음' : '환승 ${itinerary.transferCount}회',
-      '도보 ${formatTransitDuration(itinerary.totalWalkTimeSeconds)}',
-      if (fare != null && fare > 0) formatTransitFare(fare),
-    ];
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 10, 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
+    final start = widget.onStartGuidance;
+
+    final child = start == null
+        ? RoutexBottomSheet(
+            showHandle: false,
+            includeBottomSafeArea: true,
+            child: RoutexStack(
+              gap: RoutexStackGap.content,
               children: [
-                const Icon(
-                  Icons.directions_transit_rounded,
-                  size: 14,
-                  color: AppColors.primary,
-                ),
-                const SizedBox(width: 4),
-                Flexible(
-                  child: Text(
-                    label,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: AppColors.muted,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                TransitDurationFare(itinerary: itinerary),
+                _details(context, departure),
+                RoutexButton(
+                  label: '안내 종료',
+                  variant: RoutexButtonVariant.secondary,
+                  onPressed: widget.onClose,
                 ),
               ],
             ),
-            const SizedBox(height: 3),
-            Text(
-              '약 ${formatTransitDuration(itinerary.totalTimeSeconds)}',
-              style: const TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
-                color: AppColors.text,
+          )
+        // 안내 전에는 소요·요금을 카드가 이미 지표 줄로 적는다. 위에 같은 값을
+        // 한 줄 더 두면 한 화면에 소요 시간이 두 개가 된다.
+        : RoutexEtaCard(
+            title: widget.label,
+            arrivalTime: TimeOfDay.fromDateTime(
+              transitArrivalTime(departure, itinerary) ?? departure,
+            ).format(context),
+            metrics: [
+              RoutexTripMetric(
+                value: formatTransitDuration(itinerary.totalTimeSeconds),
+                label: '소요',
+              ),
+              if (fare != null && fare > 0)
+                RoutexTripMetric(value: formatTransitFare(fare), label: '요금'),
+            ],
+            routeOptions: _details(context, departure),
+            onStart: start,
+          );
+
+    return Listener(
+      onPointerDown: (event) => widget.onClosePointerDown?.call(event.position),
+      child: child,
+    );
+  }
+
+  /// 구간 막대 + 펼치기 + (펼쳤을 때) 세부 타임라인.
+  Widget _details(BuildContext context, DateTime departure) {
+    return RoutexStack(
+      gap: RoutexStackGap.inline,
+      children: [
+        TransitLegBar(itinerary: widget.itinerary),
+        RoutexShowMore(
+          expanded: _expanded,
+          onExpanded: (value) => setState(() => _expanded = value),
+        ),
+        if (_expanded)
+          ConstrainedBox(
+            // 세부는 구간 수만큼 길어진다. 상한을 안 두면 환승이 많은 경로에서
+            // 카드가 지도를 통째로 덮는다.
+            constraints: BoxConstraints(
+              maxHeight:
+                  MediaQuery.sizeOf(context).height * _detailHeightFraction,
+            ),
+            child: SingleChildScrollView(
+              child: TransitTimeline(
+                itinerary: widget.itinerary,
+                destinationLabel: widget.label,
+                departureAt: departure,
               ),
             ),
-            const SizedBox(height: 2),
-            Text(
-              facts.join(' · '),
-              style: const TextStyle(fontSize: 12, color: AppColors.muted),
-            ),
-            const SizedBox(height: 10),
-            // 구간 칩과 "안내 종료"가 같은 줄이다. 칩이 길면 가로로 스크롤되는데,
-            // 종료 버튼은 스크롤 밖에 두어 언제나 같은 자리에 남는다 — 스크롤
-            // 안에 넣으면 환승이 많은 경로에서 버튼이 화면 밖으로 밀려난다.
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Expanded(
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: [
-                        for (var i = 0; i < itinerary.legs.length; i++) ...[
-                          if (i > 0)
-                            const Padding(
-                              padding: EdgeInsets.symmetric(horizontal: 3),
-                              child: Icon(
-                                Icons.chevron_right,
-                                size: 13,
-                                color: AppColors.muted,
-                              ),
-                            ),
-                          TransitLegChip(leg: itinerary.legs[i], compact: true),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Listener(
-                  onPointerDown: (event) =>
-                      onClosePointerDown?.call(event.position),
-                  child: TextButton(
-                    onPressed: onClose,
-                    style: TextButton.styleFrom(
-                      foregroundColor: const Color(0xFFD93025),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        side: const BorderSide(color: Color(0x33D93025)),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      textStyle: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    child: const Text('안내 종료'),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
+          ),
+      ],
     );
   }
 }

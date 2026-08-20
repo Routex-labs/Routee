@@ -200,6 +200,42 @@ lib/
 | 12 | 계층 방향 세우기 + 주제별 폴더 | 위반 6 → 0 | **완료** (9cc96de0, e3d58095) |
 | 13 | 주석 2차 압축 + 상한 조이기 | 12,239 → 9,649줄 | **완료** (db721efe, 258a6ea1, 1d3eba6f) |
 | 14 | 폴더 안에서 한 겹 더 묶기 | 5개 디렉터리 · 147파일 | **완료** (57a4f81d, 2ae5e34f) |
+| 15 | `map_shell_screen`을 `parts/`로 다시 가르기 | 본체 2,946 → 986줄 | **완료** |
+
+### 15단계 — 다시 커진 `map_shell_screen`을 `parts/`로
+
+8단계가 이 파일을 2,953 → 2,553줄로 줄였지만 **2,946줄로 돌아왔다.** 한 파일이라
+막을 장치가 없었기 때문이다. 야외 지도가 쓰는 `part` 방식을 그대로 옮겨,
+본체에는 상태 필드·생명주기·`build`만 남긴다.
+
+| 파일 | 줄 | 담은 것 |
+|---|---|---|
+| `map_shell_screen.dart` | 986 | 필드 전부 · `initState`/`dispose` · 지도 잠금 · `build`·`_build*` |
+| `parts/route_plan.dart` | 487 | 길찾기 두 칸 — 후보 조회·바꾸기·지도에서 고르기 |
+| `parts/sheets.dart` | 470 | 시트 chain · 건물/매장/POI 정보 시트 · 공유 링크 |
+| `parts/transit.dart` | 428 | 대중교통 조회·후보 선택·앞뒤 도보 채우기 |
+| `parts/route_start.dart` | 242 | 이동 수단 결정 · 도보/자동차 경로 시작 |
+| `parts/search.dart` | 157 | 검색창·검색 패널의 입력과 선택 |
+| `parts/bottom_bar.dart` | 130 | 하단 바 버튼 다섯(메뉴·즐겨찾기·보정·위치 지정) |
+| `parts/category.dart` | 122 | 카테고리 pill·목록 시트·층별 개수 |
+
+part 규약(왜 extension인가, 왜 `ignore_for_file`인가)은
+[야외 지도 이동 대장](outdoor-map-moves.md)이 단일 출처다. 여기서도 같다.
+
+**본문은 한 글자도 바꾸지 않았다.** 옮기기만 했고 테스트는 하나도 고치지 않았다
+(`test/screens/map_shell/` + 계층·머리 주석 검사 364개 통과). 선언 자리만 어쩔 수 없이
+움직인 것이 둘 있다.
+
+| 무엇 | 어떻게 | 왜 |
+|---|---|---|
+| `_buildingId` `_mapLock*` | 클래스 `static const` → 최상위 `const` | extension은 확장 대상의 static을 이름 없이 못 읽는다. 호출부를 15곳 고치는 대신 선언을 올렸다 |
+| `_onSearchFocusChanged` `_onRouteOriginFocusChanged` `_onRouteDestinationFocusChanged` `_onPlaceLinkChanged` | part로 안 옮기고 본체에 남김 | 아래 참고 |
+
+**extension 메서드의 tearoff는 매번 새 클로저다.** 인스턴스 메서드 tearoff는 같은
+객체·같은 메서드면 `==`가 참인데 extension은 아니라서, `addListener`로 건 것을
+`removeListener`가 못 지운다. 옮겼더니 죽은 화면이 링크 수신함을 계속 듣고 다음
+화면의 링크를 가로챘다 — `place_link_cold_start_test.dart`가 잡았다. 그래서
+`addListener`/`removeListener` 짝을 이루는 넷은 본체에 남는다.
 
 ### 14단계 — 폴더 안에서 한 겹 더 묶었다
 
@@ -288,7 +324,7 @@ lib/
 
 **총량은 문제가 아니었다.** 우리 비율 28%는 Flutter material(28.8%)·widgets(43.7%)과
 같은 대역이고, 선언당 주석 길이는 오히려 우리가 더 짧다(15.5줄 ↔ 22.8줄). 문제는 파일을
-열 때 코드 첫 줄까지 넘겨야 하는 벽이었다. 규칙은 [AGENTS.md](../../AGENTS.md)에 있고
+열 때 코드 첫 줄까지 넘겨야 하는 벽이었다. 규칙은 [주석 자리](comment-placement.md)에 있고
 상한은 `test/lib_header_comment_length_test.dart`가 지킨다.
 
 ### 10단계 — 파일 분할과 결합도는 별개 축이다

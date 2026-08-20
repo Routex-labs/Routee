@@ -64,14 +64,14 @@ void main() {
     watchPosition = defaultWatchPosition;
   });
 
-  testWidgets('안내 종료를 누르면 상단 출발/도착 칸도 함께 사라진다', (
-    WidgetTester tester,
-  ) async {
+  testWidgets('안내 종료를 누르면 상단 출발/도착 칸도 함께 사라진다', (WidgetTester tester) async {
     final positions = StreamController<Position>.broadcast();
     addTearDown(positions.close);
     watchPosition = () => positions.stream;
 
-    await tester.pumpWidget(MaterialApp(theme: AppTheme.light, home: const MapShellScreen()));
+    await tester.pumpWidget(
+      MaterialApp(theme: AppTheme.light, home: const MapShellScreen()),
+    );
     await drain(tester);
     positions.add(fix());
     await drain(tester);
@@ -84,13 +84,15 @@ void main() {
     await drain(tester);
     await tester.tap(find.text('도착'));
     await drain(tester);
+    await tester.tap(find.text('안내 시작'));
+    await drain(tester);
 
     expect(
       find.byType(EtaCard),
       findsOneWidget,
       reason: '테스트 전제(도착을 누르면 경로가 그려짐)가 성립하지 않았다',
     );
-    expect(find.byKey(const Key('route-draft-destination')), findsOneWidget);
+    expect(find.byKey(const Key('route-planner')), findsNothing);
 
     await tester.tap(find.text('안내 종료'));
     await drain(tester);

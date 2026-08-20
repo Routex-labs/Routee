@@ -72,14 +72,16 @@ void main() {
 
   /// 야외 지도에 실제로 경로가 그려진 상태를 만든다. 야외 걷기 경로는 GPS가
   /// 있어야 계산되므로 위치를 하나 흘려 넣는다.
-  Future<void> startGuidance(WidgetTester tester) async {
+  Future<void> planRoute(WidgetTester tester) async {
     // broadcast여야 한다. 화면이 상황에 따라 위치를 다시 구독하는데, 단일 구독
     // 스트림은 취소 뒤 재구독하면 'already been listened to'로 터진다.
     final positions = StreamController<Position>.broadcast();
     addTearDown(positions.close);
     watchPosition = () => positions.stream;
 
-    await tester.pumpWidget(MaterialApp(theme: AppTheme.light, home: const MapShellScreen()));
+    await tester.pumpWidget(
+      MaterialApp(theme: AppTheme.light, home: const MapShellScreen()),
+    );
     await drain(tester);
     positions.add(fix());
     await drain(tester);
@@ -105,23 +107,28 @@ void main() {
     );
   }
 
-  testWidgets('길안내 중 상단에서 도착지를 바꾸면 곧바로 그 도착지로 경로가 바뀐다', (
-    WidgetTester tester,
-  ) async {
-    await startGuidance(tester);
+  testWidgets('계획 중 도착지를 바꾸면 곧바로 그 도착지로 경로가 바뀐다', (WidgetTester tester) async {
+    await planRoute(tester);
 
     // 상단 도착 행 → 길찾기 화면. 도착지 칸이 활성인 채로 열리므로 검색어만
     // 새로 넣고 후보를 고르면 그 자리에서 경로 계산으로 이어진다. 그 화면의
     // 입력창은 [출발지, 도착지] 순서다(길찾기 화면이 상단 바를 대신한다).
-    await tester.tap(find.byKey(const Key('route-draft-destination')));
-    await drain(tester);
-    await tester.enterText(find.byType(TextField).at(1), '데모');
-    await drain(tester);
     await tester.tap(
-      find
-          .descendant(of: find.byType(ListTile), matching: find.text('데모 건물'))
-          .first,
+      find.descendant(
+        of: find.byKey(const Key('route-planner')),
+        matching: find.text('강의실 101'),
+      ),
     );
+    await drain(tester);
+    await tester.enterText(
+      find.descendant(
+        of: find.byKey(const Key('route-draft-destination')),
+        matching: find.byType(TextField),
+      ),
+      '데모',
+    );
+    await drain(tester);
+    await tester.tap(find.text('데모 건물').first);
     await drain(tester);
 
     // 도보는 안내를 시작하지 않고 경로만 그린 뒤 화면을 닫는다. 즉 버튼을 한 번

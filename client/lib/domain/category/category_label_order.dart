@@ -11,10 +11,34 @@ int categoryLabelCompare(String a, String b) {
   return normalizedOrder != 0 ? normalizedOrder : a.compareTo(b);
 }
 
-/// 중복 label을 제거하고 사용자 표시 기준으로 정렬한다.
+/// 대분류 chip을 늘어놓는 순서. **가나다도 매장 수도 아니고, 찾는 빈도순이다.**
+///
+/// 매장 수로 두면 `패션`(262)이 1번인데 패션을 카테고리로 찾는 질의는 14건뿐이다 —
+/// 브랜드명을 아는 매장은 이름으로 찾고 **모르는 것만 카테고리로 찾는다.**
+/// `편의시설`은 질의가 가장 많지만 맨 뒤다. 시설은 이미 지도에 아이콘으로 그려져
+/// chip 없이 보이고, chip을 누르면 주차 787건이 따라온다.
+/// 질의 수 표와 세트의 한계는 `docs/backend/store-category-resurvey.md`.
+///
+/// 매장 수 내림차순이 아니라 **표로 박아 두는** 이유는, 매장 수는 재분류할 때마다
+/// 바뀌어서 chip 위치가 같이 움직이기 때문이다(이번 재조사에서 실제로 크게 바뀌었다).
+/// 순서표에 없는 값은 뒤에 가나다로 붙어, 배포 시차로 백엔드가 아직
+/// `서비스`·`식음료`를 주는 동안에도 chip이 사라지지 않는다.
+const kCategoryDisplayOrder = <String>[
+  '음식점',
+  '카페',
+  '패션',
+  '뷰티',
+  '식품관',
+  '키즈',
+  '리빙',
+  '편의시설',
+];
+
+/// 중복 label을 제거하고 [kCategoryDisplayOrder] 순서로 정렬한다.
 ///
 /// [leadingLabels]에 포함된 값이 실제 목록에 있으면 지정 순서대로 맨 앞에
 /// 유지한다. 기본값인 `전체`가 원본에 없으면 새로 만들지는 않는다.
+/// 순서표에 없는 label은 그 뒤에 가나다로 붙는다.
 List<String> sortedCategoryLabels(
   Iterable<String?> labels, {
   List<String> leadingLabels = const ['전체'],
@@ -29,6 +53,11 @@ List<String> sortedCategoryLabels(
   for (final label in leadingLabels) {
     if (unique.remove(label)) leading.add(label);
   }
-  final sorted = unique.toList()..sort(categoryLabelCompare);
-  return [...leading, ...sorted];
+
+  final known = [
+    for (final label in kCategoryDisplayOrder)
+      if (unique.remove(label)) label,
+  ];
+  final rest = unique.toList()..sort(categoryLabelCompare);
+  return [...leading, ...known, ...rest];
 }

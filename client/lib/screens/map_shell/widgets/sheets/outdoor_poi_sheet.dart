@@ -257,26 +257,9 @@ class _PoiActions extends StatelessWidget {
   final VoidCallback onDestination;
 
   @override
-  Widget build(BuildContext context) => Row(
+  Widget build(BuildContext context) => RoutexPlaceActions(
     key: const ValueKey('outdoor-poi-actions'),
-    children: [
-      FilledButton(
-        onPressed: onOrigin,
-        style: FilledButton.styleFrom(
-          backgroundColor: AppColors.blue50,
-          foregroundColor: AppColors.primary,
-          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
-        ),
-        child: const Text('출발'),
-      ),
-      const SizedBox(width: 8),
-      FilledButton(
-        onPressed: onDestination,
-        style: FilledButton.styleFrom(
-          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
-        ),
-        child: const Text('도착'),
-      ),
-    ],
+    onOrigin: onOrigin,
+    onDestination: onDestination,
   );
 }

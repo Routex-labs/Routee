@@ -82,7 +82,9 @@ void main() {
     addTearDown(positions.close);
     watchPosition = () => positions.stream;
 
-    await tester.pumpWidget(MaterialApp(theme: AppTheme.light, home: const MapShellScreen()));
+    await tester.pumpWidget(
+      MaterialApp(theme: AppTheme.light, home: const MapShellScreen()),
+    );
     await drain(tester);
     positions.add(fix());
     await drain(tester);
@@ -98,6 +100,9 @@ void main() {
     await tester.tap(find.text('강의실 101').first);
     await drain(tester);
     await tester.tap(find.text('도착'));
+    await drain(tester);
+    expect(find.text('안내 시작'), findsOneWidget);
+    await tester.tap(find.text('안내 시작'));
     await drain(tester);
   }
 
@@ -117,6 +122,11 @@ void main() {
       find.byType(EtaCard),
       findsOneWidget,
       reason: '테스트 전제(도착을 누르면 경로가 그려짐)가 성립하지 않았다',
+    );
+    expect(
+      tester.getBottomLeft(find.byType(EtaCard)).dy,
+      tester.getSize(find.byType(Scaffold).first).height,
+      reason: '안내 중 하단 패널은 지도 위에 뜨지 않고 화면 아래에 붙어야 한다',
     );
     expect(
       find.byType(MapBottomBar),
@@ -162,12 +172,8 @@ void main() {
     await pumpShell(tester);
     await tester.tap(find.byTooltip('길찾기'));
     await drain(tester);
-    // 전제를 여기서 세운다. 원래 없던 걸 없다고 하면 이 테스트는 그냥 통과한다.
-    expect(
-      find.byKey(const ValueKey('travel-mode-bar')),
-      findsOneWidget,
-      reason: '테스트 전제(길찾기 모드에서는 이동 수단 줄이 뜸)가 성립하지 않았다',
-    );
+    expect(find.text('자동차'), findsNothing);
+    expect(find.text('도보'), findsNothing);
 
     await tester.enterText(
       find.descendant(
@@ -185,26 +191,28 @@ void main() {
       findsOneWidget,
       reason: '테스트 전제(도착지를 고르면 경로가 그려짐)가 성립하지 않았다',
     );
-    // 초안 바는 남아 있다 — 즉 _routeMode는 그대로다. 줄이 사라진 이유가
-    // "길찾기가 끝나서"가 아니라 **안내가 시작돼서**임을 이 한 줄이 가른다.
-    expect(find.byKey(const Key('route-draft-destination')), findsOneWidget);
-    expect(
-      find.byKey(const ValueKey('travel-mode-bar')),
-      findsNothing,
-      reason: '안내 중에 수단을 바꾸면 경로가 통째로 다시 계산돼 따라가던 안내가 끊긴다',
-    );
+    // 경로만 계산된 계획 상태에서는 플래너와 수단 줄이 그대로 남는다.
+    expect(find.byKey(const Key('route-planner')), findsOneWidget);
+    expect(find.text('안내 시작'), findsOneWidget);
+    expect(find.text('자동차'), findsOneWidget);
+    expect(find.text('도보'), findsOneWidget);
+
+    await tester.tap(find.text('안내 시작'));
+    await drain(tester);
+
+    expect(find.byKey(const Key('route-planner')), findsNothing);
+    expect(find.text('자동차'), findsNothing);
+    expect(find.text('도보'), findsNothing);
   });
 
-  testWidgets('안내 중에도 상단 초안 바는 남아 도착지를 바꿀 수 있다', (WidgetTester tester) async {
+  testWidgets('안내를 시작하면 상단 플래너에서 길안내 UI로 전환된다', (WidgetTester tester) async {
     await startGuidance(tester);
 
-    // 상단 바는 안내 중에 검색창이 아니라 출발/도착 초안 바로 바뀐다. 이건
-    // 접어야 할 사전 조작 chrome이 아니라 "지금 어디로 가는 중"인지를 적는
-    // 안내 UI이고, 길안내 중 도착지를 바꾸는 유일한 진입점이다.
     expect(
-      find.byKey(const Key('route-draft-destination')),
-      findsOneWidget,
-      reason: '접으면 도착지를 바꾸려고 안내를 먼저 끝내야 하는 화면이 된다',
+      find.byKey(const Key('route-planner')),
+      findsNothing,
+      reason: '안내 시작 뒤에도 플래너가 남으면 계획과 실제 안내가 같은 화면으로 읽힌다',
     );
+    expect(find.text('안내 종료'), findsOneWidget);
   });
 }

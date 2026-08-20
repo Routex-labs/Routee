@@ -186,8 +186,8 @@ flowchart LR
 | 항목 | iOS | Android |
 |---|---|---|
 | native 구현 | `client/ios/Runner/PdrMotionBridge.swift` | `client/android/app/src/main/kotlin/com/navigation/navigation_client/PdrMotionBridge.kt` |
-| 방향의 기본 입력 | `CMMotionManager.deviceMotion` | `TYPE_ROTATION_VECTOR`, 없으면 `TYPE_GAME_ROTATION_VECTOR` |
-| 방향 기준 | `.xMagneticNorthZVertical`을 우선 사용하고, 불가하면 `.xArbitraryCorrectedZVertical` | 일반 rotation vector는 자북 기준, game rotation vector는 절대 북 기준이 아님 |
+| 방향의 기본 입력 | `CMMotionManager.deviceMotion` | `FusedOrientationProvider`, 끊기면 `TYPE_ROTATION_VECTOR`, 그것도 없으면 `TYPE_GAME_ROTATION_VECTOR` |
+| 방향 기준 | `.xMagneticNorthZVertical`을 우선 사용하고, 불가하면 `.xArbitraryCorrectedZVertical` | FOP와 일반 rotation vector는 자북 기준, game rotation vector는 절대 북 기준이 아님 |
 | 걸음 수 기준 | `CMPedometer.numberOfSteps` | `STEP_COUNTER`가 들어오면 이를 우선; 아직 live가 아니면 `STEP_DETECTOR`를 fallback으로 사용 |
 | 거리·보폭 입력 | OS 거리, cadence, pace를 제공할 수 있음 | OS 거리·pace는 없음. cadence와 가속도 amplitude는 진단용 후보만 계산 |
 | 권한 | 앱 시작 시 sensor 권한 요청 | Android 10 이상에서는 `ACTIVITY_RECOGNITION` 권한이 있어야 step 센서를 등록 |
@@ -225,11 +225,68 @@ RoNIN 입력에 쓰는 raw accelerometer·gyroscope는 200 Hz를 요청한다. �
   peak가 확정 경로를 독자적으로 늘리지 않는다.
 - `STEP_COUNTER`를 아직 받지 못한 환경에서는 `STEP_DETECTOR`를 fallback 걸음 수로 쓴다.
   detector 이벤트는 cadence와 step timing도 제공한다.
-- rotation vector의 자력계 품질이 낮거나, 자기장 변화·heading 불일치·낮은 정확도가
-  감지되면 짧게 gyro 적분 방향을 사용한다. 일반 rotation vector에서 시작한 gyro hold는
-  마지막 자북 frame을 이어가지만, game rotation vector나 순수 gyro hold는 arbitrary
-  기준으로 취급되어 수동 방향 보정이 필요하다.
+- **방향은 `FusedOrientationProvider`(Play Services Location)의 자세를 우선 쓴다.**
+  벤더 `TYPE_ROTATION_VECTOR`를 신뢰할 수 없다는 것이 실측으로 확인됐다 — 아래
+  "Android 방향 소스를 FOP로 옮긴 근거" 참고. FOP 표본이 1초 넘게 끊기면 벤더
+  rotation vector로 되돌아가므로 Play Services가 없거나 갱신 중이어도 방향이 끊기지 않는다.
+- FOP 자세는 `getHeadingDegrees()`를 그대로 쓰지 않고 rotation vector와 **같은 +Y/−Z
+  블렌드 식**에 통과시킨다. 정면 축 정의가 두 소스에서 갈리면 소스를 바꿀 때마다 방향이
+  튀기 때문이다. FOP 원본 heading은 진단 필드로만 싣는다.
+- 자력계 품질이 낮거나, 자기장 변화·heading 불일치·낮은 정확도가 감지되면 짧게 gyro 적분
+  방향을 사용한다. 다만 **FOP를 쓰는 동안에는 원시 자력계 정확도 플래그로 hold하지 않는다** —
+  그 보정을 대신 해 주는 것이 FOP이고, 실측에서 이 플래그가 세션 내내 `low`로 남아 hold가
+  상시 켜졌다. 대신 FOP의 `getHeadingErrorDegrees()`를 문턱으로 쓴다.
+- gyro 적분값은 세션당 한 번 seed하지 않고 **상시 rotation 소스 쪽으로 끌어당긴다**(정상
+  τ≈0.5초, hold 중 τ≈20초). seed가 한 번뿐이면 자이로 바이어스가 누적되고 그 편차가 곧
+  hold 진입 조건이라 스스로를 가둔다.
+- 일반 rotation vector나 FOP에서 시작한 gyro hold는 마지막 자북 frame을 이어가지만,
+  game rotation vector나 순수 gyro hold는 arbitrary 기준으로 취급되어 수동 방향 보정이
+  필요하다. 판별은 `packages/indoor_pdr_core/lib/src/domain/heading_reference.dart`가
+  단일 출처다.
 - 종료 직전에는 counter의 마지막 관측값을 한 번 반영하고 세션을 동결한다.
+
+##### Android 방향 소스를 FOP로 옮긴 근거
+
+증상은 "안드로이드에서만 방향이 틀어진 채 고정되고, 출발 위치를 찍어도 안 고쳐진다"였다.
+같은 자리에서 iOS는 핀을 찍으면 정상으로 돌아왔다. 2026-08-17 SM-G996N(Android 15)
+세션 로그에서 나온 값이다.
+
+| 관측 | 값 |
+|---|---|
+| `magnetic_accuracy` | 세션 전 구간 `low` |
+| `rotation_heading_accuracy_deg` | `-1.0` — **이 기기는 `values[4]`를 주지 않는다** |
+| 마커 방향 − 복도 방향 | 53~58°로 **일정** |
+| `heading_bias_deg` / `walk_offset_deg` | 전 구간 `0.0` |
+
+결정적인 것은 55~58초 구간이다.
+
+| t | `device_heading_deg`(벤더 RV) | `gyro_heading_deg` |
+|---|---|---|
+| 54.5s | 281.82 | 281.80 |
+| 57.0s | 331.13 | 283.47 |
+| 58.2s | 347.52 | 287.21 |
+
+**벤더 RV가 3초 만에 66° 돌아가는 동안 자이로는 6°만 움직였다.** 짧은 구간에서는
+자이로가 훨씬 믿을 만하므로 저 66°는 실제 회전이 아니라 자기 교란이다. 벤더
+rotation vector를 절대 방위의 단일 출처로 쓸 수 없다는 뜻이다.
+
+같은 로그에서 `fused`·`device`·`gyro` 세 값의 차이가 0.0~0.5°였다. 즉 Dart·융합 쪽
+계산은 입력을 충실히 따라가고 있었고, **틀린 것은 입력 자체였다.** 융합 로직을 아무리
+고쳐도 이 증상은 사라지지 않는다.
+
+버린 대안:
+
+- **OS 위치의 bearing(`Location.getBearing()`)** — 이동 중 GPS 궤적에서만 나온다. 정지
+  상태와 실내에서 값이 없어 PDR이 필요한 구간이 그대로 빈다.
+- **플랫폼 나침반 플러그인** — 결국 같은 `TYPE_ROTATION_VECTOR`를 읽는다. 소스를
+  갈아끼운 것처럼 보이지만 원인을 건드리지 않는다.
+- **복도 맵매칭 상수 완화** — 위 세션에서 오차 53°가 `headingBiasMaxErrorDeg = 50`
+  바로 위라 bias 학습이 매번 즉시 return했다. 다만 그 세션은 걷지 않고 서 있던
+  세션이라 확정 걸음이 0이었고, 맵매칭이 못 돈 것이 상수 탓인지 판정할 수 없다.
+  **별개 항목으로 남긴다.**
+
+FOP 적용 뒤 SM-G996N과 SM-F711N 두 기기에서 개선을 확인했다. 다만 이는 현장 체감이며
+`fopHeadingDeg`와 `rvHeadingDeg`를 대조한 로그 검증은 아직 남아 있다.
 - Android 디버그 모드에서는 공식 RoNIN TCN의 최근 수평 속도를
   `STEP_DETECTOR` cadence로 나눠 자동보폭 후보를 만든다. 이 값은 기존 heading과
   `STEP_COUNTER`에만 적용한 분홍 비교 경로를 별도로 누적하며, 확정 위치·길찾기·

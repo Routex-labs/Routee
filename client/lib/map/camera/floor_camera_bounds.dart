@@ -166,11 +166,19 @@ bool shouldRecenterFollow({
 ///
 /// [keepZoom]이면 배율을 그대로 둔다(훑는 행동이라 당기면 층 배치를 잃는다).
 /// 아니면 [storeFocusZoom]까지 당기되 **이미 더 가까우면 그대로 둔다.**
+///
+/// [storeFitsViewport]는 [storeFocusZoom]이 **그 매장의 폴리곤을 재서 나온
+/// 값**이라는 뜻이다. 그때는 더 가까이 있어도 그 배율까지 **물러선다** — 크게
+/// 당겨 놓고 앵커 매장을 누르면 한 귀퉁이만 보이던 것이 이 조건에서 났다.
+/// 폴리곤을 못 재 상수로 떨어진 값이면 물러서지 않는다. 매장 크기를 모르는
+/// 채 배율을 낮추면 훑던 화면만 잃는다.
 double focusZoomFor({
   required double currentZoom,
   required bool keepZoom,
   double storeFocusZoom = 19.0,
+  bool storeFitsViewport = false,
 }) {
   if (keepZoom) return currentZoom;
+  if (storeFitsViewport) return storeFocusZoom;
   return currentZoom > storeFocusZoom ? currentZoom : storeFocusZoom;
 }

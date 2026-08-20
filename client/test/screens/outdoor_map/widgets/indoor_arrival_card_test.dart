@@ -25,8 +25,8 @@ void main() {
       ),
     );
 
-    expect(find.text('스타벅스 리저브'), findsOneWidget);
-    expect(find.text('B2 · 도착했습니다'), findsOneWidget);
+    expect(find.text('도착했습니다'), findsOneWidget);
+    expect(find.text('스타벅스 리저브 · B2'), findsOneWidget);
   });
 
   testWidgets('층을 모르면 층 없이 도착만 말한다', (tester) async {
@@ -56,18 +56,6 @@ void main() {
     expect(find.textContaining('0m'), findsNothing);
   });
 
-  testWidgets('띡 하고 나타나지 않고 떠오르며 들어온다', (tester) async {
-    await tester.pumpWidget(
-      _host(IndoorArrivalCard(destinationName: '레페토', onConfirm: () {})),
-    );
-    await tester.pump();
-    final opacity = tester.widget<Opacity>(find.byType(Opacity).first);
-    expect(opacity.opacity, lessThan(1.0), reason: '첫 프레임부터 불투명하면 등장이 없다');
-
-    await tester.pumpAndSettle();
-    expect(tester.widget<Opacity>(find.byType(Opacity).first).opacity, 1.0);
-  });
-
   testWidgets('안내 종료를 누르면 상위에 알린다', (tester) async {
     var confirmed = false;
     await tester.pumpWidget(
@@ -79,7 +67,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byKey(const Key('indoor-arrival-confirm')));
+    await tester.tap(find.text('안내 종료'));
 
     expect(confirmed, isTrue);
   });

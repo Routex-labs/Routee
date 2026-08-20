@@ -83,13 +83,55 @@ WalkRouteKind classifyWalkRoute({
   // 라우팅에 넘기고 "도착지 노드 정보가 없어..."만 봤다. 출발 노드가 이미
   // 있으면 PDR 앵커([indoorStartReady])는 필요 없다 — 그래서 조건 1)과 같은
   // 모양으로 갈린다.
-  if (indoorContextActive &&
-      destination.nodeId == null &&
-      (origin == null ? indoorStartReady : origin.isIndoorPoint)) {
+  //
+  // **도면 유무도 1)과 같이 다룬다.** 출발지를 직접 골랐으면 지금 야외 지도를
+  // 보고 있어도 그 노드가 시작점이다. 도면을 요구하던 동안에는 그 요청이 아래
+  // `outdoor`로 떨어져 건물을 관통하는 TMAP 보행선이 그려졌다.
+  if (destination.nodeId == null &&
+      (origin == null
+          ? (indoorContextActive && indoorStartReady)
+          : origin.isIndoorPoint)) {
     return WalkRouteKind.indoorToOutdoor;
+  }
+
+  // 4) 두 끝점이 모두 건물 밖 지점이면 **도면이 떠 있어도 야외 걷기다.**
+  //
+  // 예전에는 아래 `indoorContextActive` 한 줄만 보고 [indoorFallback]으로
+  // 흘려보냈다. 그래서 건물 안에 선 채로 바깥 두 지점을 이으면(실기기:
+  // "서울창업허브 공덕 → 공덕" 도보) 실내 라우팅이 그 요청을 받아 "도착지 노드
+  // 정보가 없어 경로를 계산할 수 없습니다"만 띄우고 끝났다 — 사용자에게는
+  // 도보만 안 되는 화면으로 보인다.
+  //
+  // [indoorFallback]은 **끝점 어느 한쪽에라도 실내 정보가 있을 때**의 갈래다.
+  // 아무 쪽에도 없으면 실내 그래프가 할 수 있는 일이 없다.
+  if (_isOutdoorPoint(destination) &&
+      (origin == null || _isOutdoorPoint(origin))) {
+    return WalkRouteKind.outdoor;
   }
 
   if (!indoorContextActive) return WalkRouteKind.outdoor;
 
   return WalkRouteKind.indoorFallback;
+}
+
+/// 이 여정이 **건물 안에서 건물 안으로**만 가는지. 화면이 이동 수단 줄을 띄울지
+/// 정할 때 쓴다 — 참이면 수단은 도보 하나뿐이라 고를 것이 없다.
+///
+/// 판정 모양은 위 1) `indoorToIndoor` 갈래와 **같아야 한다.** 갈리면 화면에는
+/// 자동차·대중교통이 떠 있는데 계산은 실내 그래프로 도는 상태가 생긴다.
+///
+/// 다른 점은 하나, **[indoorStartReady]를 묻지 않는다.** 그건 실내 위치가
+/// 잡혔는가이지 이 여정이 어떤 종류인가가 아니다 — 앵커를 아직 못 잡았다고
+/// 자동차 버튼이 나타나면, 누르는 순간 실내 구간이 통째로 빠진다.
+///
+/// **두 끝점을 다 본다.** 도착지만 보면 "서울창업허브 → 샤브미담"처럼 멀리서
+/// 건물 안 매장을 찍는 길까지 참이 되는데, 그건 야외 이동이 대부분인 여정이라
+/// 대중교통이 정당한 선택이다.
+bool isIndoorOnlyWalk({
+  required DirectionsCandidate? origin,
+  required DirectionsCandidate? destination,
+  required bool indoorContextActive,
+}) {
+  if (destination == null || !destination.isIndoorPoint) return false;
+  return origin == null ? indoorContextActive : origin.isIndoorPoint;
 }

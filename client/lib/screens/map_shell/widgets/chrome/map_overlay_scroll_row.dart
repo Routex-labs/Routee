@@ -1,5 +1,6 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:routex_design_system/routex_design_system.dart';
 
 /// 지도 위에 얹은 가로 스크롤 오버레이 열(장소 pill + 카테고리 chip)의 껍데기.
 ///
@@ -95,7 +96,9 @@ class _MapOverlayScrollRowState extends State<MapOverlayScrollRow> {
     return SingleChildScrollView(
       controller: _controller,
       scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.symmetric(
+        horizontal: RoutexSpacing.screenGutter,
+      ),
       // 잠금·휠 처리는 뷰포트 전체가 아니라 chip이 실제로 그려진 영역에만 건다.
       // 뷰포트는 화면 폭 전체라, 바깥까지 잠그면 chip 오른쪽 빈 곳에 마우스를
       // 올려 둔 것만으로 지도 휠 줌이 죽는다.

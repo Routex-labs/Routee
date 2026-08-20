@@ -53,3 +53,17 @@ def test_없는_매장_링크도_페이지는_선다(api_client):
     response = api_client.get("/place/no-such-building/no-such-place")
 
     assert response.status_code == 200
+
+
+# 이 주소는 사람들이 메신저에 붙여 넣는 **공개 페이지**이고, 같은 출처가 assetlinks.json을
+# 낸다. 경로 파라미터는 서버가 percent-decode한 뒤 넘겨주므로 `%3Cimg ...%3E`가 살아 있는
+# 마크업으로 들어온다. "id가 본문에 있다"만 보면 이스케이프를 걷어내도 통과하므로,
+# **꺾쇠가 실체로 남지 않는 것**을 직접 확인한다.
+def test_링크의_글자가_마크업으로_살아나지_않는다(api_client):
+    response = api_client.get("/place/b/%3Cimg%20src=x%20onerror=alert(1)%3E")
+
+    assert response.status_code == 200
+    body = response.text
+    assert "<img" not in body
+    assert "onerror" not in body or "&lt;img" in body
+    assert "&lt;img" in body

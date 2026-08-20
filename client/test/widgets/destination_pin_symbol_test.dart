@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:navigation_client/map/icon/destination_pin.dart';
+import 'package:navigation_client/screens/outdoor_map/layers/marker_map_layers.dart';
 
 /// 도착 핀 심볼 레이어 규칙을 못 박는다.
 ///
@@ -87,5 +88,10 @@ void main() {
       final approxWidth = kPinLabelText.length * kPinLabelFontSize;
       expect(approxWidth, lessThan(kPinHeadRadius * 2));
     });
+  });
+
+  test('실내 도착 핀은 현재 위치보다 눈에 띄는 크기를 쓴다', () {
+    expect(kDestinationPinIconSizeZ16, greaterThanOrEqualTo(0.24));
+    expect(kDestinationPinIconSizeZ20, greaterThanOrEqualTo(0.50));
   });
 }
