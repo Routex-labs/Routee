@@ -623,6 +623,10 @@ class IndoorGuidanceSession {
     bool onEscalator = false,
     int? nowMs,
   }) {
+    // 호출부가 [onEscalator]를 넘기지 않아도 탑승 중이면 참이어야 한다. 인자
+    // 하나에 맡겨 뒀더니 화면 쪽 호출이 실제로 그것을 빠뜨렸고, 아래 방어는
+    // 고정 지점이 잡힌 경우([isPositionHeld])에만 걸려 있었다.
+    final riding = onEscalator || _escalator.pendingTransition != null;
     final route = _routeSegment;
     if (route == null || result == null) {
       if (route == null) {
@@ -682,7 +686,7 @@ class IndoorGuidanceSession {
     // 에스컬레이터 위나 탑승점 고정 구간에서는 진행 상태를 갱신하지 않는다.
     // 위치가 한 지점에 묶여 있어 그 투영은 "경로를 벗어났다"는 오판만 만들고,
     // 곧 층이 바뀔 자리에서 재탐색을 돌린다.
-    if (onEscalator || isPositionHeld) {
+    if (riding || isPositionHeld) {
       return GuidanceProgressUpdate(
         displayProgress: _displayProgress,
         measuredProgress: _measuredProgress,

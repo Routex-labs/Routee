@@ -666,6 +666,107 @@ void main() {
     });
   });
 
+  group('탑승 중 진행률 — 호출부가 인자를 빠뜨려도', () {
+    // 고정을 걸어 주는 takePhaseChanges를 **부르지 않는다.** 화면 쪽 호출이
+    // onEscalator를 실제로 빠뜨리고 있었고, 그때 남은 방어는 isPositionHeld
+    // 하나뿐이었다. 탑승 자체를 근거로 막는지를 본다.
+    // 에스컬레이터 **너머로도 복도가 이어진다.** 여기서 끊어 두면 보정 위치가
+    // 어차피 못 넘어가 진행률이 저절로 멈추고, 테스트가 아무것도 안 지킨다.
+    const graph = FloorGraph(
+      nodes: [
+        GraphNode(id: 'w', type: 'corridor', xM: 0, yM: 0),
+        GraphNode(
+          id: 'es-dn',
+          type: 'escalator',
+          name: 'ES1-DN(TOB1)',
+          xM: 20,
+          yM: 0,
+        ),
+        GraphNode(id: 'e', type: 'corridor', xM: 40, yM: 0),
+      ],
+      edges: [
+        GraphEdge(
+          id: 'we',
+          fromNodeId: 'w',
+          toNodeId: 'es-dn',
+          lengthM: 20,
+          bidirectional: true,
+          geometryLocalM: [LocalPoint(0, 0), LocalPoint(20, 0)],
+        ),
+        GraphEdge(
+          id: 'ee',
+          fromNodeId: 'es-dn',
+          toNodeId: 'e',
+          lengthM: 20,
+          bidirectional: true,
+          geometryLocalM: [LocalPoint(20, 0), LocalPoint(40, 0)],
+        ),
+      ],
+    );
+    const route = IndoorRoute(
+      points: [],
+      pointsLocalM: [LocalPoint(0, 0), LocalPoint(20, 0), LocalPoint(40, 0)],
+      nodeIds: ['w', 'es-dn', 'e'],
+      edgeIds: ['we', 'ee'],
+      distanceMeters: 40,
+    );
+
+    double pressureAt(double altitudeM) =>
+        1013.25 * math.pow(1.0 - altitudeM / 44330.0, 1 / 0.190295);
+
+    test('탑승 후보가 열려 있으면 진행률이 얼어붙는다', () {
+      final session = newSession()
+        ..attach(buildingId: 'b1')
+        ..setContext(floorId: '1F', graph: graph, floorLabels: ['1F', 'B1'])
+        ..setAnchor(_anchor())
+        ..setRouteSegment(route);
+
+      var nowMs = 1000;
+      for (final steps in [20, 23, 25, 27]) {
+        nowMs += 1500;
+        session.onSnapshot(_walkedEast(steps), timestampMs: nowMs);
+      }
+      session.updateProgress(
+        session.trackingResult,
+        previewSteps: 27,
+        nowMs: nowMs,
+      );
+      final frozen = session.displayProgress!.remainingM;
+
+      void feed(double altitudeM) {
+        nowMs += 1069;
+        session.onAltitude(
+          AltitudeSample(
+            timestampMs: nowMs,
+            pressureHpa: pressureAt(altitudeM),
+            source: 'test',
+          ),
+        );
+      }
+
+      for (var i = 0; i < 5; i += 1) {
+        feed(0);
+      }
+      // 도면 교체(mapSwapDeltaM=2.4m)를 넘겨야 탑승 후보가 열린다.
+      for (var i = 1; i <= 12; i += 1) {
+        feed(-3.5 * i / 12);
+      }
+
+      expect(session.escalator.pendingTransition, isNotNull);
+      expect(session.isPositionHeld, isFalse);
+
+      // 발판 진동이 걸음으로 세어져 들어오는 구간이다.
+      nowMs += 1500;
+      session.updateProgress(
+        session.onSnapshot(_walkedEast(45), timestampMs: nowMs),
+        previewSteps: 45,
+        nowMs: nowMs,
+      );
+
+      expect(session.displayProgress!.remainingM, frozen);
+    });
+  });
+
   group('경로 진행률', () {
     /// 복도(0,0)~(50,0)을 그대로 따라가는 경로.
     const route = IndoorRoute(

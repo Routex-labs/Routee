@@ -28,6 +28,7 @@ import '../../domain/guidance/guidance_start_reach.dart';
 import '../../features/debug_mode/debug_mode.dart';
 import '../../domain/route/dijkstra.dart';
 import '../../domain/route/route_endpoint_fill.dart';
+import '../../domain/guidance/reroute_start_node.dart';
 import '../../domain/guidance/route_guidance.dart';
 import '../../features/indoor_navigation/application/corridor_position_tracker.dart';
 import '../../domain/guidance/escalator_ride.dart';

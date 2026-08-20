@@ -354,6 +354,9 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
   /// **층 선택기 층이 아니라 앵커 층을 기준으로 한다.** 선택기는 사용자가 다른
   /// 층을 둘러보는 UI 상태일 뿐이다. 그 층으로 재탐색하면 다층 안내 중간
   /// 세그먼트가 단층 경로로 바뀌어 최종 도착처럼 보인다.
+  ///
+  /// 출발 노드는 [pickRerouteStartNodeId]가 고른다 — 최근접 노드를 그대로 쓰면
+  /// 나란한 에스컬레이터 레인 사이에서 경로가 뒤집힌다.
   Future<void> _rerouteIndoorFromCurrentPosition() async {
     if (_indoorRerouteInFlight) return;
     final destination = _indoorRouteDestination;
@@ -370,10 +373,10 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
         current == null) {
       return;
     }
-    final startNodeId = _nearestNodeId(
-      graph.nodes,
-      current.eastM,
-      current.northM,
+    final startNodeId = pickRerouteStartNodeId(
+      nodes: graph.nodes,
+      xM: current.eastM,
+      yM: current.northM,
       excludingNodeId: destinationNodeId,
     );
     if (startNodeId == null) return;
