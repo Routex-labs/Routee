@@ -88,6 +88,7 @@ import '../../map/icon/place_pin.dart';
 import 'widgets/map_overlay_tap_guard.dart';
 import 'entry/floor_outline.dart';
 import 'entry/heading_debug.dart';
+import 'entry/heading_log.dart';
 import 'gps/gps_session.dart';
 import 'entry/indoor_entry_gps.dart';
 import 'entry/initial_camera.dart';
@@ -1086,6 +1087,10 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   /// ([_publishHeadingDebug]). 갱신이 걸음마다라 위 둘과 같은 이유로
   /// [ValueNotifier]다.
   final ValueNotifier<String?> _headingDebugText = ValueNotifier<String?>(null);
+
+  /// heading 로그를 마지막으로 찍은 시각. 초당 한 줄로 묶는 스로틀이다
+  /// ([_logHeading]).
+  DateTime? _lastHeadingLogAt;
 
   /// 마지막으로 나온 층 전환 진단 이벤트.
   ///

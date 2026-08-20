@@ -29,6 +29,8 @@ class PdrQualityFeatures {
     required this.walkDirConfidence,
     required this.headingConverged,
     required this.headingSpreadDeg,
+    this.magneticFieldUt,
+    this.headingTrustworthy = false,
   });
 
   /// |orange−green| / green (초록 거리 대비 주황 거리 괴리, %).
@@ -48,12 +50,29 @@ class PdrQualityFeatures {
   final String headingSource;
   final String magneticAccuracy;
   final double rotationHeadingAccuracyDeg;
+
+  /// 자기장 **세기**(µT). 방향이 아니라 크기다.
+  ///
+  /// [magneticAccuracy]·[rotationHeadingAccuracyDeg]와 달리 기기의 자기 신고가
+  /// 아니라 **관측값**이라, 아무 품질 신호도 안 주는 기기에서 유일하게 남는
+  /// 근거다(실측: SM-F711N은 앞의 둘이 각각 `unknown`·−1이다). 지구 자기장은
+  /// 지표 어디서나 25~65 µT라, 이 범위를 크게 벗어난 값은 나침반이 지구가 아닌
+  /// 무언가를 보고 있다는 뜻이다. 값을 못 받았으면 null이다.
+  final double? magneticFieldUt;
   final double cadenceHz;
   final double pitchDeg;
   final double rollDeg;
 
   /// heading reference가 자북 기준인지. false면 arbitrary corrected fallback이다.
   final bool headingReferenceIsMagneticNorth;
+
+  /// 이 방위를 앵커의 기준으로 삼아도 되는지([PdrSession.headingTrustworthy]).
+  ///
+  /// [headingReferenceIsMagneticNorth]와 **다른 질문이다.** 진단 화면이 이 둘을
+  /// 나란히 보여야 "frame은 맞는데 못 믿는 것"과 "frame부터 아닌 것"이 갈린다.
+  /// 판정 자체는 세션이 하고 여기서는 실어 나르기만 한다 — UI가 같은 규칙을
+  /// 다시 쓰면 문턱을 고칠 때 한쪽만 고쳐진다.
+  final bool headingTrustworthy;
 
   /// accel peak reject 사유별 카운트.
   final Map<String, int> peakRejectHistogram;

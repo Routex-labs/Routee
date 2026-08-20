@@ -102,6 +102,7 @@ class PdrSession {
   double rollDeg = 0;
   String magneticAccuracy = 'unknown';
   double rotationHeadingAccuracyDeg = -1;
+  double? magneticFieldUt;
   double walkDirDeg = 0;
   double walkDirConfidence = 0;
   int? lastMotionAtMs;
@@ -174,6 +175,7 @@ class PdrSession {
     magneticAccuracy = e.magneticAccuracy ?? magneticAccuracy;
     rotationHeadingAccuracyDeg =
         e.rotationHeadingAccuracyDeg ?? rotationHeadingAccuracyDeg;
+    magneticFieldUt = e.magneticField ?? magneticFieldUt;
     headingStable = e.headingStable ?? headingStable;
     yawDeg = e.yawDeg ?? yawDeg;
     gyroHeadingDeg = e.gyroHeadingDeg ?? gyroHeadingDeg;
@@ -502,6 +504,8 @@ class PdrSession {
         walkDirConfidence: walkDirConfidence,
         headingConverged: headingConverged,
         headingSpreadDeg: headingSpreadDeg,
+        magneticFieldUt: magneticFieldUt,
+        headingTrustworthy: headingTrustworthy,
       ),
     );
   }

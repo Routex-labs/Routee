@@ -318,6 +318,43 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
       headingErrorDeg:
           _pdrTrailState.snapshot?.quality.features.rotationHeadingAccuracyDeg,
     );
+    _logHeading(markerHeadingDeg);
+  }
+
+  /// 칩과 **같은 값**으로 heading 네 토막을 로그 한 줄에 찍는다.
+  ///
+  /// 칩은 화면에 네 자리만 담지만 원인을 가르려면 그 판정의 근거(자기장 세기,
+  /// walkOffset, 신뢰 판정)까지 나란히 있어야 한다. 걷는 중에 읽는 값이라
+  /// 초당 한 줄로 묶는다 — 스냅샷은 걸음마다 오므로 거르지 않으면 로그가
+  /// 흘러가 정작 앵커가 잡히는 순간을 못 본다.
+  void _logHeading(double? markerHeadingDeg) {
+    final now = DateTime.now();
+    final last = _lastHeadingLogAt;
+    if (last != null && now.difference(last) < const Duration(seconds: 1)) {
+      return;
+    }
+    _lastHeadingLogAt = now;
+    final features = _pdrTrailState.snapshot?.quality.features;
+    debugPrint(
+      describeHeadingLog(
+        deviceBearingDeg: features?.deviceHeadingDeg,
+        gyroBearingDeg: features?.gyroHeadingDeg,
+        orientationBearingDeg: _pdrTrailState.snapshot?.orientationHeadingDeg,
+        walkingBearingDeg: _pdrTrailState.snapshot?.walkingHeadingDeg,
+        walkOffsetDeg: features?.walkOffsetDeg,
+        headingConverged: features?.headingConverged,
+        magneticFieldUt: features?.magneticFieldUt,
+        headingErrorDeg: features?.rotationHeadingAccuracyDeg,
+        magneticAccuracy: features?.magneticAccuracy,
+        headingSource: features?.headingSource,
+        anchorRotationDeg: _pdrTrailState.anchor?.rotationDeg,
+        calibrationPhase:
+            indoorNavigationDriver.currentCalibration.phase.name,
+        headingTrustworthy: features?.headingTrustworthy,
+        markerBearingDeg: markerHeadingDeg,
+        cameraBearingDeg: _mapController?.cameraPosition?.bearing ?? 0,
+      ),
+    );
   }
 
   Future<void> _syncDebugPdrLayers() async {
