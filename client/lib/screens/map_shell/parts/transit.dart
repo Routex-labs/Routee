@@ -242,6 +242,24 @@ extension _MapShellTransit on _MapShellScreenState {
       // 스냅하는데, 그 도로가 내린 곳 반대편일 수 있다. 내린 자리에서 가장 가까운
       // 문을 우리가 직접 고른다 — 그 자리를 어떻게 구하는지는
       // [transitDropPoint]에 있다.
+      // **건물 안에서 출발하면 정류장까지의 실내 구간을 먼저 그린다.**
+      //
+      // 거울상인 하차 쪽은 아래 [prepareIndoorLegFromDrop]으로 이미 있었는데,
+      // 승차 쪽은 함수([showIndoorLegToTransitBoarding])와 좌표 계산
+      // ([transitBoardPoint])이 다 만들어져 있으면서 **부르는 자리만 없었다.**
+      // 그래서 실내에서 대중교통을 시작하면 바깥 경로만 그려지고, 사용자는 지금
+      // 서 있는 층에서 어느 문으로 나가야 하는지 화면에서 알 수 없었다.
+      //
+      // 대중교통 경로를 그리기 **전에** 부른다 — 그 함수가 `_userDestination`을
+      // 비우므로, 뒤에 부르면 방금 세운 도착 핀이 지워진다.
+      final boardingWalkOrigin = _indoorContextActive
+          ? await outdoor.showIndoorLegToTransitBoarding(
+              transitBoardPoint(picked, fallback: origin),
+              origin: _indoorOriginPoi(),
+            )
+          : null;
+      if (!mounted) return;
+
       final dropPoint = transitDropPoint(picked, fallback: destination.point);
       final indoorStore = _indoorStoreOf(destination);
       // **우리 건물을 향하는 안내면 하차 지점 기준으로 문을 다시 고른다.**
@@ -282,7 +300,10 @@ extension _MapShellTransit on _MapShellScreenState {
         completed,
         destination: walkTarget,
         label: '${destination.title}까지',
-        origin: origin,
+        // 실내 구간을 그렸으면 바깥 도보는 **그 문에서** 시작한다. 안 그러면
+        // 실내 선은 문에서 끝나는데 바깥 선은 건물 안 좌표에서 뻗어, 두 선이
+        // 서로 다른 곳을 가리킨다.
+        origin: boardingWalkOrigin ?? origin,
         // 나머지 후보도 함께 넘겨 회색으로 깔린다. 고른 것 하나만 그리면 "다른
         // 길도 있다"가 시트를 다시 열기 전까지 화면에서 사라진다.
         //
@@ -380,6 +401,17 @@ extension _MapShellTransit on _MapShellScreenState {
       point: candidate.point,
       nodeId: nodeId,
     );
+  }
+
+  /// 사용자가 **출발지로 고른 실내 매장**. 안 골랐으면 null이라 실내 구간이
+  /// PDR 앵커(=지금 서 있는 자리)에서 시작한다.
+  ///
+  /// [_indoorStoreOf]의 출발지 쪽 짝이다. 좌표만 있는 야외 지점은 실내 라우팅의
+  /// 시작 노드가 못 되므로 걸러 낸다.
+  PoiSearchResult? _indoorOriginPoi() {
+    final selected = _selectedOrigin;
+    if (selected == null) return null;
+    return _indoorStoreOf(selected);
   }
 
   /// 고른 한 경로의 출발·도착 도보를 TMAP 보행자 경로로 채운다.
