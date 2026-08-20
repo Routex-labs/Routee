@@ -227,7 +227,7 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
     if (!mounted) return;
     _notifyRouteStateIfChanged();
     // 앵커를 방금 찍었으므로 이제 옮길 자리가 있다. 야외 갈래와 같은 연출이다.
-    await _moveCameraToGuidanceStart();
+    _moveCameraToGuidanceStart();
   }
 
   /// 안내 시작 판정에 쓸, 지금 지도에 그려진 야외 경로의 좌표열.
@@ -290,7 +290,7 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
       await startFollowingCurrentLocation();
       return;
     }
-    await _moveCameraToGuidanceStart();
+    _moveCameraToGuidanceStart();
   }
 
   /// 안내를 시작하는 순간 시점을 **지금 서 있는 자리**로 내린다.
@@ -302,7 +302,21 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
   /// 위치의 주인을 그대로 따른다 — 실내면 도면 위 실내 마커(바라보는 방향으로
   /// 회전까지), 야외면 GPS 좌표다. 둘 다 없으면 아무것도 하지 않는다: 옮길
   /// 자리를 모르면서 배율만 당기면 엉뚱한 곳을 확대한다.
-  Future<void> _moveCameraToGuidanceStart() async {
+  /// **다음 프레임에 옮긴다.** 개요 맞추기([_fitCameraToPoints])가 자기 이동을
+  /// `addPostFrameCallback`으로 미뤄 두기 때문이다. 지금 자리에서 바로 옮기면
+  /// 그 예약이 뒤에 도착해 카메라를 경로 전체로 도로 끌고 간다 — 시작을 눌러도
+  /// 화면이 그대로인 것처럼 보인 원인이 이것이다. 콜백은 등록 순서대로 도므로
+  /// 뒤에 걸면 이쪽이 마지막이 된다.
+  /// **기다리지 않는다.** 프레임이 돌아야 콜백이 뜨는데, 이 함수를 await하는
+  /// 호출부가 프레임을 진행시키지 않으면 그대로 멈춘다(위젯 테스트가 실제로
+  /// 그렇게 걸렸다). 카메라 이동은 호출부가 기다릴 이유가 없는 일이다.
+  void _moveCameraToGuidanceStart() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_moveCameraToStartPointNow());
+    });
+  }
+
+  Future<void> _moveCameraToStartPointNow() async {
     if (_indoorEntered) {
       await _centerOnIndoorMarker(zoom: walkingViewZoom);
       return;
