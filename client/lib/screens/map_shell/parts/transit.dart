@@ -236,12 +236,6 @@ extension _MapShellTransit on _MapShellScreenState {
       final outdoor = _outdoorKey.currentState;
       if (outdoor == null) return;
 
-      // **건물 안 매장이면 마지막 도보는 매장이 아니라 문으로 간다.**
-      //
-      // 매장 좌표를 그대로 끝점으로 주면 TMAP이 그 좌표에서 가장 가까운 도로로
-      // 스냅하는데, 그 도로가 내린 곳 반대편일 수 있다. 내린 자리에서 가장 가까운
-      // 문을 우리가 직접 고른다 — 그 자리를 어떻게 구하는지는
-      // [transitDropPoint]에 있다.
       // **건물 안에서 출발하면 정류장까지의 실내 구간을 먼저 그린다.**
       //
       // 거울상인 하차 쪽은 아래 [prepareIndoorLegFromDrop]으로 이미 있었는데,
@@ -252,7 +246,17 @@ extension _MapShellTransit on _MapShellScreenState {
       //
       // 대중교통 경로를 그리기 **전에** 부른다 — 그 함수가 `_userDestination`을
       // 비우므로, 뒤에 부르면 방금 세운 도착 핀이 지워진다.
-      final boardingWalkOrigin = _indoorContextActive
+      //
+      // **도면 유무만 보면 안 된다**([transitStartsIndoors]) — 도보 갈래
+      // ([classifyWalkRoute])와 같은 모양이라야 수단을 바꾸는 것만으로 안내
+      // 앞부분이 사라지지 않는다.
+      final boardingWalkOrigin =
+          transitStartsIndoors(
+            origin: _selectedOrigin,
+            indoorContextActive: _indoorContextActive,
+            indoorStartReady:
+                indoorNavigationDriver.currentCalibration.canRenderPosition,
+          )
           ? await outdoor.showIndoorLegToTransitBoarding(
               transitBoardPoint(picked, fallback: origin),
               origin: _indoorOriginPoi(),
@@ -260,6 +264,12 @@ extension _MapShellTransit on _MapShellScreenState {
           : null;
       if (!mounted) return;
 
+      // **건물 안 매장이면 마지막 도보는 매장이 아니라 문으로 간다.**
+      //
+      // 매장 좌표를 그대로 끝점으로 주면 TMAP이 그 좌표에서 가장 가까운 도로로
+      // 스냅하는데, 그 도로가 내린 곳 반대편일 수 있다. 내린 자리에서 가장 가까운
+      // 문을 우리가 직접 고른다 — 그 자리를 어떻게 구하는지는
+      // [transitDropPoint]에 있다.
       final dropPoint = transitDropPoint(picked, fallback: destination.point);
       final indoorStore = _indoorStoreOf(destination);
       // **우리 건물을 향하는 안내면 하차 지점 기준으로 문을 다시 고른다.**

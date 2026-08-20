@@ -98,7 +98,7 @@ import 'widgets/placing_anchor_hint.dart';
 import 'route_recompute_policy.dart';
 import 'layers/indoor_overlay_layers.dart';
 import 'camera/guidance_follow.dart';
-import 'camera/guidance_stop_camera.dart';
+import 'camera/route_overview_camera.dart';
 import 'camera/map_camera_commands.dart';
 import 'layers/marker_map_layers.dart';
 import 'layers/shape_map_layers.dart';

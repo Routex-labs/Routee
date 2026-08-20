@@ -1,12 +1,19 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:navigation_client/screens/outdoor_map/camera/guidance_stop_camera.dart';
+import 'package:navigation_client/screens/outdoor_map/camera/route_overview_camera.dart';
 
-/// 안내를 끄고 계획 화면으로 돌아갈 때 카메라가 어디로 가는지의 검증 기준표.
+/// 야외 경로 전체를 담아도 되는지와, 안 될 때 카메라가 어디로 가는지의 기준표.
 ///
 /// 실기기 증상: 실내→야외 안내를 시작한 뒤 뒤로가기를 누르면 카메라가 야외 구간
 /// 전체로 물러서면서 도면이 접혔고, 그 뒤로는 길찾기가 실내 갈래로 들어가지 못해
 /// **두 번째 길찾기부터 실내 구간이 안 그려졌다.**
 void main() {
+  test('도면을 편 상태에서는 경로 전체를 담지 않는다', () {
+    // 경로 전체를 담는 맞추기에는 줌 하한이 없다. 물러선 카메라가 멈추는 순간
+    // 실내 오버레이가 접히고, 접힌 뒤로는 실내 갈래로 들어가지 못한다.
+    expect(canFitWholeRouteOverIndoor(indoorEntered: true), isFalse);
+    expect(canFitWholeRouteOverIndoor(indoorEntered: false), isTrue);
+  });
+
   test('도면을 편 상태에서는 야외 경로 전체로 물러서지 않는다', () {
     expect(
       guidanceStopCameraTarget(

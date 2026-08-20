@@ -437,15 +437,13 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
       // 화면이 도시 축척으로 바뀌고 건물이 점이 된다 — "건물 위치가 안 나온다"의
       // 정체가 이것이다. 사용자가 직접 고른 목적지면 그대로 맞춘다.
       //
-      // **도면을 펴고 있는 동안에는 고른 목적지여도 안 가져간다.** 실내→야외
-      // 여정에서 이 자리가 바깥 구간 전체(출구~목적지)에 카메라를 맞추는데,
-      // 목적지가 몇백 m만 떨어져도 그 배율이 이탈 임계값(15.6) 아래로 떨어진다.
-      // 그러면 다음 카메라 정지에서 오버레이가 접히고([_handleCameraIdle]),
-      // 방금 그린 실내 구간이 도면과 함께 사라진다 — **"실내 경로가 안 보인다"의
-      // 정체가 이것이다.** 지금 사용자는 건물 안이고, 봐야 할 것은 출구까지의
-      // 실내 구간이다. 바깥 구간은 나간 뒤 [_activatePendingOutdoorRoute]가
-      // 그 자리에서 다시 그리며 그때 카메라를 맞춘다.
-      if (_userDestination != null && !_indoorEntered) _fitCameraToRoute(route);
+      // **도면을 펴고 있는 동안에는 고른 목적지여도 안 가져간다** — 그 규칙과
+      // 근거는 [canFitWholeRouteOverIndoor]에 있다. 여기서 접히면 실내→야외
+      // 여정에서 방금 그린 실내 구간이 도면과 함께 사라진다.
+      if (_userDestination != null &&
+          canFitWholeRouteOverIndoor(indoorEntered: _indoorEntered)) {
+        _fitCameraToRoute(route);
+      }
     }
   }
 
@@ -1078,10 +1076,20 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
     _syncRouteLayer();
     await _syncTransitLayer();
     _notifyRouteStateIfChanged();
-    _fitCameraToPoints(
-      itinerary.points,
-      bottomSheetFraction: bottomSheetFraction,
-    );
+    // **도면을 편 상태에서는 여정 전체로 물러서지 않는다.** 이유와 안 지켰을 때
+    // 무엇이 깨지는지는 [canFitWholeRouteOverIndoor]에 있다. 여기서는 그 대가가
+    // 특히 크다 — 이 함수는 후보를 고르기 **전에도** 불리므로(preview), 물러선
+    // 카메라가 멈추는 순간 도면이 접히고, 정작 실내 구간을 붙일 차례가 됐을 때는
+    // "건물 안에서 출발한다"는 판정이 이미 거짓이 된 뒤다.
+    //
+    // 대신 카메라를 그대로 둔다. 지금 화면은 건물이고, 후보 사이의 차이(노선·
+    // 환승·소요)는 그 위로 올라오는 후보 목록이 글로 말한다.
+    if (canFitWholeRouteOverIndoor(indoorEntered: _indoorEntered)) {
+      _fitCameraToPoints(
+        itinerary.points,
+        bottomSheetFraction: bottomSheetFraction,
+      );
+    }
   }
 
   /// 후보 상세에서 확정한 경로로 **안내를 시작한다.** 셸(길찾기 화면)이
