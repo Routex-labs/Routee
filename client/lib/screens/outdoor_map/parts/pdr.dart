@@ -313,6 +313,10 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
       headingSource: _pdrTrailState.snapshot?.quality.features.headingSource,
       magneticAccuracy:
           _pdrTrailState.snapshot?.quality.features.magneticAccuracy,
+      // 앵커가 이 방위를 썼는지 갈아탔는지의 근거다. rot과 나란히 있어야
+      // "게이트가 안 걸렸다"와 "걸렸는데도 틀렸다"가 구분된다.
+      headingErrorDeg:
+          _pdrTrailState.snapshot?.quality.features.rotationHeadingAccuracyDeg,
     );
   }
 
