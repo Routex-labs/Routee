@@ -145,6 +145,17 @@ class PdrSession {
   HeadingReference get headingReference =>
       headingReferenceFromSource(headingSource);
 
+  /// 지금 이 방위를 **앵커의 기준으로 삼아도 되는지.**
+  ///
+  /// [headingReference]와 **다른 질문이다.** 저쪽은 "이 값이 자북 frame인가"이고
+  /// 이쪽은 "그 frame을 지금 맡겨도 되는가"다. 둘을 한 함수로 합치면 안 된다 —
+  /// 합쳐 두었다가 "frame은 자북이다"가 곧 "보정 불필요"로 읽혀, 교란된 방위를
+  /// 보정 없이 앵커에 구워 넣던 회귀가 있었다
+  /// (`docs/client/android-heading-drift.md` 6절).
+  bool get headingTrustworthy =>
+      headingReference == HeadingReference.magneticNorth &&
+      isHeadingErrorTrusted(rotationHeadingAccuracyDeg);
+
   PdrLocalPoint get position => _paths.correctedPosition;
   List<PdrLocalPoint> get path => List.unmodifiable(_paths.corrected);
   int get steps => iosTrackedSteps;

@@ -69,6 +69,7 @@ Map<String, Object?> motionEvent({
   String source = 'device_motion/xMagneticNorthZVertical',
   int? stepPeakCount,
   int? latestStepPeakMs,
+  double? headingErrorDeg,
 }) => {
   'source': 'ios_core_motion',
   'kind': 'motion',
@@ -76,6 +77,7 @@ Map<String, Object?> motionEvent({
   'fusedHeadingDeg': heading,
   'headingStable': true,
   'headingSource': source,
+  'rotationHeadingAccuracyDeg': ?headingErrorDeg,
   'motionTimestamp': tMs.toDouble(),
   'stepPeakCount': ?stepPeakCount,
   'latestStepPeakMs': ?latestStepPeakMs?.toDouble(),
@@ -291,6 +293,44 @@ void main() {
     expect(driver.currentCalibration.anchor!.floorId, 'B2');
     expect(driver.currentCalibration.anchor!.anchorLocalM.eastM, 12);
     expect(driver.currentCalibration.anchor!.anchorLocalM.northM, 34);
+  });
+
+  group('자북 frame이어도 센서가 오차를 크게 신고하면 그 방위를 안 쓴다', () {
+    // 안드로이드는 gyro hold 중에도 frame을 자북으로 신고한다. frame만 보면
+    // 철골 건물 안에서 통째로 돌아간 방위가 보정 없이 앵커에 박힌다
+    // (docs/client/android-heading-drift.md 6절).
+    Future<void> pinWith(double? errorDeg) async {
+      await driver.startGuidance(floorId: 'F1');
+      source.emitRaw(
+        motionEvent(
+          tMs: 1000,
+          heading: 0,
+          source: 'fused_orientation_provider+gyro_hold',
+          headingErrorDeg: errorDeg,
+        ),
+      );
+      await settle();
+      await driver.confirmAnchorByPin(floorPointM: const PdrLocalPoint(0, 0));
+    }
+
+    test('오차가 문턱을 넘으면 진행 방향 보정으로 넘어간다', () async {
+      await pinWith(60);
+      expect(driver.currentCalibration.phase, CalibrationPhase.awaitingHeading);
+      expect(driver.currentCalibration.requiresManualRotationCalibration, isTrue);
+    });
+
+    test('오차가 작으면 예전처럼 회전 0으로 바로 확정한다', () async {
+      await pinWith(8);
+      expect(driver.currentCalibration.phase, CalibrationPhase.calibrated);
+      expect(driver.currentCalibration.anchor!.rotationDeg, 0);
+    });
+
+    test('기기가 오차를 안 주면(-1) 막지 않는다', () async {
+      // SM-G996N은 rotation vector의 values[4]를 -1로 준다. 여기서 막으면 그
+      // 기기의 앵커가 통째로 죽는다.
+      await pinWith(-1);
+      expect(driver.currentCalibration.phase, CalibrationPhase.calibrated);
+    });
   });
 
   test('arbitrary 기준: pin 후 heading 보정까지 요구한다', () async {

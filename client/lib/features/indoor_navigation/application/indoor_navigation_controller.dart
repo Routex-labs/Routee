@@ -188,11 +188,16 @@ class IndoorNavigationDriver implements IndoorNavigationController {
     _pendingPinFloorM = floorPointM;
     _pendingPinPdrM = PdrLocalPoint.zero;
     _pendingAxes = axes;
-    if (_session.headingReference == HeadingReference.magneticNorth) {
-      // 자북 기준: 서버 north_alignment 오프셋을 Phase 3에서 주입한다. 지금은 0.
+    // **frame이 자북인 것만으로는 부족하다.** 안드로이드는 gyro hold 중에도
+    // frame을 자북으로 신고하므로, 그것만 보면 철골 건물 안에서 통째로 돌아간
+    // 방위를 보정 없이 앵커에 구워 넣는다([PdrSession.headingTrustworthy]).
+    if (_session.headingTrustworthy) {
+      // 믿을 수 있는 자북 기준: 서버 north_alignment 오프셋을 Phase 3에서
+      // 주입한다. 지금은 0.
       _finalizeAnchor(rotationDeg: 0, source: AnchorSource.userPin);
     } else {
-      // arbitrary corrected: 진행 방향 보정이 필수(§4).
+      // frame이 arbitrary이거나, 자북이어도 센서가 스스로 오차가 크다고 보고한
+      // 경우다. 둘 다 진행 방향으로 보정해야 한다(§4).
       _updateCalibration(CalibrationPhase.awaitingHeading);
     }
   }
@@ -496,8 +501,9 @@ class IndoorNavigationDriver implements IndoorNavigationController {
       anchorLocalM: anchorLocalM,
       rotationDeg: rotationDeg,
       headingReference: reference,
-      requiresManualRotationCalibration:
-          reference != HeadingReference.magneticNorth,
+      // **frame이 아니라 신뢰를 기록한다.** 이 값은 진단 로그로만 나가는데,
+      // frame만 적으면 "자북인데 왜 회전값이 0이 아닌가"를 사후에 되짚을 수 없다.
+      requiresManualRotationCalibration: !_session.headingTrustworthy,
       source: source,
       confidence: 1,
       axes: _pendingAxes,
@@ -509,12 +515,10 @@ class IndoorNavigationDriver implements IndoorNavigationController {
   }
 
   void _updateCalibration(CalibrationPhase phase, {PdrAnchor? anchor}) {
-    final reference = _session.headingReference;
     _calib = CalibrationStatus(
       phase: phase,
-      headingReference: reference,
-      requiresManualRotationCalibration:
-          reference != HeadingReference.magneticNorth,
+      headingReference: _session.headingReference,
+      requiresManualRotationCalibration: !_session.headingTrustworthy,
       anchor: anchor,
     );
     if (!_calibration.isClosed) {
