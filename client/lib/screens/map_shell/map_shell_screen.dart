@@ -199,6 +199,15 @@ class _MapShellScreenState extends State<MapShellScreen> {
   FloorTransitionUiState? _floorTransition;
   double _floorScrimOpacity = 0;
 
+  /// 층 전환 연출이 화면을 덮고 있는지. 참이면 셸 chrome(검색창·카테고리 줄·
+  /// 하단 바)을 트리에서 뺀다.
+  ///
+  /// **스크림을 맨 위에 두는 것만으로는 부족하다.** 페이드가 오르내리는 동안
+  /// 스크림은 반투명이라 그 구간 내내 chrome이 비쳐 보인다 — 연출이 "덮었다"고
+  /// 말하는 동안 화면은 아직 덮이지 않은 셈이다. 0보다 크면 곧 덮이거나 덮여
+  /// 있는 것이므로, 그 순간부터 아예 그리지 않는다.
+  bool get _floorTransitionCovers => _floorScrimOpacity > 0;
+
   // 지도 위에 얹은 공용 오버레이(검색창·카테고리 줄·하단 바)의 영역을
   // IndoorMapBody가 map click 처리에서 제외할 수 있게 넘겨줄 key들.
   // MapLibre PlatformView가 gesture arena를 우회해서 오버레이 탭이 뒤의 매장
@@ -635,6 +644,10 @@ class _MapShellScreenState extends State<MapShellScreen> {
   /// | 3 | 상단 오버레이([_buildTopOverlays]) — 검색·길찾기·카테고리·배너 |
   /// | 4 | 하단 바([_buildBottomBar]) |
   /// | 5 | 층 전환 스크림([_buildFloorScrim]) — **맨 위여야 한다.** 지도뿐 아니라 검색창·하단 바까지 덮는다 |
+  ///
+  /// 층 전환 중에는 3·4층을 **덮는 것이 아니라 뺀다**([_floorTransitionCovers]).
+  /// 스크림은 맨 위지만 페이드가 오르내리는 동안 반투명이라, 그 구간 내내
+  /// 검색창과 카테고리 줄이 비쳐 보였다.
   Widget _buildShell(BuildContext context, bool routeVisible) {
     return Scaffold(
       // 상단 검색창(MapTopBar)에 포커스가 들어가 소프트키보드가 올라올 때
@@ -646,8 +659,9 @@ class _MapShellScreenState extends State<MapShellScreen> {
         children: [
           _buildMap(),
           if (_searchActive) _buildSearchBarrier(),
-          _buildTopOverlays(context),
-          if (!_guidanceActive && !_routeMode) _buildBottomBar(routeVisible),
+          if (!_floorTransitionCovers) _buildTopOverlays(context),
+          if (!_floorTransitionCovers && !_guidanceActive && !_routeMode)
+            _buildBottomBar(routeVisible),
           _buildFloorScrim(),
         ],
       ),
