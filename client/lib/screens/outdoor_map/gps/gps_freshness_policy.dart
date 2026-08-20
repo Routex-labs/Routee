@@ -14,6 +14,32 @@ library;
 /// 배터리만 쓰고 얻는 것이 없다.
 const gpsFixMaxAge = Duration(seconds: 3);
 
+/// 떠 있는 일회성 조회를 이 시간까지만 기다린다.
+///
+/// **상한이 없으면 실내에서 위치가 통째로 멎는다.** 스트림이 조용한 구간을
+/// 떠받치는 것이 이 조회 하나인데, `getCurrentPosition`은 좌표가 생길 때까지
+/// 무한정 기다릴 수 있다. 겹침 방지 플래그를 그동안 세워 두면 **다음 주기가
+/// 아예 안 나가고**, 신호가 가장 나쁜 구간에서 유일한 생명줄이 멈춘다.
+///
+/// 요청을 취소하지는 않는다 — 늦게 도착한 좌표는 배달구의 메아리·튐 거르기가
+/// 받아 준다. 여기서 푸는 것은 "다음 요청을 막고 있다"는 것 하나다.
+///
+/// 6초는 실측 응답 간격(3~9초)의 가운데다. 더 짧으면 정상 응답을 기다리는 중에
+/// 요청이 겹치고, 더 길면 멎은 구간이 그만큼 길어진다.
+const oneShotFixMaxWait = Duration(seconds: 6);
+
+/// [startedAt]에 쏜 조회가 아직 다음 요청을 막아야 하는지.
+///
+/// null이면 떠 있는 요청이 없다는 뜻이다.
+bool isFreshFixRequestBlocking({
+  required DateTime? startedAt,
+  required DateTime now,
+  Duration maxWait = oneShotFixMaxWait,
+}) {
+  if (startedAt == null) return false;
+  return now.difference(startedAt) < maxWait;
+}
+
 /// 지금 일회성 위치 조회를 보내야 하는지.
 ///
 /// [lastFixReceivedAt]은 좌표를 **받은** 시각이다(기기가 찍은 시각이 아니다).

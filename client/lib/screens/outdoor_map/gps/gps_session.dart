@@ -13,8 +13,11 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 
+import 'package:latlong2/latlong.dart' as ll;
+
 import '../../../service_locator.dart';
 import 'gps_freshness_policy.dart';
+import 'gps_jump_policy.dart';
 
 /// 좌표 한 건이 도착했을 때. [fromStream]이 false면 일회성 조회로 끌어온 것이다
 /// (진단 칩이 이 둘을 구분해 보여준다).
@@ -67,8 +70,11 @@ class GpsSession {
   /// 스트림이 조용한지 주기적으로 확인하는 타이머.
   Timer? _freshFixTimer;
 
-  /// 일회성 위치 조회가 떠 있는 동안 true. 겹쳐 쏘는 것을 막는다.
-  bool _freshFixInFlight = false;
+  /// 떠 있는 일회성 조회를 **쏜 시각.** null이면 떠 있는 요청이 없다.
+  ///
+  /// bool이 아닌 이유는 [isFreshFixRequestBlocking]에 있다 — 끝나지 않는 요청
+  /// 하나가 다음 요청을 영영 막지 못하게, 시각으로 상한을 건다.
+  DateTime? _freshFixStartedAt;
 
   /// 마지막으로 좌표를 **받은** 시각. 기기가 찍은 시각이 아니다 —
   /// 낡음의 기준은 "화면이 얼마나 오래 옛 위치를 보여주고 있는가"다.
@@ -77,6 +83,14 @@ class GpsSession {
   /// 마지막으로 배달한 좌표를 **기기가 찍은** 시각. 위 값과 짝을 이루지만 하는
   /// 일이 다르다 — 이쪽은 "같은 좌표를 또 받았는가"를 가린다([_deliver]).
   DateTime? _lastFixTakenAt;
+
+  /// 튐 거르기의 기준점([shouldAcceptGpsFix]). 받아들인 좌표마다 갱신한다.
+  GpsFixReference? _jumpReference;
+
+  /// 마지막으로 거부한 좌표의 거리(m). 진단 칩이 읽는다 — 화면만 보면 "좌표가
+  /// 안 온다"와 "와서 버렸다"가 똑같이 멈춘 마커로 보인다.
+  double? get lastRejectedJumpMeters => _lastRejectedJumpMeters;
+  double? _lastRejectedJumpMeters;
 
   /// 위치 스트림을 지금까지 몇 번 열었는지. **진단 전용이다.**
   ///
@@ -105,11 +119,16 @@ class GpsSession {
   /// 구독·타이머를 전부 정리한다. 재시도 간격도 처음으로 되돌린다.
   void stop() {
     _syncFreshFixTimer(wanted: false);
+    _freshFixStartedAt = null;
     _retryTimer?.cancel();
     _retryTimer = null;
     _silenceTimer?.cancel();
     _silenceTimer = null;
     _retryDelay = streamRetryMinDelay;
+    // 기준점은 이 세션의 것이다. 남겨 두면 화면을 다시 열었을 때 옛 자리에서
+    // 잰 거리로 첫 좌표를 거부한다.
+    _jumpReference = null;
+    _lastRejectedJumpMeters = null;
     final subscription = _subscription;
     if (subscription == null) return;
     unawaited(subscription.cancel());
@@ -191,6 +210,25 @@ class GpsSession {
       // 정작 새 좌표가 필요한 구간에서 조회가 멎는다.
       return;
     }
+    final point = ll.LatLng(position.latitude, position.longitude);
+    final reference = _jumpReference;
+    if (!shouldAcceptGpsFix(
+      reference: reference,
+      point: point,
+      accuracyMeters: position.accuracy,
+      now: now(),
+    )) {
+      // 메아리와 같은 이유로 받은 시각을 갱신하지 않는다 — 버린 좌표는 화면을
+      // 떠받치지 못하므로, 다음 주기가 새 좌표를 계속 요청해야 한다.
+      _lastRejectedJumpMeters = wgs84DistanceMeters(reference!.point, point);
+      return;
+    }
+    _lastRejectedJumpMeters = null;
+    _jumpReference = GpsFixReference(
+      point: point,
+      accuracyMeters: position.accuracy,
+      acceptedAt: now(),
+    );
     _lastFixFromStream = fromStream;
     // 좌표가 들어오면 스트림은 살아 있다. 침묵 감시를 **다시 걸고**(걷어 버리면
     // 한 건만 주고 조용해지는 스트림을 못 잡는다), 재연결 간격도 되돌려 다음에
@@ -255,11 +293,15 @@ class GpsSession {
     if (!shouldRequestFreshFix(
       lastFixReceivedAt: _lastFixReceivedAt,
       now: now(),
-      requestInFlight: _freshFixInFlight,
+      requestInFlight: isFreshFixRequestBlocking(
+        startedAt: _freshFixStartedAt,
+        now: now(),
+      ),
     )) {
       return;
     }
-    _freshFixInFlight = true;
+    final startedAt = now();
+    _freshFixStartedAt = startedAt;
     try {
       final position = await currentPosition();
       _deliver(position, fromStream: false);
@@ -267,7 +309,8 @@ class GpsSession {
       // 조용히 넘긴다. 다음 주기에 다시 시도하고, 실패해도 스트림은 그대로다.
       debugPrint('one-shot fix failed: $error');
     } finally {
-      _freshFixInFlight = false;
+      // 상한을 넘겨 이미 다음 요청이 나갔다면 그쪽 시각을 덮지 않는다.
+      if (_freshFixStartedAt == startedAt) _freshFixStartedAt = null;
     }
   }
 }

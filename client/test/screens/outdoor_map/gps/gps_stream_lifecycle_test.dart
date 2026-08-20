@@ -28,6 +28,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() {
   late BuildingRepository originalBuildingRepository;
   late Stream<Position> Function() originalWatchPosition;
+  late Future<Position> Function() originalCurrentPosition;
 
   /// 스트림을 연 횟수. 화면이 재구독하면 늘어난다.
   late int subscribeCount;
@@ -39,7 +40,12 @@ void main() {
     await debugModeController.reload();
     originalBuildingRepository = buildingRepository;
     originalWatchPosition = watchPosition;
+    originalCurrentPosition = currentPosition;
     buildingRepository = MockBuildingRepository();
+    // 일회성 조회 seam도 갈아 끼운다. 안 끼우면 진짜 플러그인을 부르고, 그쪽이
+    // 거는 timeLimit 타이머가 fakeAsync에 남아 테스트가 "pending timer"로 깨진다.
+    // 이 테스트가 보는 것은 스트림 재구독 횟수뿐이라 조회는 영영 안 끝나면 된다.
+    currentPosition = () => Completer<Position>().future;
     requestStartupPermissions = () async => {};
     subscribeCount = 0;
     controllers = [];
@@ -54,6 +60,7 @@ void main() {
   tearDown(() {
     buildingRepository = originalBuildingRepository;
     watchPosition = originalWatchPosition;
+    currentPosition = originalCurrentPosition;
     requestStartupPermissions = defaultRequestStartupPermissions;
     for (final controller in controllers) {
       controller.close();

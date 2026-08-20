@@ -101,4 +101,36 @@ void main() {
       expect(streamRetryMinDelay, lessThanOrEqualTo(const Duration(seconds: 3)));
     });
   });
+
+  group('isFreshFixRequestBlocking', () {
+    final t0 = DateTime.utc(2026, 8, 20, 12);
+
+    test('떠 있는 요청이 없으면 막지 않는다', () {
+      expect(isFreshFixRequestBlocking(startedAt: null, now: t0), isFalse);
+    });
+
+    test('쏜 지 얼마 안 된 요청은 다음 요청을 막는다', () {
+      expect(
+        isFreshFixRequestBlocking(
+          startedAt: t0,
+          now: t0.add(const Duration(seconds: 2)),
+        ),
+        isTrue,
+      );
+    });
+
+    test('상한을 넘긴 요청은 더 이상 막지 못한다', () {
+      // 이 갈래가 이 함수의 존재 이유다. 끝나지 않는 조회 하나가 겹침 방지
+      // 플래그를 영영 세워 두면, 스트림이 조용한 구간에서 유일한 생명줄이 멎는다.
+      expect(
+        isFreshFixRequestBlocking(startedAt: t0, now: t0.add(oneShotFixMaxWait)),
+        isFalse,
+      );
+    });
+
+    test('상한은 신선도 문턱보다 넉넉해야 한다', () {
+      // 짧으면 정상 응답을 기다리는 중에 요청이 겹쳐, 아끼려던 배터리를 더 쓴다.
+      expect(oneShotFixMaxWait, greaterThan(gpsFixMaxAge));
+    });
+  });
 }
