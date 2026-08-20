@@ -362,7 +362,7 @@ class _GraphBuildingRepository implements BuildingRepository {
           'centroid_wgs84': {'lat': 37.5665, 'lng': 126.9779},
         },
       ],
-      if (graphJson case final graph?) 'navigation_graph': graph,
+      'navigation_graph': ?graphJson,
     };
   }
 
