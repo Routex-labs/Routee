@@ -1456,6 +1456,14 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
       _pendingOutdoorDestination = destination;
       _pendingOutdoorLabel = label;
     });
+    // 바깥 구간을 **지금** 다시 그린다. 위 [showRouteTo]가 예약을 비운 채로
+    // 레이어를 썼기 때문에, 방금 되건 예약을 반영하지 않으면 두 구간을 함께
+    // 그리는 조건([_syncRouteLayerNow])이 그 시점에는 거짓이었다.
+    unawaited(_syncRouteLayer());
+    debugPrint(
+      '[indoor→outdoor] 실내 ${_indoorRouteSegment?.points.length ?? 0}점 · '
+      '야외 ${_route?.points.length ?? 0}점 · 출구 $exitLabel',
+    );
     _showSnack('$exitLabel로 나가 목적지까지 이어집니다');
   }
 

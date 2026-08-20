@@ -436,7 +436,16 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
       // **자동으로 생긴 경로는 카메라를 가져가지 않는다.** 맞춰 버리면 막 확대한
       // 화면이 도시 축척으로 바뀌고 건물이 점이 된다 — "건물 위치가 안 나온다"의
       // 정체가 이것이다. 사용자가 직접 고른 목적지면 그대로 맞춘다.
-      if (_userDestination != null) _fitCameraToRoute(route);
+      //
+      // **도면을 펴고 있는 동안에는 고른 목적지여도 안 가져간다.** 실내→야외
+      // 여정에서 이 자리가 바깥 구간 전체(출구~목적지)에 카메라를 맞추는데,
+      // 목적지가 몇백 m만 떨어져도 그 배율이 이탈 임계값(15.6) 아래로 떨어진다.
+      // 그러면 다음 카메라 정지에서 오버레이가 접히고([_handleCameraIdle]),
+      // 방금 그린 실내 구간이 도면과 함께 사라진다 — **"실내 경로가 안 보인다"의
+      // 정체가 이것이다.** 지금 사용자는 건물 안이고, 봐야 할 것은 출구까지의
+      // 실내 구간이다. 바깥 구간은 나간 뒤 [_activatePendingOutdoorRoute]가
+      // 그 자리에서 다시 그리며 그때 카메라를 맞춘다.
+      if (_userDestination != null && !_indoorEntered) _fitCameraToRoute(route);
     }
   }
 
