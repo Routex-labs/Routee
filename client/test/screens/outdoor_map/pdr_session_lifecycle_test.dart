@@ -232,7 +232,11 @@ class _FakeDriver implements IndoorNavigationController {
   @override
   Future<void> confirmAnchorByFloorDirection({
     required PdrLocalPoint floorDirection,
+    required AnchorRotationBasis basis,
   }) async {}
+
+  @override
+  Future<void> flipAnchorRotation() async {}
 
   @override
   Future<void> changeFloor({required String floorId}) async {

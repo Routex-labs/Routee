@@ -307,6 +307,9 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
       markerBearingDeg: markerHeadingDeg,
       cameraBearingDeg: _mapController?.cameraPosition?.bearing ?? 0,
       anchorRotationDeg: _pdrTrailState.anchor?.rotationDeg,
+      // 각도와 **함께** 있어야 읽힌다. 따로 두면 칩을 보는 사람이 두 값을 눈으로
+      // 짝지어야 하고, 그 사이에 다른 자리가 끼면 짝이 어긋난다.
+      rotationBasis: _pdrTrailState.anchor?.rotationBasis,
       // **파생값이 아니라 센서가 준 원문을 띄운다.** `headingReference`만 보면
       // 실내에서 자력계가 교란돼 gyro hold에 들어간 상태도 그냥 `magneticNorth`
       // 로 보인다 — 그 구분이 안 보여서 회귀를 한참 못 찾았다.
@@ -367,8 +370,34 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     return transform.floorBearingToMapBearing(orientationFloorHeading);
   }
 
+  /// 복도 축으로 잡은 앵커의 **앞뒤**를 걸어 본 궤적으로 한 번만 확인한다.
+  ///
+  /// 축은 선이라 두 방향 중 어느 쪽인지 못 고른다. 거꾸로 잡았다면 궤적이 앵커를
+  /// 중심으로 점대칭이고, 복도는 유한하므로 그 궤적은 통행 그래프를 벗어난다 —
+  /// 두 가설을 같은 자로 재는 것이 [anchorAxisIsBackward]다. 이동이 모자라
+  /// 아직 못 가르면 null이고, 그때는 판정을 소진하지 않고 다음 걸음을 기다린다.
+  void _maybeFlipAnchorAxis() {
+    final anchor = _pdrTrailState.anchor;
+    final graph = _floorGraph;
+    if (anchor == null ||
+        graph == null ||
+        anchor.rotationBasis != AnchorRotationBasis.corridorAxis ||
+        identical(anchor, _anchorAxisSignProbed)) {
+      return;
+    }
+    final backward = anchorAxisIsBackward(
+      graph: graph,
+      anchorLocalM: anchor.anchorLocalM,
+      floorPath: _pdrConfirmedFloorPath,
+    );
+    if (backward == null) return;
+    _anchorAxisSignProbed = anchor;
+    if (backward) unawaited(indoorNavigationDriver.flipAnchorRotation());
+  }
+
   void _syncCorridorTracking(PdrSnapshot? snapshot) {
     if (_indoorEntered) _ensureGuidanceAttached();
+    _maybeFlipAnchorAxis();
     _guidance
       ..setContext(
         floorId: _activeFloor,
@@ -581,10 +610,10 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     // 그렇다고 그냥 지우면 안 된다 — [CalibrationPhase.awaitingHeading]은
     // `canRenderPosition`이 false라, 물음을 없애는 순간 **위치 마커가 통째로
     // 사라진다.** 그래서 묻는 대신 자동 진입과 **같은 추정**으로 채운다
-    // ([_entryFloorDirection]: GPS course → 층 그래프 중심).
+    // ([_entryFloorDirection]: GPS course → 찍은 자리의 복도 축).
     if (indoorNavigationDriver.currentCalibration.phase ==
         CalibrationPhase.awaitingHeading) {
-      final direction = graph == null
+      final estimate = graph == null
           ? null
           : _entryFloorDirection(
               position: _position,
@@ -592,16 +621,18 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
               graph: graph,
               axes: axes,
             );
-      // 추정도 실패하면(그래프가 없거나 찍은 점이 중심과 겹침) 방향을 모르는
-      // 채로 둔다. 지어낸 각도로 궤적을 통째로 돌리는 것보다, 위치가 아직
-      // 안 잡힌 상태로 남겨 두고 사용자가 다시 찍게 하는 편이 낫다.
-      if (direction == null) {
+      // 추정도 실패하면(그래프가 없거나 찍은 점 근처에 통로가 없음) 방향을
+      // 모르는 채로 둔다. 지어낸 각도로 궤적을 통째로 돌리는 것보다, 위치가
+      // 아직 안 잡힌 상태로 남겨 두고 사용자가 다시 찍게 하는 편이 낫다.
+      if (estimate == null) {
         _showSnack('방향을 잡지 못했습니다. 조금 걸은 뒤 다시 지정해주세요.');
         return;
       }
       await indoorNavigationDriver.confirmAnchorByFloorDirection(
-        floorDirection: direction,
+        floorDirection: estimate.direction,
+        basis: estimate.basis,
       );
+      if (!mounted) return;
     }
     if (!mounted) return;
     _setPlacingAnchor(false);

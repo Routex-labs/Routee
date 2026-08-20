@@ -194,7 +194,11 @@ class IndoorNavigationDriver implements IndoorNavigationController {
     if (_session.headingTrustworthy) {
       // 믿을 수 있는 자북 기준: 서버 north_alignment 오프셋을 Phase 3에서
       // 주입한다. 지금은 0.
-      _finalizeAnchor(rotationDeg: 0, source: AnchorSource.userPin);
+      _finalizeAnchor(
+        rotationDeg: 0,
+        source: AnchorSource.userPin,
+        basis: AnchorRotationBasis.trustedHeading,
+      );
     } else {
       // frame이 arbitrary이거나, 자북이어도 센서가 스스로 오차가 크다고 보고한
       // 경우다. 둘 다 진행 방향으로 보정해야 한다(§4).
@@ -205,6 +209,7 @@ class IndoorNavigationDriver implements IndoorNavigationController {
   @override
   Future<void> confirmAnchorByFloorDirection({
     required PdrLocalPoint floorDirection,
+    required AnchorRotationBasis basis,
   }) async {
     if (!_guiding || _pendingPinFloorM == null) {
       return;
@@ -220,6 +225,30 @@ class IndoorNavigationDriver implements IndoorNavigationController {
     _finalizeAnchor(
       rotationDeg: rotationDeg,
       source: AnchorSource.manualHeadingCal,
+      basis: basis,
+    );
+  }
+
+  @override
+  Future<void> flipAnchorRotation() async {
+    final previous = _calib.anchor;
+    if (!_guiding || previous == null) return;
+    // anchor 원점은 pin 그 자리다(`_finalizeAnchor`에서 pinPdr이 0). 회전각만
+    // 180° 돌리면 궤적이 그 점을 중심으로 점대칭이 되고 찍은 자리는 안 움직인다.
+    _updateCalibration(
+      CalibrationPhase.calibrated,
+      anchor: PdrAnchor(
+        floorId: previous.floorId,
+        anchorLocalM: previous.anchorLocalM,
+        rotationDeg: normalizePdrRotation(previous.rotationDeg + 180),
+        rotationBasis: AnchorRotationBasis.corridorAxisFlipped,
+        headingReference: previous.headingReference,
+        requiresManualRotationCalibration:
+            previous.requiresManualRotationCalibration,
+        source: previous.source,
+        confidence: previous.confidence,
+        axes: previous.axes,
+      ),
     );
   }
 
@@ -261,6 +290,7 @@ class IndoorNavigationDriver implements IndoorNavigationController {
         // 같은 센서 세션이므로 heading frame이 끊기지 않는다. 회전값을 물려받아
         // 사용자가 새 층에서 방향 보정을 다시 하지 않게 한다.
         rotationDeg: previous.rotationDeg,
+        rotationBasis: AnchorRotationBasis.inherited,
         headingReference: reference,
         requiresManualRotationCalibration:
             reference != HeadingReference.magneticNorth,
@@ -478,6 +508,7 @@ class IndoorNavigationDriver implements IndoorNavigationController {
   void _finalizeAnchor({
     required double rotationDeg,
     required AnchorSource source,
+    required AnchorRotationBasis basis,
   }) {
     final pinFloor = _pendingPinFloorM;
     final pinPdr = _pendingPinPdrM;
@@ -500,6 +531,7 @@ class IndoorNavigationDriver implements IndoorNavigationController {
       floorId: _floorId ?? '',
       anchorLocalM: anchorLocalM,
       rotationDeg: rotationDeg,
+      rotationBasis: basis,
       headingReference: reference,
       // **frame이 아니라 신뢰를 기록한다.** 이 값은 진단 로그로만 나가는데,
       // frame만 적으면 "자북인데 왜 회전값이 0이 아닌가"를 사후에 되짚을 수 없다.

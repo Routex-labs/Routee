@@ -1,6 +1,7 @@
 import 'package:indoor_pdr_core/indoor_pdr_core.dart';
 
 import '../../../domain/geo/geo_transform.dart';
+import 'pdr_anchor.dart';
 
 /// UI가 **호출**하는 명령 계약(UI → 로직).
 ///
@@ -26,9 +27,20 @@ abstract interface class IndoorNavigationIntents {
   /// 사용자가 현재 진행 방향을 floor local_m 방향으로 맞춰 rotation을 확정한다.
   /// [floorDirection]은 위치가 아닌 단위와 무관한 방향 벡터다. 컨트롤러가 anchor
   /// 확정 때 받은 axes로 PDR 동·북 방향에 역변환한다.
+  ///
+  /// [basis]는 이 방향을 무엇에서 얻었는지다. 회전각과 함께 anchor에 남아 진단
+  /// 칩으로 나가므로, 방향이 틀어졌을 때 어느 근거가 나빴는지 사후에 갈린다.
   Future<void> confirmAnchorByFloorDirection({
     required PdrLocalPoint floorDirection,
+    required AnchorRotationBasis basis,
   });
+
+  /// 복도 축으로 잡은 anchor의 **앞뒤만** 뒤집는다(회전각 +180°).
+  ///
+  /// 위치는 그대로 두고 회전각만 바꾼다 — anchor 원점은 사용자가 찍은 그 점이고,
+  /// 뒤집기는 그 점을 중심으로 한 점대칭이라 찍은 자리가 움직이지 않는다.
+  /// anchor가 아직 없으면 아무 일도 하지 않는다.
+  Future<void> flipAnchorRotation();
 
   /// 층 변경. PDR 세션을 reset하고 새 층 anchor 확정을 다시 요구한다.
   Future<void> changeFloor({required String floorId});

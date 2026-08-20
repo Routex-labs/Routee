@@ -80,8 +80,14 @@ class FakeIndoorNavigation implements IndoorNavigationController {
   @override
   Future<void> confirmAnchorByFloorDirection({
     required PdrLocalPoint floorDirection,
+    required AnchorRotationBasis basis,
   }) async {
     log.add('heading:${floorDirection.eastM},${floorDirection.northM}');
+  }
+
+  @override
+  Future<void> flipAnchorRotation() async {
+    log.add('flip');
   }
 
   @override
