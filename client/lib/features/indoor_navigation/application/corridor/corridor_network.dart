@@ -5,6 +5,15 @@ import 'package:indoor_pdr_core/indoor_pdr_core.dart';
 import '../../../../models/building/floor_graph.dart';
 import '../../contract/pdr_anchor.dart';
 
+/// 층 안에서 사람이 **지나다니는 길이 아닌** 간선의 양 끝 노드 타입.
+///
+/// 두 끝이 모두 여기 들면 나란한 레인을 잇는 짧은 연결선이다. 실측 B2에는
+/// 그런 간선이 8개 있고 전부 1.3~4.0m에 동서 방향이라, 서쪽으로 걷는 어떤
+/// heading에도 잘 맞는 **짧은 자석**이 된다. 실제로 원본 위치가 9m 떨어져
+/// 있는데도 1등이 이 간선으로 넘어가 마커가 반대편 에스컬레이터에 붙었다
+/// (근거: `pdr_v14_ios_b2_escalator_flip.json` 재생).
+const _laneLinkNodeTypes = {'escalator', 'elevator', 'stairs'};
+
 /// 노드에서 나가는 한 갈래. 어느 간선을 어느 부호로 탈 것인가.
 class RecoveryOption {
   const RecoveryOption({
@@ -48,7 +57,9 @@ class CorridorNetwork {
         accessEdge:
             graphEdge.id.startsWith('store_edge_') ||
             const {'store_entrance', 'poi'}.contains(from.type) ||
-            const {'store_entrance', 'poi'}.contains(to.type),
+            const {'store_entrance', 'poi'}.contains(to.type) ||
+            (_laneLinkNodeTypes.contains(from.type) &&
+                _laneLinkNodeTypes.contains(to.type)),
       );
       if (edge.lengthM <= 1e-6) continue;
       edges.add(edge);

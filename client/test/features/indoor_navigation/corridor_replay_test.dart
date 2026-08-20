@@ -184,4 +184,58 @@ void main() {
       );
     });
   });
+
+  group('아이폰 B2 에스컬레이터 레인 붙기 재생', () {
+    // 2026-08-20 실측. 에스컬레이터 앞에서 경로가 반대 레인으로 뒤집혀 사용자가
+    // 탑승을 포기한 세션이다. 30초 동안 경로가 4번 갈아치워졌다.
+    //
+    // 나란한 두 레인을 잇는 짧은 간선(B2에 8개, 1.3~4.0m, 전부 동서 방향)이
+    // 원인이었다. 원본 위치가 9m 떨어져 있어도 서쪽으로 걷는 heading에 잘 맞아
+    // 1등이 그리로 넘어갔고, 마커가 (157.7,147.9) -> (151.7,141.5)로 튄 뒤
+    // 되돌려지며 optimistic lead 11.1m가 통째로 사라졌다.
+    //
+    // **아직 안 고친 것이 남아 있다.** 되돌리기(_rebaseOptimistic) 자체가 lead를
+    // 0으로 만드는 문제는 이 세션에 3번 더 있고, 평범한 복도에서도 마커가 최대
+    // 9.5m 뒤로 튄다. 그건 레인 연결선과 무관한 별개 결함이라 여기서 재지 않는다.
+    late CorridorReplayRun run;
+
+    setUpAll(() {
+      run = CorridorReplay.load('pdr_v14_ios_b2_escalator_flip.json').run();
+    });
+
+    test('레인 사이 연결선에는 올라타지 않는다', () {
+      final graph = CorridorReplay.loadGraph();
+      final nodeTypes = {
+        for (final node in graph.nodes) node.id: node.type.toLowerCase(),
+      };
+      const laneLinkTypes = {'escalator', 'elevator', 'stairs'};
+      final laneLinkEdgeIds = {
+        for (final edge in graph.edges)
+          if (laneLinkTypes.contains(nodeTypes[edge.fromNodeId]) &&
+              laneLinkTypes.contains(nodeTypes[edge.toNodeId]))
+            edge.id,
+      };
+      expect(laneLinkEdgeIds, hasLength(8), reason: 'B2 실측 8개');
+
+      final occupied = <String>{};
+      for (final sample in run.samples) {
+        for (final id in [
+          sample.result.currentEdgeId,
+          sample.result.optimisticEdgeId,
+        ]) {
+          if (id != null && laneLinkEdgeIds.contains(id)) occupied.add(id);
+        }
+      }
+
+      expect(
+        occupied,
+        isEmpty,
+        reason:
+            '레인 연결선은 사람이 지나다니는 길이 아니라 짧은 동서 방향 자석이다. '
+            '수정 전 실측은 A0OzR8GMIZ에, 재생은 rJOyOouyz에 올라탔다 — 어느 쪽이든 '
+            '그 직후 되돌려지며 lead가 증발한다.',
+      );
+    });
+
+  });
 }
