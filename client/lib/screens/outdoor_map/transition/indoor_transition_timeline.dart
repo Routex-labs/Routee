@@ -10,11 +10,17 @@ library;
 import 'dart:math' as math;
 
 /// 진입 연출 길이.
-const indoorEnterTransitionDuration = Duration(milliseconds: 1200);
+///
+/// **책상에서 1200 ms로 정했다가 실기기를 보고 0.5배속(=두 배 길이)으로 늦췄다.**
+/// 비율(진입 : 이탈)은 그대로 두고 둘 다 2배로 폈다.
+///
+/// 길어진 만큼 덮개가 앵커를 기다려 줄 여유도 함께 생긴다 — 층 그래프 로드와
+/// 센서 워밍업이 이 안에서 끝날 확률이 그만큼 올라간다(문서 8절의 남은 문제).
+const indoorEnterTransitionDuration = Duration(milliseconds: 2400);
 
 /// 이탈 연출 길이. **진입보다 짧다** — 나가는 사람은 이미 문 밖으로 걸어 나간
 /// 뒤라, 같은 시간을 쓰면 화면이 자기를 못 따라온다고 느낀다.
-const indoorExitTransitionDuration = Duration(milliseconds: 900);
+const indoorExitTransitionDuration = Duration(milliseconds: 1800);
 
 /// 전환의 방향.
 enum IndoorTransitionDirection {
