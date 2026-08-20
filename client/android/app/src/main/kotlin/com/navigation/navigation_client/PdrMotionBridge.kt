@@ -214,13 +214,30 @@ class PdrMotionBridge(
         fopHeadingErrorDeg = orientationSample.headingErrorDegrees.toDouble()
         fopAtNs = SystemClock.elapsedRealtimeNanos()
         fopSupported = true
-        fopStatus = "streaming"
+        // 표본이 오는 것과 그 안에 방위가 들어 있는 것은 다르다. 현장에서 이
+        // 둘을 갈라 보려면 상태 문자열이 갈려 있어야 한다.
+        fopStatus = if (fopHeadingErrorDeg >= FOP_UNUSABLE_HEADING_ERROR_DEG) {
+            "streaming_no_heading"
+        } else {
+            "streaming"
+        }
     }
 
     /** FOP 표본이 아직 유효한지. 끊기면 플랫폼 rotation vector로 되돌아간다. */
     private fun fopFresh(): Boolean =
         fopAtNs != 0L &&
             SystemClock.elapsedRealtimeNanos() - fopAtNs <= FOP_STALE_NS
+
+    /**
+     * FOP heading을 **써도 되는지.** [fopFresh]와 다른 질문이다.
+     *
+     * 저쪽은 "표본이 오고 있나"이고 이쪽은 "그 안에 방위가 들어 있나"다. 둘을
+     * 합쳐 두면 표본은 멀쩡히 흐르는데 방위만 없는 기기에서 출구가 사라진다 —
+     * FOP 전환에 되돌아가는 조건이 신선도 하나뿐이라, 그런 기기에서 방위가
+     * 통째로 어긋난 채 고정됐다.
+     */
+    private fun fopUsable(): Boolean =
+        fopFresh() && fopHeadingErrorDeg < FOP_UNUSABLE_HEADING_ERROR_DEG
 
     /**
      * device→world 행렬에서 진행 정면 방위를 뽑는다. 수평 성분이 너무 짧으면
@@ -322,7 +339,11 @@ class PdrMotionBridge(
         }
         // SM-G996N은 values[4]를 -1로 준다. FOP의 headingError가 이 기기에서
         // 유일한 정량 불확실성이라, 있으면 그쪽을 쓴다.
-        val useFop = fopFresh()
+        //
+        // **방위가 없는 FOP 표본은 여기서 배제한다**([fopUsable]). 배제하지 않으면
+        // 아래 두 줄이 함께 틀어진다 — 신고 오차가 180°로 굳어 hold가 상시 켜지고,
+        // 그 값을 그대로 올려 보내 앵커 신뢰 게이트도 매번 거부한다.
+        val useFop = fopUsable()
         rotationHeadingAccuracyDeg = if (useFop && fopHeadingErrorDeg >= 0) {
             fopHeadingErrorDeg
         } else {
@@ -437,7 +458,7 @@ class PdrMotionBridge(
             abs(magneticField - baseline) / baseline
         } else 0.0
         val innovation = angularDistance(rawRotationHeadingDeg, gyroHeadingDeg)
-        val usingFop = fopFresh()
+        val usingFop = fopUsable()
         // FOP를 쓰는 동안에는 원시 자력계 정확도 플래그로 hold하지 않는다.
         // 실측에서 이 플래그가 세션 내내 "low"라 hold가 상시 켜졌는데, 그
         // 보정을 대신 해 주는 게 바로 FOP다. 대신 FOP가 주는 headingError를
@@ -818,5 +839,14 @@ class PdrMotionBridge(
         // FOP 표본이 이보다 오래되면 플랫폼 rotation vector로 되돌아간다.
         // Play Services 미설치·업데이트 중에도 heading이 끊기지 않아야 한다.
         const val FOP_STALE_NS = 1_000_000_000L
+
+        // 이 이상을 신고한 FOP heading은 **방위가 아니다.** 사분면조차 고르지
+        // 못하는 값이라 소스 자체를 rotation vector로 되돌린다.
+        //
+        // 앵커 문턱(30°)·hold 문턱(35°)과 하는 일이 다르다. 저 둘은 "이 방위를
+        // 지금 믿을까"를 묻고, 이 값은 "이게 방위이긴 한가"를 묻는다. 실측에서
+        // 이 값을 안 두는 동안 Z 플립이 세션 내내 180°(신고 최댓값)를 올렸고,
+        // 그동안 앞의 두 문턱은 그것을 "아주 나쁜 방위"로 읽어 매번 거부했다.
+        const val FOP_UNUSABLE_HEADING_ERROR_DEG = 90.0
     }
 }
