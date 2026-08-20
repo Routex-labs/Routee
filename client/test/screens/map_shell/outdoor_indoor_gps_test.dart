@@ -10,11 +10,11 @@ import 'package:navigation_client/repositories/place/destination_repository.dart
 import 'package:navigation_client/repositories/building/mock_building_repository.dart';
 import 'package:navigation_client/repositories/place/mock_destination_repository.dart';
 import 'package:navigation_client/screens/map_shell/map_shell_screen.dart';
+import 'package:navigation_client/screens/outdoor_map/outdoor_map_screen.dart';
 import 'package:navigation_client/screens/map_shell/widgets/chrome/map_bottom_bar.dart';
 import 'package:navigation_client/screens/outdoor_map/widgets/floor_selector.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../support/entry_floor_prompt_helper.dart';
 
 /// 건물 안에서는 GPS를 **화면에 쓰지 않는다**는 규칙에 대한 회귀 테스트.
 ///
@@ -40,21 +40,6 @@ void main() {
   // 인스턴스별로 캐시하므로, 테스트마다 새로 만들면 매번 실제 파일 I/O가 필요해진다.
   final testBuildingRepository = MockBuildingRepository();
 
-  // 데모 건물 입구(37.5665, 126.9779) 바로 위 + 신호 양호. 자동 진입은 "신호가
-  // 멀쩡했을 때 입구 앞에 있었다"는 근거를 요구하므로, 저하 표본만 흘리면 판정이
-  // 서지 않는다. 이 표본이 그 근거다.
-  Position approachingEntrance() => Position(
-    latitude: 37.5665,
-    longitude: 126.9779,
-    timestamp: DateTime(2024, 1, 1),
-    accuracy: 10,
-    altitude: 0,
-    altitudeAccuracy: 0,
-    heading: 0,
-    headingAccuracy: 0,
-    speed: 0,
-    speedAccuracy: 0,
-  );
 
   // 같은 자리에서 신호가 무너진 상태. 위 접근 표본과 짝을 이뤄 자동 실내 진입
   // 조건(창 안에 입구 20m 이내의 신뢰 좌표 + 지금 accuracy 30m 초과)을 만족한다.
@@ -148,11 +133,15 @@ void main() {
     expect(find.text('GPS 신호 약함'), findsOneWidget);
     expect(cancelled, isFalse);
 
-    // 입구에서 신호가 나빠지면 자동으로 실내 진입 오버레이가 켜진다.
-    positions.add(approachingEntrance());
-    await tester.pump(const Duration(milliseconds: 50));
+    // 실내로 들어가는 것은 이제 좌표가 아니라 조작이다(건물 탭·확대·안내 카드의
+    // 진입 버튼). 좌표는 계속 흘려 구독이 살아 있는지를 본다.
     positions.add(atEntrance());
     await tester.pump(const Duration(milliseconds: 50));
+    await drain(tester);
+    tester
+        .state<OutdoorMapBodyState>(find.byType(OutdoorMapBody))
+        // ignore: invalid_use_of_visible_for_testing_member
+        .enterIndoorForTest();
     await drain(tester);
 
     expect(find.byType(FloorSelector), findsOneWidget);
@@ -185,22 +174,15 @@ void main() {
     // 이벤트로 흘리면 아직 입구를 몰라 진입이 일어나지 않는다.
     positions.add(farAway());
     await tester.pump(const Duration(milliseconds: 50));
-    positions.add(approachingEntrance());
-    await tester.pump(const Duration(milliseconds: 50));
     positions.add(atEntrance());
     await tester.pump(const Duration(milliseconds: 50));
     await drain(tester);
-    expect(find.byType(FloorSelector), findsOneWidget);
-    // 자동 진입은 "몇 층에 계신가요?"를 먼저 띄운다. 그 화면이 지도를 덮으므로
-    // 아래 하단 바 탭을 시험하려면 먼저 걷어야 한다.
-    await dismissEntryFloorPrompt(tester);
-
-    // 자동 진입이 띄운 '건물 감지 중...' 스낵바가 하단 바를 덮고 있으므로,
-    // 사라질 때까지(기본 4초 + 퇴장 애니메이션) 프레임을 진행한 뒤에 누른다.
-    // 그러지 않으면 탭이 스낵바에 먹혀 위치 보정이 호출되지 않는다.
-    await tester.pump(const Duration(seconds: 5));
+    tester
+        .state<OutdoorMapBodyState>(find.byType(OutdoorMapBody))
+        // ignore: invalid_use_of_visible_for_testing_member
+        .enterIndoorForTest();
     await drain(tester);
-    expect(find.text('건물 감지 중...'), findsNothing);
+    expect(find.byType(FloorSelector), findsOneWidget);
 
     // 위치 보정(하단 바 우측 원형 버튼) 탭. 아직 실내 위치를 지정하지 않았으므로
     // 실내 분기의 안내가 떠야 한다. GPS 분기였다면 geolocator 플러그인 채널이

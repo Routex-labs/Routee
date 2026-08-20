@@ -6,7 +6,6 @@ import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'support/entry_floor_prompt_helper.dart';
 
 import 'package:navigation_client/theme/app_theme.dart';
 import 'package:routex_design_system/routex_design_system.dart';
@@ -221,8 +220,12 @@ void main() {
   });
 
   testWidgets(
-    'map shell shows the indoor entry overlay when entrance is detected nearby',
+    'map shell keeps the outdoor view even when GPS lands inside the building',
     (WidgetTester tester) async {
+      // **실내로 들어가는 것은 좌표가 아니라 조작이다.** 건물 안 GPS는 오차가
+      // 십수 m라 벽 안팎을 가르지 못하고, 그 좌표로 화면을 통째로 바꾸면 건물
+      // 앞을 지나가는 사람에게 도면이 열린다. 지금 도면을 여는 것은 건물 탭·
+      // 확대, 그리고 안내 카드의 진입 버튼뿐이다.
       watchPosition = () => Stream.fromIterable([
         _fakePositionApproachingEntrance,
         _fakePositionAtEntrance,
@@ -231,27 +234,14 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(theme: AppTheme.light, home: const MapShellScreen()),
       );
-
-      // 접근 표본 → 진입 표본 순으로 흘러야 판정이 서므로, 두 건이 모두 도착할
-      // 때까지 프레임을 진행한다.
       for (var i = 0; i < 5; i++) {
         await tester.pump(const Duration(milliseconds: 50));
       }
-      // 자동 진입은 '건물 감지 중...'을 먼저 띄운 뒤, 입구 기준으로 실내 위치를
-      // 잡는 작업이 끝나면 같은 자리에 결과를 덮어쓴다(진행 문구가 4초를 다
-      // 채운 뒤에야 결과가 뜨면 이미 끝난 작업을 계속 보여주는 셈이다).
-      // 이 fixture의 mock 층에는 navigation_graph가 없어 결과가 즉시 나오므로,
-      // 여기서 보이는 것은 진행 문구가 아니라 수동 지정 안내다.
-      //
-      // 다만 그 작업은 **층을 답한 뒤에** 시작한다 — 자동 진입이 "몇 층에
-      // 계신가요?"를 먼저 띄운다.
-      await dismissEntryFloorPrompt(tester);
-      expect(find.textContaining('위치 지정으로 직접 지정해주세요'), findsOneWidget);
-
       await tester.pumpAndSettle();
-      // 실내 진입 오버레이가 켜지면 야외 지도 위에 세로 층 선택기(FloorSelector)
-      // 가 나타난다. 상단 햄버거(앱 메뉴)는 모드와 무관하게 늘 그 자리에 있다.
-      expect(find.byType(FloorSelector), findsOneWidget);
+
+      // 층 선택기는 실내 오버레이가 켜졌을 때만 뜬다. 상단 햄버거(앱 메뉴)는
+      // 모드와 무관하게 늘 그 자리에 있다 — 화면 자체는 멀쩡하다는 확인이다.
+      expect(find.byType(FloorSelector), findsNothing);
       expect(find.byTooltip('메뉴'), findsOneWidget);
     },
   );
