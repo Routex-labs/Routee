@@ -276,6 +276,37 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     return _groundEntrances.any((entrance) => entrance.nodeId == nodeId);
   }
 
+  /// **앱을 건물 안에서 켠 사용자**를 실내로 데려간다.
+  ///
+  /// 좌표 한 건이 화면을 실내로 바꾸는, 이제 유일하게 남은 자리다. 자동 진입을
+  /// 걷어낸 뒤에도 이것만 남긴 이유는 **이것이 전환이 아니기 때문**이다 —
+  /// 야외에서 실내로 넘어가는 순간을 잡는 것이 아니라, 앱이 처음 눈을 떴을 때
+  /// 사용자가 어디에 서 있는지를 읽는 것이다. 전환할 야외 화면 자체가 없으므로
+  /// 문 연출도 붙이지 않는다.
+  ///
+  /// 벽 안팎을 가르는 것보다 훨씬 쉬운 판정이기도 하다. 이 건물은 폭이 180 m라,
+  /// 오차 15 m로도 "건물 한가운데"는 넉넉히 구분된다.
+  ///
+  /// **막는 조건 넷.** 하나라도 걸리면 아무것도 하지 않는다.
+  ///   - 이미 한 번 처리했다([_coldStartIndoorHandled]) — 건물 밖을 탭해 나온
+  ///     사용자를 다음 좌표가 되끌고 들어가지 않게 한다.
+  ///   - 밖을 한 번이라도 봤다 — 걸어 들어온 사람이다. 그쪽은 안내 카드의
+  ///     진입 버튼으로 들어간다.
+  ///   - 이미 실내다 — 건물을 탭해 도면을 편 사용자다.
+  ///   - 좌표가 건물 안이라고 말하지 않는다.
+  void _maybeEnterIndoorOnColdStart(
+    GpsBuildingJudgement judgement,
+    Position position,
+  ) {
+    if (_coldStartIndoorHandled || _sawOutsideSinceLaunch || _indoorEntered) {
+      return;
+    }
+    if (judgement.verdict != GpsBuildingVerdict.inside) return;
+    _coldStartIndoorHandled = true;
+    _setIndoorEntered(true);
+    unawaited(_askEntryFloorThenTrack(position));
+  }
+
   /// 지금 GPS 좌표. 없으면 null이라 진입 게이트가 닫힌다.
   ll.LatLng? get _gpsPoint {
     final position = _position;
@@ -341,7 +372,7 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
   ///
   /// 좌표를 그래프 노드에서 직접 읽는다. 문의 위경도를 되돌려 쓸 수도 있지만,
   /// 그러면 같은 지점이 아핀 왕복을 한 번 더 거쳐 몇십 cm씩 어긋난다 — 앵커를
-  /// 찍는 [_startTrackingFromEntrance]가 쓰는 값과 같아야 "문에 앵커를 찍었는데
+  /// 찍는 [_startIndoorTracking]이 쓰는 값과 같아야 "문에 앵커를 찍었는데
   /// 나가기 버튼이 안 켜진다"가 생기지 않는다.
   List<PdrLocalPoint> get _groundEntranceNodesM {
     final graph = _floorGraph;
@@ -392,7 +423,7 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     }
     await _runIndoorTransition(IndoorTransitionDirection.enter, () {
       _setIndoorEntered(true);
-      unawaited(_startTrackingFromEntrance(entrance, position));
+      unawaited(_startIndoorTracking(entrance: entrance, position: position));
     });
   }
 
@@ -871,9 +902,12 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     // 상태를 내리기 **전에** 버린다. 아래 [_syncPdrCurrentLayer]가 이 값을 보고
     // 그릴지 말지를 정하므로, 뒤에 버리면 그 한 프레임 동안 옛 위치가 남는다.
     if (!value && leftBuilding) _dropIndoorPosition();
-    // **정말로 나갔을 때만** 매장 질문을 다시 열어 둔다. 도면만 접은 사용자는 같은
+    // **정말로 나갔을 때만** 층·매장 질문을 다시 열어 둔다. 도면만 접은 사용자는 같은
     // 자리에 그대로 있어서, 다시 펼 때마다 묻는 것은 답을 아는 질문을 되묻는 것이다.
-    if (!value && leftBuilding) _nearbyStoreAsked = false;
+    if (!value && leftBuilding) {
+      _entryFloorAsked = false;
+      _nearbyStoreAsked = false;
+    }
     // 실내 안내를 켜고 끄는 유일한 지점이다.
     //
     // 예전에는 오버레이가 꺼져도 복도 보정이 계속 돌았다 — 화면에 안 보일 뿐

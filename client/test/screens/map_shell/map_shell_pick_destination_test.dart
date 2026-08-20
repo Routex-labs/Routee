@@ -13,6 +13,7 @@ import 'package:navigation_client/service_locator.dart';
 import 'package:navigation_client/theme/app_theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../support/entry_floor_prompt_helper.dart';
 
 /// 경로 입력 중 지도 탭이 별도 모드 버튼 없이 같은 입력으로 이어지는지 본다.
 void main() {
@@ -85,8 +86,9 @@ void main() {
       ),
     );
     await drain(tester);
-    // 자동 진입이 띄운 "몇 층에 계신가요?"가 지도를 덮는다. 상단 바를 누르려면
+    // 실내에서 켠 판정이 띄운 "몇 층에 계신가요?"가 지도를 덮는다. 상단 바를 누르려면
     // 먼저 걷어야 한다.
+    await dismissEntryFloorPrompt(tester);
     await tester.tap(find.byTooltip('길찾기'));
     await drain(tester);
 

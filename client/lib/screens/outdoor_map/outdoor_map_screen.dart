@@ -79,6 +79,7 @@ import 'widgets/nearby_store_sheet.dart';
 import 'widgets/floor_switch_escalator_motif.dart';
 import 'widgets/guidance_recenter_button.dart';
 import 'widgets/indoor_arrival_card.dart';
+import 'widgets/entry_floor_prompt.dart';
 import 'widgets/route_steps_sheet.dart';
 import '../../core/korean_josa.dart';
 import '../../widgets/guidance_action_row.dart';
@@ -405,6 +406,25 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   /// 지금 굴러가는 연출의 방향. 문이 당겨 열릴지 밀려 열릴지를 정한다.
   IndoorTransitionDirection _indoorTransitionDirection =
       IndoorTransitionDirection.enter;
+
+  /// 앱을 켠 뒤 GPS가 "건물 밖"이라고 한 번이라도 말했는지([saysOutsideBuilding]).
+  ///
+  /// **앱을 실내에서 켠 경우를 가르는 값이다.** 걸어 들어온 사람은 반드시 밖에서
+  /// 걸어왔으므로 그 사이 한 번은 밖이 나온다. 한 번도 없이 안이 나왔다면
+  /// 사용자는 처음부터 건물 안에 있었다는 뜻이다([_maybeEnterIndoorOnColdStart]).
+  ///
+  /// 시각이 아니라 이 사실로 가르는 이유는 **건물 로드가 늦을 수 있어서**다.
+  /// 외곽선이 없는 동안의 판정은 전부 `unclear`라, "첫 좌표"로 가르면 로딩이
+  /// 느린 기기에서 실내에서 켠 사용자가 걸어 들어온 것으로 읽힌다.
+  bool _sawOutsideSinceLaunch = false;
+
+  /// 실내에서 켠 판정을 이미 한 번 처리했는지.
+  ///
+  /// **앱을 켠 뒤 딱 한 번만 발화한다.** 없으면 건물 밖을 탭해 야외 지도로 나온
+  /// 사용자를 다음 좌표 한 건이 곧바로 되끌고 들어가, 건물 안에서는 야외 지도를
+  /// 볼 수 없게 된다. 예전에는 이 일을 무장 플래그(`_gpsEntryArmed`)가 했는데,
+  /// 자동 진입이 사라진 지금 남은 갈래는 이 하나뿐이라 1회성으로 충분하다.
+  bool _coldStartIndoorHandled = false;
 
   Position? _position;
 
@@ -1072,6 +1092,13 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   /// 이벤트는 무슨 일이 일어난 순간에만 나온다. 들고 있지 않으면 거부 사유가
   /// 한 프레임 떴다 사라져, 정작 읽어야 할 사람이 못 읽는다.
   EscalatorDetectionEvent? _lastEscalatorEvent;
+
+  /// 이번 진입에서 "몇 층에 계신가요?"를 이미 물었는지([_askEntryFloor]).
+  ///
+  /// **건물을 실제로 나갈 때만 되돌린다.** 도면만 접은 경우
+  /// (`returnToOutdoorView`)는 같은 자리에 그대로 있어서, 다시 펼 때마다 묻는
+  /// 것은 답을 아는 질문을 되묻는 것이다.
+  bool _entryFloorAsked = false;
 
   /// 이번 진입에서 "근처 매장에서 골라주세요"를 이미 띄웠는지.
   ///

@@ -137,6 +137,23 @@ GpsBuildingJudgement judgeBuildingFromGps({
   );
 }
 
+/// 이 좌표가 **건물 밖이라고 말할 만한가.** 오차를 보지 않는다.
+///
+/// 쓰이는 곳은 하나 — "앱을 켠 뒤 한 번이라도 밖이 나왔는가"
+/// (`_sawOutsideSinceLaunch`). 그 값이 실내에서 앱을 켠 사람과 걸어 들어온
+/// 사람을 가른다.
+///
+/// [judgeBuildingFromGps]의 `outside` 판정을 그대로 쓰지 않는 이유는 **오차
+/// 문턱 때문**이다. 유리 외벽 건물 앞은 오차가 30 m 아래로 안 내려오는 일이
+/// 흔한데, 그 자리에서 걸어 들어온 사람은 밖을 한 번도 못 본 것이 되어 "앱을
+/// 안에서 켰다"로 읽힌다 — 걷는 내내 층을 묻는 전면 화면이 뜬다.
+///
+/// 느슨하게 해도 되는 근거는 **이 값이 행동이 아니라 빗장**이라는 것이다.
+/// 노이즈로 true가 되면 질문을 한 번 건너뛸 뿐이고, 층은 선택기로 고르면 된다.
+bool saysOutsideBuilding(GpsBuildingJudgement judgement) =>
+    judgement.hasFootprint &&
+    judgement.metersOutside >= outdoorExitMarginMeters;
+
 /// 잰 거리로 결론을 내리는 사다리. 순서가 곧 정책이다.
 ///
 /// **진입은 오차를 보지 않는다.** 좌표가 외곽선 안쪽 문턱을 넘었으면 그것으로

@@ -141,13 +141,19 @@ void main() {
       MaterialApp(theme: AppTheme.light, home: Scaffold(body: OutdoorMapBody())),
     );
     await drain(tester);
+    // **밖 좌표를 먼저 흘린다.** 밖을 한 번도 안 본 채 안 좌표가 오면 "앱을
+    // 실내에서 켰다"로 읽혀 화면이 스스로 들어간다 — 이 파일이 확인하려는 것은
+    // 그 갈래가 아니라 **걸어 들어온 사람은 버튼으로만 들어간다**는 쪽이다.
+    positions.add(fix(wellOutside, 8));
+    await tester.pump(const Duration(milliseconds: 50));
+    await drain(tester);
     positions.add(fix(entrance, 10));
     await tester.pump(const Duration(milliseconds: 50));
     await drain(tester);
     expect(
       find.byType(FloorSelector),
       findsNothing,
-      reason: '좌표 한 건이 화면을 실내로 바꾸면 안 된다',
+      reason: '밖에서 걸어 들어온 사람을 좌표 한 건이 끌고 들어가면 안 된다',
     );
     // **await하지 않는다.** 이 Future는 전환 연출이 끝나야 완료되는데 그 시계를
     // 미는 것이 아래 drain이다 — 기다리면 서로를 기다리며 테스트가 멈춘다.
@@ -264,6 +270,9 @@ void main() {
           home: Scaffold(body: OutdoorMapBody()),
         ),
       );
+      await drain(tester);
+      positions.add(fix(wellOutside, 8));
+      await tester.pump(const Duration(milliseconds: 50));
       await drain(tester);
       positions.add(fix(entrance, 10));
       await tester.pump(const Duration(milliseconds: 50));

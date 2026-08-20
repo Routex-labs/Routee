@@ -77,6 +77,21 @@ void main() {
     ],
   };
 
+  /// 건물에서 한참 떨어진 인도(약 185 m 동쪽). 외곽선 밖이라 "밖을 봤다"의
+  /// 근거가 된다.
+  Position farAway() => Position(
+    latitude: 37.5665,
+    longitude: 126.9800,
+    timestamp: DateTime(2024, 1, 1),
+    accuracy: 40,
+    altitude: 0,
+    altitudeAccuracy: 0,
+    heading: 0,
+    headingAccuracy: 0,
+    speed: 0,
+    speedAccuracy: 0,
+  );
+
 
   /// 문 앞. 오차가 나빠도 상관없다 — 진입 게이트는 오차를 보지 않고, 앵커도
   /// 이 좌표가 아니라 여기서 가장 가까운 문의 **노드**에 찍힌다.
@@ -117,6 +132,11 @@ void main() {
     );
     // 위치를 흘리기 전에 건물(문 목록·층 그래프) 로드가 끝날 때까지 진행한다.
     await drain(tester);
+    // **밖 좌표를 먼저 흘린다.** 밖을 한 번도 안 본 채 안 좌표가 오면 "앱을
+    // 실내에서 켰다"로 읽혀, 화면이 스스로 실내로 들어가고 GPS 스냅으로 앵커를
+    // 찍는다 — 이 파일이 확인하려는 문 노드 앵커가 아니게 된다.
+    positions.add(farAway());
+    await tester.pump(const Duration(milliseconds: 50));
     positions.add(atEntrance());
     await tester.pump(const Duration(milliseconds: 50));
     await drain(tester);
