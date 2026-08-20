@@ -511,13 +511,19 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || _mapController != controller || !_styleReady) return;
       final viewport = MediaQuery.sizeOf(context);
+      final topChrome = _topChromeBottomPx();
       unawaited(
         animateCameraToPoints(
           controller,
           points,
           viewport: viewport,
-          // 상태 표시줄은 기기마다 달라 상수로 못 박는다.
-          topInsetPx: MediaQuery.paddingOf(context).top + routeFitTopInsetPx,
+          // **잰 값을 우선한다.** 상수는 길찾기 플래너 한 줄일 때의 실측이라,
+          // 출발/도착 두 줄에 이동 수단 칩까지 붙은 화면에서는 모자란다 —
+          // 그만큼 경로 위쪽(대개 목적지)이 카드 뒤로 들어가 안 보인다.
+          // 못 재는 프레임에서만 상수로 떨어진다(상태 표시줄은 기기마다 다르다).
+          topInsetPx: topChrome > 0
+              ? topChrome + routeFitChromeGapPx
+              : MediaQuery.paddingOf(context).top + routeFitTopInsetPx,
           bottomInsetPx: math.max(
             _bottomCardHeightPx(),
             viewport.height * bottomSheetFraction,
@@ -525,6 +531,28 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
         ),
       );
     });
+  }
+
+  /// 지금 화면 **위쪽**을 덮고 있는 chrome의 아래 끝(논리 px). 없으면 0.
+  ///
+  /// 상수로 못 박는다 — 검색창 한 줄일 때와 출발/도착 두 줄 + 이동 수단 칩까지
+  /// 있을 때가 배로 다르다. 상태 표시줄은 이미 포함된 값이다(화면 위 끝 기준).
+  ///
+  /// 상위가 넘겨 준 오버레이 키를 그대로 쓰되 **위쪽 절반에 있는 것만** 센다.
+  /// 하단 바도 같은 목록에 있어서, 안 가르면 화면 전체가 가려진 것으로 읽혀
+  /// 경로가 점이 된다.
+  double _topChromeBottomPx() {
+    final half = MediaQuery.sizeOf(context).height / 2;
+    var bottom = 0.0;
+    for (final key in widget.outerOverlayKeys) {
+      final box = key.currentContext?.findRenderObject() as RenderBox?;
+      if (box == null || !box.hasSize) continue;
+      final top = box.localToGlobal(Offset.zero).dy;
+      if (top > half) continue;
+      final edge = top + box.size.height;
+      if (edge > bottom) bottom = edge;
+    }
+    return bottom;
   }
 
   /// 지금 화면 아래를 덮고 있는 카드(ETA·대중교통 요약)의 높이(논리 px).

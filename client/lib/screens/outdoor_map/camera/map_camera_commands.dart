@@ -124,6 +124,12 @@ const routeFitSideInsetPx = 16.0;
 const routeFitTopInsetPx = 120.0;
 const routeFitBottomInsetPx = 180.0;
 
+/// 잰 chrome 아래 끝과 경로 사이에 남기는 틈(논리 px).
+///
+/// 0이면 경로선이 카드 밑변에 딱 붙어, 잘린 것인지 거기서 끝나는 것인지
+/// 구분되지 않는다.
+const routeFitChromeGapPx = 12.0;
+
 /// 여백을 다 빼고도 남겨야 하는 세로 띠(논리 px). 여백 합이 화면을 넘으면
 /// MapLibre가 `화면 - 여백`(<= 0)으로 줌을 계산해 카메라가 튄다.
 const routeFitMinBandPx = 120.0;
