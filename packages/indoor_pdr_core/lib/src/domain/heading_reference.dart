@@ -32,33 +32,3 @@ HeadingReference headingReferenceFromSource(String? source) {
   // 아직 heading을 못 받았거나 알 수 없으면 보수적으로 자북으로 가정하지 않는다.
   return HeadingReference.arbitraryCorrected;
 }
-
-/// 자력계 정확도가 **절대 방위를 맡길 만한가**.
-///
-/// native가 주는 문자열은 high·medium·low·uncalibrated·unknown이다.
-///
-/// **"나쁘다는 증거"가 있을 때만 거부한다.** `unknown`(아직 정확도 콜백이 안 옴)
-/// 까지 거부하면 세션 초반마다 방향 질문이 뜨고, iOS는 사용자가 폰을 흔들기 전까지
-/// `uncalibrated`에 머무는 일이 잦아 정상 기기에서도 창이 반복된다. 잘못 걸리는
-/// 비용(매번 모달)이 놓치는 비용보다 크고, 놓치는 쪽은 사용자가 지도를 직접 찍어
-/// 언제든 고칠 수 있다(`confirmAnchorByPin`의 requireDirection).
-bool isTrustedMagneticAccuracy(String accuracy) =>
-    accuracy != 'low' && accuracy != 'uncalibrated';
-
-/// 지금 heading의 **절대 방위를 앵커 확정에 맡겨도 되는가.**
-///
-/// [headingReferenceFromSource]와 **반드시 갈라 둔다.** 저쪽은 "이 값이 자북
-/// frame인가"라는 성질이고, 이쪽은 "그 frame이 지금 맞는가"라는 상태다.
-///
-/// 둘을 한 함수로 합쳤던 적이 있고, 그것이 실내 방향을 90° 틀어 놓은 회귀였다 —
-/// `gyro_hold`를 frame 판정에서 뺐더니(맞는 변경이다) 품질 판정까지 함께
-/// 사라져, 자력계가 교란된 실내에서 보정 없이 방위가 확정됐다. 근거와 경위는
-/// `docs/client/android-heading-drift.md` 6절.
-bool isTrustedHeading({
-  required String source,
-  required String magneticAccuracy,
-}) =>
-    headingReferenceFromSource(source) == HeadingReference.magneticNorth &&
-    isTrustedMagneticAccuracy(magneticAccuracy) &&
-    // hold가 걸렸다는 것 자체가 "자력계를 지금 못 믿는다"는 판정 결과다.
-    !source.contains('gyro_hold');

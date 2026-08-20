@@ -145,11 +145,6 @@ class PdrSession {
   HeadingReference get headingReference =>
       headingReferenceFromSource(headingSource);
 
-  /// 지금 heading의 **절대 방위를 믿어도 되는가.** 판정은 [isTrustedHeading]이
-  /// 단일 출처이고, 왜 [headingReference]와 갈라 두는지도 그쪽에 적혀 있다.
-  bool get headingTrustworthy =>
-      isTrustedHeading(source: headingSource, magneticAccuracy: magneticAccuracy);
-
   PdrLocalPoint get position => _paths.correctedPosition;
   List<PdrLocalPoint> get path => List.unmodifiable(_paths.corrected);
   int get steps => iosTrackedSteps;

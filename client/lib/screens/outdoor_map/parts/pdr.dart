@@ -196,30 +196,6 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     return _pdrMarkerWriteQueue;
   }
 
-  /// heading이 도는 네 토막의 값을 칩 한 줄로 내보낸다.
-  ///
-  /// **마커를 그리는 그 자리에서 찍는다.** 따로 계산하면 칩과 화면이 다른 값을
-  /// 보게 되고, 그러면 현장에서 "칩은 맞는데 마커는 틀렸다"를 어느 쪽도 못 믿는다
-  /// (GPS 진입 판정 칩과 같은 규칙 — `indoor-entry-rules.md`).
-  void _publishHeadingDebug(double? markerHeadingDeg) {
-    if (!_debugModeController.enabled) {
-      _headingDebugText.value = null;
-      return;
-    }
-    _headingDebugText.value = describeMarkerHeading(
-      deviceBearingDeg: _pdrTrailState.snapshot?.orientationHeadingDeg,
-      markerBearingDeg: markerHeadingDeg,
-      cameraBearingDeg: _mapController?.cameraPosition?.bearing ?? 0,
-      anchorRotationDeg: _pdrTrailState.anchor?.rotationDeg,
-      // **파생값이 아니라 센서가 준 원문을 띄운다.** `headingReference`만 보면
-      // 실내에서 자력계가 교란돼 gyro hold에 들어간 상태도 그냥 `magneticNorth`
-      // 로 보인다 — 그 구분이 안 보여서 회귀를 한참 못 찾았다.
-      headingSource: _pdrTrailState.snapshot?.quality.features.headingSource,
-      magneticAccuracy:
-          _pdrTrailState.snapshot?.quality.features.magneticAccuracy,
-    );
-  }
-
   ll.LatLng? _pdrCurrentWgs84() {
     // 탑승 중에는 활강이 위치의 출처다. 걸음은 멈춰 있고 앵커는 아직 이전 층에
     // 있어서, 이 갈래가 없으면 층이 바뀌는 순간 마커가 통째로 사라진다.
@@ -316,6 +292,30 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
   ///
   /// 디버그 모드가 꺼져 있거나 개별 토글이 꺼져 있으면 빈 데이터를 넘겨 해당
   /// 소스를 비운다. 지도 소스에 실제로 쓰는 일은 [syncPdrDebugLayers]가 한다.
+  /// heading이 도는 네 토막의 값을 칩 한 줄로 내보낸다.
+  ///
+  /// **마커를 그리는 그 자리에서 찍는다.** 따로 계산하면 칩과 화면이 다른 값을
+  /// 보게 되고, 그러면 현장에서 "칩은 맞는데 마커는 틀렸다"를 어느 쪽도 못 믿는다
+  /// (GPS 진입 판정 칩과 같은 규칙 — `indoor-entry-rules.md`).
+  void _publishHeadingDebug(double? markerHeadingDeg) {
+    if (!_debugModeController.enabled) {
+      _headingDebugText.value = null;
+      return;
+    }
+    _headingDebugText.value = describeMarkerHeading(
+      deviceBearingDeg: _pdrTrailState.snapshot?.orientationHeadingDeg,
+      markerBearingDeg: markerHeadingDeg,
+      cameraBearingDeg: _mapController?.cameraPosition?.bearing ?? 0,
+      anchorRotationDeg: _pdrTrailState.anchor?.rotationDeg,
+      // **파생값이 아니라 센서가 준 원문을 띄운다.** `headingReference`만 보면
+      // 실내에서 자력계가 교란돼 gyro hold에 들어간 상태도 그냥 `magneticNorth`
+      // 로 보인다 — 그 구분이 안 보여서 회귀를 한참 못 찾았다.
+      headingSource: _pdrTrailState.snapshot?.quality.features.headingSource,
+      magneticAccuracy:
+          _pdrTrailState.snapshot?.quality.features.magneticAccuracy,
+    );
+  }
+
   Future<void> _syncDebugPdrLayers() async {
     final controller = _mapController;
     if (controller == null || !_styleReady) return;
@@ -547,11 +547,7 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
       _showSnack('복도를 선택해주세요!', duration: OutdoorMapUi._briefSnackDuration);
       return;
     }
-    // **지도를 직접 찍은 경우는 방향도 함께 묻는다.** 사용자가 「위치 지정」으로
-    // 여기까지 온 것은 "지금 잡힌 게 틀렸다"는 뜻이고, 방향이 그 절반이다.
-    // 자동 판정만으로는 자력계가 "정확도 높음"을 보고하면서 건물 철골 때문에
-    // 국소적으로 90° 틀어진 경우를 잡지 못한다 — 그때 이 창이 유일한 출구다.
-    await _confirmPdrAnchor(snapped.point, askDirection: true);
+    await _confirmPdrAnchor(snapped.point);
   }
 
   /// [notifyLocationChanged]는 "사용자의 현재 위치가 새로 잡혔다"를 상위에
@@ -559,13 +555,9 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
   /// 경우이기 때문이다. 출발지 매장을 따라 찍는 경우([_anchorAtStoreOrigin])만
   /// 끈다. 그쪽은 상위가 방금 정한 출발지를 되짚어 찍는 것이라, 다시 알리면
   /// 상위가 그 출발지를 스스로 버리게 된다.
-  ///
-  /// [askDirection]은 자북을 믿을 만해도 방향을 묻게 한다. 사용자가 지도를 직접
-  /// 찍은 경우에만 참이다(그 자리 주석 참고).
   Future<void> _confirmPdrAnchor(
     PdrLocalPoint floorPoint, {
     bool notifyLocationChanged = true,
-    bool askDirection = false,
   }) async {
     final graph = _floorGraph;
     final axes = graph == null
@@ -574,7 +566,6 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     await indoorNavigationDriver.confirmAnchorByPin(
       floorPointM: floorPoint,
       axes: axes,
-      requireDirection: askDirection,
     );
     if (!mounted) return;
     if (indoorNavigationDriver.currentCalibration.phase ==
@@ -589,8 +580,6 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
       );
       await indoorNavigationDriver.confirmAnchorByFloorDirection(
         floorDirection: floorDirection,
-        // 「위쪽/오른쪽/…」은 **바라보는 쪽**을 물은 것이다.
-        describesFacing: true,
       );
     }
     if (!mounted) return;
@@ -626,13 +615,9 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     return showDialog<double>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('바라보는 방향 맞추기'),
-        // 예전 문구는 "이 기기는 절대 북쪽 기준 heading을 얻지 못했습니다"였다.
-        // 이제 자북을 얻고도 **믿을 수 없는 경우**(건물 철골에 자력계가 끌려간
-        // 경우)에도 이 창이 뜨므로, 기기 탓으로 읽히는 문장을 쓰지 않는다.
+        title: const Text('진행 방향 보정'),
         content: const Text(
-          '건물 안에서는 나침반이 철골에 끌려 방향이 크게 어긋날 수 있습니다.\n'
-          '지금 화면에서 어느 쪽을 보고 계신지 골라 주세요.',
+          '이 기기는 절대 북쪽 기준 heading을 얻지 못했습니다. 현재 휴대폰이 향한 지도 방향을 선택해주세요.',
         ),
         actions: [
           for (final entry in const [

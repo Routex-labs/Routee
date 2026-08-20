@@ -328,10 +328,7 @@ class PdrMotionBridge(
         } else {
             vendorAccuracyDeg
         }
-        // **FOP를 쓰는 동안에는 FOP가 준 각도를 그대로 쓴다.** 우리 forward 축
-        // 블렌드(+Y/-Z)는 폴백 경로에만 남는다 — 두 값이 같은 곳을 가리키는지는
-        // 진단으로 가른다(fopHeadingDeg vs fopBlendHeadingDeg를 나란히 싣는 이유).
-        val forward = if (useFop) fopHeadingDeg else rvHeading
+        val forward = if (useFop) fopBlendHeadingDeg else rvHeading
         if (forward != null && forward >= 0) {
             rawRotationHeadingDeg = forward
             if (!gyroHeadingInitialized) {
@@ -449,17 +446,8 @@ class PdrMotionBridge(
             (magneticAccuracy == "low" || magneticAccuracy == "uncalibrated")
         val inaccurate = rotationHeadingAccuracyDeg > 35
         val activeSource = if (usingFop) "fused_orientation_provider" else rotationSource
-        // **FOP를 쓰는 동안에는 hold하지 않는다.** 자기 교란을 다시 융합해 주는
-        // 것이 FOP의 일이고, 그 위에 우리 자이로 hold를 얹으면 같은 보정을 두 번
-        // 하면서 결과가 나빠졌을 때 어느 쪽 탓인지 가릴 수 없다. 폴백(rotation
-        // vector) 구간에서는 그대로 건다.
-        //
-        // FOP가 스스로 "많이 불확실하다"고 말하는 경우([fopHeadingErrorDeg])에도
-        // 우리 값으로 갈아치우지 않고 그 오차를 그대로 위로 올린다 — 판단은
-        // 위층이 한다.
-        val useGyroHold = !usingFop &&
-            (activeSource.contains("game_rotation_vector") || poorMagnetic ||
-                fieldDeviation > 0.35 || innovation > 35 || inaccurate)
+        val useGyroHold = activeSource.contains("game_rotation_vector") || poorMagnetic ||
+            fieldDeviation > 0.35 || innovation > 35 || inaccurate
         headingHoldActive = useGyroHold
         if (useGyroHold && gyroHeadingInitialized) {
             fusedHeadingDeg = gyroHeadingDeg

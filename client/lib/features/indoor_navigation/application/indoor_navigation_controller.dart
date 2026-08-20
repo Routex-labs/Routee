@@ -171,7 +171,6 @@ class IndoorNavigationDriver implements IndoorNavigationController {
     required PdrLocalPoint floorPointM,
     PdrToFloorAxes axes = const PdrToFloorAxes.identity(),
     String? floorId,
-    bool requireDirection = false,
   }) async {
     if (!_guiding) {
       return;
@@ -189,16 +188,11 @@ class IndoorNavigationDriver implements IndoorNavigationController {
     _pendingPinFloorM = floorPointM;
     _pendingPinPdrM = PdrLocalPoint.zero;
     _pendingAxes = axes;
-    // **frame이 자북인 것과 그 frame이 지금 맞는 것은 다르다.**
-    // 예전에는 `headingReference == magneticNorth` 하나로 갈라 rotation을 0으로
-    // 못 박았다. 그런데 철골 건물 안에서는 자력계가 통째로 틀어져도 reference는
-    // 그대로 magneticNorth라, **틀린 방위를 고칠 경로가 아예 없었다**(실기기에서
-    // 마커가 90° 넘게 돌아간 채 남던 원인). 이제 자력계 품질까지 함께 본다.
-    if (_session.headingTrustworthy && !requireDirection) {
+    if (_session.headingReference == HeadingReference.magneticNorth) {
       // 자북 기준: 서버 north_alignment 오프셋을 Phase 3에서 주입한다. 지금은 0.
       _finalizeAnchor(rotationDeg: 0, source: AnchorSource.userPin);
     } else {
-      // 자북을 못 믿는다: 진행 방향 보정이 필수(§4).
+      // arbitrary corrected: 진행 방향 보정이 필수(§4).
       _updateCalibration(CalibrationPhase.awaitingHeading);
     }
   }
@@ -206,7 +200,6 @@ class IndoorNavigationDriver implements IndoorNavigationController {
   @override
   Future<void> confirmAnchorByFloorDirection({
     required PdrLocalPoint floorDirection,
-    bool describesFacing = false,
   }) async {
     if (!_guiding || _pendingPinFloorM == null) {
       return;
@@ -216,15 +209,8 @@ class IndoorNavigationDriver implements IndoorNavigationController {
     final pdrDirection = _pendingAxes.inverseApply(floorDirection);
     if (pdrDirection == null || pdrDirection.distance < 1e-12) return;
     final targetPdrHeadingDeg = pdrBearingForDirection(pdrDirection);
-    // **빼는 대상을 같은 뜻의 값으로 맞춘다.** `walkingHeading`은
-    // `fusedHeading + walkOffset`이라, 바라보는 방향을 물어 놓고 여기서 빼면
-    // 폰을 든 각도(±60°까지)가 보정각에 그대로 남는다. 위치 마커는
-    // `fusedHeading`에 이 보정각을 더하므로 그 차이가 곧 마커의 상수 오차다.
-    final referenceHeadingDeg = describesFacing
-        ? _session.fusedHeadingDeg
-        : _session.walkingHeadingDeg;
     final rotationDeg = normalizePdrRotation(
-      targetPdrHeadingDeg - referenceHeadingDeg,
+      targetPdrHeadingDeg - _session.walkingHeadingDeg,
     );
     _finalizeAnchor(
       rotationDeg: rotationDeg,

@@ -73,7 +73,6 @@ class FakeIndoorNavigation implements IndoorNavigationController {
     required PdrLocalPoint floorPointM,
     PdrToFloorAxes axes = const PdrToFloorAxes.identity(),
     String? floorId,
-    bool requireDirection = false,
   }) async {
     log.add('pin:${floorPointM.eastM},${floorPointM.northM}');
   }
@@ -81,7 +80,6 @@ class FakeIndoorNavigation implements IndoorNavigationController {
   @override
   Future<void> confirmAnchorByFloorDirection({
     required PdrLocalPoint floorDirection,
-    bool describesFacing = false,
   }) async {
     log.add('heading:${floorDirection.eastM},${floorDirection.northM}');
   }
