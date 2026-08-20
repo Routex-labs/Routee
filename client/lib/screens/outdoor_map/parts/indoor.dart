@@ -460,16 +460,21 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
   /// arbitrary reference 기기에서 쓸 "진입 방향"을 층 좌표 벡터로 만든다.
   /// 층 좌표계는 데이터셋마다 축이 뒤집혀 있을 수 있어, 나침반 각도는 반드시
   /// [axes]를 거쳐 층 벡터로 바꾼다.
+  ///
+  /// [position]은 없을 수 있다 — 사용자가 지도를 직접 찍는 경로는 GPS를 안
+  /// 지나므로, 그때는 course 갈래를 건너뛰고 그래프 중심만 쓴다.
   PdrLocalPoint? _entryFloorDirection({
-    required Position position,
+    required Position? position,
     required PdrLocalPoint anchorFloorPoint,
     required FloorGraph graph,
     required PdrToFloorAxes axes,
   }) {
     // 1순위: GPS course. 실제로 측정된 이동 방향이라 가장 정확하다. 다만 멈춰
     // 있을 때는 값이 의미 없고 플랫폼이 0으로 채우므로 속도로 먼저 거른다.
-    final course = position.heading;
-    if (position.speed >= entryCourseMinSpeedMps &&
+    final course = position?.heading;
+    if (position != null &&
+        course != null &&
+        position.speed >= entryCourseMinSpeedMps &&
         course > 0 &&
         course < 360) {
       return axes.apply(pdrDirectionForBearing(course));

@@ -568,18 +568,35 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
       axes: axes,
     );
     if (!mounted) return;
+    // **방향은 사용자에게 묻지 않는다.**
+    //
+    // 예전에는 여기서 「바라보는 방향 맞추기」 모달을 띄웠다. 아무 조작 없이
+    // 튀어나오는 창이었고, 화면 위/오른쪽 같은 보기로 실제 방위를 고르게 하는
+    // 것이라 사용자가 답을 알기도 어려웠다.
+    //
+    // 그렇다고 그냥 지우면 안 된다 — [CalibrationPhase.awaitingHeading]은
+    // `canRenderPosition`이 false라, 물음을 없애는 순간 **위치 마커가 통째로
+    // 사라진다.** 그래서 묻는 대신 자동 진입과 **같은 추정**으로 채운다
+    // ([_entryFloorDirection]: GPS course → 층 그래프 중심).
     if (indoorNavigationDriver.currentCalibration.phase ==
         CalibrationPhase.awaitingHeading) {
-      final screenDirection = await _askScreenDirection();
-      if (screenDirection == null || !mounted) return;
-      final cameraBearing = _mapController?.cameraPosition?.bearing ?? 0;
-      final floorDirection = floorDirectionForScreenDirection(
-        cameraBearingDeg: cameraBearing,
-        screenClockwiseOffsetDeg: screenDirection,
-        axes: axes,
-      );
+      final direction = graph == null
+          ? null
+          : _entryFloorDirection(
+              position: _position,
+              anchorFloorPoint: floorPoint,
+              graph: graph,
+              axes: axes,
+            );
+      // 추정도 실패하면(그래프가 없거나 찍은 점이 중심과 겹침) 방향을 모르는
+      // 채로 둔다. 지어낸 각도로 궤적을 통째로 돌리는 것보다, 위치가 아직
+      // 안 잡힌 상태로 남겨 두고 사용자가 다시 찍게 하는 편이 낫다.
+      if (direction == null) {
+        _showSnack('방향을 잡지 못했습니다. 조금 걸은 뒤 다시 지정해주세요.');
+        return;
+      }
       await indoorNavigationDriver.confirmAnchorByFloorDirection(
-        floorDirection: floorDirection,
+        floorDirection: direction,
       );
     }
     if (!mounted) return;
@@ -609,29 +626,5 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
       indoorNavigationDriver.currentRuntimeStatus,
     );
     if (mounted) _setPlacingAnchor(false);
-  }
-
-  Future<double?> _askScreenDirection() {
-    return showDialog<double>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('진행 방향 보정'),
-        content: const Text(
-          '이 기기는 절대 북쪽 기준 heading을 얻지 못했습니다. 현재 휴대폰이 향한 지도 방향을 선택해주세요.',
-        ),
-        actions: [
-          for (final entry in const [
-            (label: '위쪽', value: 0.0),
-            (label: '오른쪽', value: 90.0),
-            (label: '아래쪽', value: 180.0),
-            (label: '왼쪽', value: 270.0),
-          ])
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(entry.value),
-              child: Text(entry.label),
-            ),
-        ],
-      ),
-    );
   }
 }
