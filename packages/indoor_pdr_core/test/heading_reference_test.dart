@@ -71,4 +71,65 @@ void main() {
       expect(isHeadingErrorTrusted(60), isFalse);
     });
   });
+
+  group('isMagneticFieldPlausible', () {
+    test('지구 자기장 범위 안이면 통과한다', () {
+      expect(isMagneticFieldPlausible(50), isTrue);
+      expect(isMagneticFieldPlausible(25), isTrue);
+      expect(isMagneticFieldPlausible(65), isTrue);
+    });
+
+    test('배수로 벌어진 세기는 거부한다', () {
+      // 실측: SM-F711N이 책상 위에서 100.7 µT를 냈다. 같은 자리의 복각은
+      // −25°로, 서울 기대값 +53°에서 78° 어긋나 있었다.
+      expect(isMagneticFieldPlausible(100.7), isFalse);
+      expect(isMagneticFieldPlausible(5), isFalse);
+    });
+
+    test('못 받은 값은 통과시킨다 — 나쁘다는 증거가 있을 때만 거부한다', () {
+      expect(isMagneticFieldPlausible(null), isTrue);
+      expect(isMagneticFieldPlausible(0), isTrue);
+    });
+
+    test('문턱은 지표 실측 범위(25~65)를 양쪽으로 감싼다', () {
+      expect(minPlausibleFieldUt, lessThan(25));
+      expect(maxPlausibleFieldUt, greaterThan(65));
+      // 넓히면 잡으려던 두 배짜리 왜곡이 빠져나간다.
+      expect(maxPlausibleFieldUt, lessThan(100));
+    });
+  });
+
+  group('headingTrustworthy', () {
+    PdrSession sessionWith({
+      required double errorDeg,
+      required double fieldUt,
+    }) {
+      final session = PdrSession()
+        ..headingSource = 'sensor_manager/rotation_vector'
+        ..rotationHeadingAccuracyDeg = errorDeg
+        ..magneticFieldUt = fieldUt;
+      return session;
+    }
+
+    test('신고 오차가 없어도 자기장 세기로 거부한다', () {
+      // 이 조합이 실기기에서 나온 그대로다 — 기기는 아무 문제도 신고하지
+      // 않는데(-1) 관측된 자기장이 지구 것이 아니다.
+      expect(
+        sessionWith(errorDeg: -1, fieldUt: 100.7).headingTrustworthy,
+        isFalse,
+      );
+    });
+
+    test('둘 다 멀쩡하면 통과한다', () {
+      expect(
+        sessionWith(errorDeg: -1, fieldUt: 50).headingTrustworthy,
+        isTrue,
+      );
+    });
+
+    test('자기장을 못 받으면 신고 오차만으로 가른다', () {
+      expect(sessionWith(errorDeg: 12, fieldUt: 0).headingTrustworthy, isTrue);
+      expect(sessionWith(errorDeg: 45, fieldUt: 0).headingTrustworthy, isFalse);
+    });
+  });
 }

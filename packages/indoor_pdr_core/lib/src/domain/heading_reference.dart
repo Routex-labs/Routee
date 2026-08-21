@@ -60,3 +60,33 @@ bool isHeadingErrorTrusted(
   if (errorDeg < 0) return true;
   return errorDeg <= maxErrorDeg;
 }
+
+/// 지구 자기장으로 설명되는 세기의 하한·상한(µT).
+///
+/// 지표 실측은 어디서나 25~65다. 양쪽에 여유를 둔 이유는 이 판정으로 **거부**를
+/// 하기 때문이다 — 센서 bias나 약한 실내 왜곡까지 잡으면 얻는 것 없이 정상
+/// 세션만 흔든다. 잡으려는 것은 배수로 벌어지는 값이다.
+///
+/// **위도와 무관하다.** 그래서 이 판정만 코어에 있다. 자기 복각도 같은 왜곡을
+/// 더 예민하게 잡지만 기대값이 위도로 정해져, 위치를 모르는 이 층에서는 문턱을
+/// 세울 수 없다(진단으로만 띄운다).
+const minPlausibleFieldUt = 20.0;
+const maxPlausibleFieldUt = 80.0;
+
+/// 이 자기장 **세기**가 지구 자기장으로 설명되는가.
+///
+/// [isHeadingErrorTrusted]와 하는 일이 같고 근거가 다르다. 저쪽은 기기가 스스로
+/// 신고한 값을 읽고, 이쪽은 **관측값**을 읽는다. 그 차이가 결정적인 기기가 있다 —
+/// 실측에서 SM-F711N은 heading 오차를 −1로, 자력계 정확도를 `unknown`으로 줘서
+/// 신고 기반 판정이 전부 통과하는데, 그 자리의 세기는 100.7 µT(지구의 2.0배)에
+/// 복각은 −25°였다(서울 기대값 +53°). 나침반이 지구가 아닌 것을 보고 있었다.
+///
+/// 값을 못 받았으면(null·0 이하) 참이다 — 나쁘다는 증거가 있을 때만 거부한다는
+/// 규칙은 여기서도 같다.
+///
+/// **남는 구멍.** 하드아이언 오프셋이 작아 세기가 범위 안에 머물면서 방향만
+/// 틀어지는 경우는 못 잡는다. 이 판정은 배수로 벌어진 것만 잡는다.
+bool isMagneticFieldPlausible(double? fieldUt) {
+  if (fieldUt == null || fieldUt <= 0) return true;
+  return fieldUt >= minPlausibleFieldUt && fieldUt <= maxPlausibleFieldUt;
+}

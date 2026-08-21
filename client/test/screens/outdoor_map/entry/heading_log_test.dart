@@ -1,35 +1,11 @@
 import 'package:flutter_test/flutter_test.dart';
+// 자기장 세기 판정 자체는 코어의 heading_reference에 있고 거기서 검증한다
+// (`packages/indoor_pdr_core/test/heading_reference_test.dart`). 여기서는 그
+// 판정을 사람이 읽는 문구로 옮기는 자리만 본다.
+
 import 'package:navigation_client/screens/outdoor_map/entry/heading_log.dart';
 
 void main() {
-  group('isMagneticFieldPlausible', () {
-    test('지구 자기장 범위 안이면 통과한다', () {
-      expect(isMagneticFieldPlausible(50), isTrue);
-      expect(isMagneticFieldPlausible(25), isTrue);
-      expect(isMagneticFieldPlausible(65), isTrue);
-    });
-
-    test('배수로 벌어진 세기는 거부한다', () {
-      // 실측: SM-F711N이 책상 위에서 107~113 µT를 냈다. 지구 자기장의 두 배다.
-      expect(isMagneticFieldPlausible(108), isFalse);
-      expect(isMagneticFieldPlausible(5), isFalse);
-    });
-
-    test('못 받은 값은 통과시킨다 — 나쁘다는 증거가 있을 때만 거부한다', () {
-      expect(isMagneticFieldPlausible(null), isTrue);
-      expect(isMagneticFieldPlausible(0), isTrue);
-      expect(isMagneticFieldPlausible(-1), isTrue);
-    });
-
-    test('문턱은 지표 실측 범위(25~65)를 양쪽으로 감싼다', () {
-      // 좁히면 센서 bias와 약한 실내 왜곡까지 걸려 정상 세션만 흔든다.
-      expect(minPlausibleFieldUt, lessThan(25));
-      expect(maxPlausibleFieldUt, greaterThan(65));
-      // 넓히면 잡으려던 두 배짜리 왜곡이 빠져나간다.
-      expect(maxPlausibleFieldUt, lessThan(107));
-    });
-  });
-
   group('describeMagneticField', () {
     test('세기와 배수와 결론을 함께 쓴다', () {
       expect(describeMagneticField(108.3), '108.3µT(2.2배·의심)');

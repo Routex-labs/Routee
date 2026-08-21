@@ -8,6 +8,8 @@
 /// 읽는 법은 `docs/client/android-heading-drift.md` 5절의 네 토막 표와 같다.
 library;
 
+import 'package:indoor_pdr_core/indoor_pdr_core.dart';
+
 /// heading 진단 한 줄. 앞에 `HEADING`이 붙어 있어 logcat에서 바로 걸린다.
 ///
 /// 예)
@@ -75,23 +77,6 @@ String describeHeadingLog({
 /// 배수를 적을 기준으로만 쓴다. 판정은 [isMagneticFieldPlausible]이 범위로
 /// 하므로 이 값이 정확할 필요는 없다.
 const nominalEarthFieldUt = 50.0;
-
-/// 지구 자기장으로 설명되는 세기의 하한·상한(µT).
-///
-/// 실제 지표값은 25~65다. 양쪽에 여유를 둔 이유는 이 판정으로 **거부**를 하기
-/// 때문이다 — 센서 bias나 약한 실내 왜곡까지 잡으면 얻는 것 없이 정상 세션만
-/// 흔든다. 잡으려는 것은 배수로 벌어지는 값이다(실측: SM-F711N 책상 위 108 µT).
-const minPlausibleFieldUt = 20.0;
-const maxPlausibleFieldUt = 80.0;
-
-/// 이 세기가 **지구 자기장으로 설명되는가.**
-///
-/// 값을 못 받았으면(null·0 이하) 참이다 — 나쁘다는 증거가 있을 때만 거부한다는
-/// 규칙은 여기서도 같다(`heading_reference.dart`의 음수 처리와 같은 이유다).
-bool isMagneticFieldPlausible(double? fieldUt) {
-  if (fieldUt == null || fieldUt <= 0) return true;
-  return fieldUt >= minPlausibleFieldUt && fieldUt <= maxPlausibleFieldUt;
-}
 
 /// 세기와 그 세기로 내린 결론을 붙여 쓴다. 숫자만 있으면 지구 자기장이 얼마인지
 /// 외우고 있어야 읽힌다.
