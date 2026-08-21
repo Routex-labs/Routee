@@ -396,24 +396,24 @@ extension OutdoorMapGps on OutdoorMapBodyState {
     );
     if (!mounted) return;
 
-    // 자북 heading을 못 얻는 기기는 여기서 방향 보정을 기다린다. 수동 배치는
-    // 사용자에게 다이얼로그로 물어보지만, 자동 진입에서 아무 조작 없이 모달이
-    // 튀어나오면 사용자는 자기가 뭘 눌러 띄운 건지 알 수 없다. 대신 진입 방향을
-    // 추정해 그 자리에서 확정한다([_entryFloorDirection]).
+    // 자북 heading을 못 얻는 기기는 여기서 방향 보정을 기다린다. 묻지 않고
+    // 추정해 그 자리에서 확정한다([_entryFloorDirection]) — 아무 조작 없이 모달이
+    // 튀어나오면 사용자는 자기가 뭘 눌러 띄운 건지 알 수 없다.
     if (indoorNavigationDriver.currentCalibration.phase ==
         CalibrationPhase.awaitingHeading) {
-      final direction = _entryFloorDirection(
+      final estimate = _entryFloorDirection(
         position: position,
         anchorFloorPoint: estimatedPoint,
         graph: graph,
         axes: axes,
       );
-      if (direction == null) {
+      if (estimate == null) {
         _replaceSnack('진입 방향을 알 수 없습니다. 위치 지정으로 직접 지정해주세요.');
         return;
       }
       await indoorNavigationDriver.confirmAnchorByFloorDirection(
-        floorDirection: direction,
+        floorDirection: estimate.direction,
+        basis: estimate.basis,
       );
       if (!mounted) return;
     }

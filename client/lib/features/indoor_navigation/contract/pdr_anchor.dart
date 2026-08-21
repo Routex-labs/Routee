@@ -11,6 +11,29 @@ import '../../../domain/geo/geo_transform.dart';
 /// 같은 센서 세션이라 heading frame이 끊기지 않기 때문이다.
 enum AnchorSource { entranceGate, userPin, manualHeadingCal, verticalTransfer }
 
+/// [PdrAnchor.rotationDeg]가 **무엇에서 나왔는지.**
+///
+/// 회전각 하나만으로는 "센서를 믿어서 0"과 "믿을 근거가 없어 0"이 구분되지
+/// 않고, 0이 아닌 값도 어느 근거로 잡은 것인지 사후에 되짚을 수 없다. 실기기
+/// 진단 칩이 이 값을 그대로 싣는다(`heading_debug.dart`) — 방향이 틀어졌을 때
+/// "게이트가 안 걸렸다"와 "걸렸는데 갈아탄 근거가 나빴다"를 가르는 유일한 자리다.
+enum AnchorRotationBasis {
+  /// 센서 방위를 그대로 믿었다. 회전각은 0이다.
+  trustedHeading,
+
+  /// 문을 걸어서 통과하는 중에 측정된 GPS course.
+  gpsCourse,
+
+  /// 앵커 지점에 놓인 복도의 축. 앞뒤 부호는 아직 확인하지 않았다.
+  corridorAxis,
+
+  /// 복도 축으로 잡은 뒤, 실제로 걸어 본 궤적이 그래프에서 벗어나 앞뒤를 뒤집었다.
+  corridorAxisFlipped,
+
+  /// 층을 옮기며 직전 앵커에서 물려받았다.
+  inherited,
+}
+
 /// PDR 로컬 미터 좌표를 floor `local_m` 좌표에 고정하는 데 필요한 데이터(§4).
 ///
 /// 변환은 `floor = axes·R(rotationDeg)·pdr + anchorLocalM`이다.
@@ -29,6 +52,7 @@ class PdrAnchor {
     required this.source,
     required this.confidence,
     this.axes = const PdrToFloorAxes.identity(),
+    this.rotationBasis = AnchorRotationBasis.trustedHeading,
   });
 
   final String floorId;
@@ -38,6 +62,9 @@ class PdrAnchor {
 
   /// PDR heading frame → floor frame 회전각(도).
   final double rotationDeg;
+
+  /// [rotationDeg]를 만든 근거.
+  final AnchorRotationBasis rotationBasis;
 
   /// heading이 자북 기준인지. arbitrary corrected fallback이면 수동 보정이 필요하다.
   final HeadingReference headingReference;

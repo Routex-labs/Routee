@@ -86,6 +86,7 @@ import '../../widgets/guidance_action_row.dart';
 import '../../map/icon/icon_cache.dart';
 import '../../map/icon/place_pin.dart';
 import 'widgets/map_overlay_tap_guard.dart';
+import 'entry/anchor_corridor_axis.dart';
 import 'entry/floor_outline.dart';
 import 'entry/heading_debug.dart';
 import 'entry/heading_log.dart';
@@ -663,6 +664,14 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   int _recalibrateTapCount = 0;
 
   late final DebugPdrTrailState _pdrTrailState;
+
+  /// 앞뒤를 이미 확인한 앵커. **같은 앵커를 두 번 판정하지 않는다.**
+  ///
+  /// 복도 축은 방향이 아니라 선이라 앞뒤가 갈리지 않고, 그 판정은 몇 걸음이
+  /// 쌓인 뒤에야 선다([_maybeFlipAnchorAxis]). 판정을 안 걸어 두면 걸음마다
+  /// 다시 재면서, 코너를 돈 뒤 뒤늦게 궤적이 통째로 뒤집힐 수 있다. 앵커를 새로
+  /// 찍으면 다른 객체가 되므로 저절로 다시 판정한다.
+  PdrAnchor? _anchorAxisSignProbed;
 
   /// 실내 안내의 위치·층 판정. 실내 탭과 **같은 구현**을 쓴다.
   ///

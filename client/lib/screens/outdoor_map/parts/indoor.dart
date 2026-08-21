@@ -460,13 +460,14 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     return nearestEntrance(_groundEntrances, here);
   }
 
-  /// arbitrary reference 기기에서 쓸 "진입 방향"을 층 좌표 벡터로 만든다.
+  /// 자북을 못 얻은 기기에서 쓸 "진행 방향"을 층 좌표 벡터와 그 근거로 만든다.
   /// 층 좌표계는 데이터셋마다 축이 뒤집혀 있을 수 있어, 나침반 각도는 반드시
-  /// [axes]를 거쳐 층 벡터로 바꾼다.
+  /// [axes]를 거쳐 층 벡터로 바꾼다. 복도 축은 이미 층 좌표라 그대로 쓴다.
   ///
-  /// [position]은 없을 수 있다 — 사용자가 지도를 직접 찍는 경로는 GPS를 안
-  /// 지나므로, 그때는 course 갈래를 건너뛰고 그래프 중심만 쓴다.
-  PdrLocalPoint? _entryFloorDirection({
+  /// [position]은 없을 수 있다 — 지도를 직접 찍는 경로는 GPS를 안 지난다.
+  /// 지하에서 앱을 켠 사용자에게는 course도 없으므로, 실질적으로는 복도 축
+  /// 하나로 간다. 둘 다 없으면 null이고, 그때는 앵커를 찍지 않는다.
+  ({PdrLocalPoint direction, AnchorRotationBasis basis})? _entryFloorDirection({
     required Position? position,
     required PdrLocalPoint anchorFloorPoint,
     required FloorGraph graph,
@@ -480,23 +481,22 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
         position.speed >= entryCourseMinSpeedMps &&
         course > 0 &&
         course < 360) {
-      return axes.apply(pdrDirectionForBearing(course));
+      return (
+        direction: axes.apply(pdrDirectionForBearing(course)),
+        basis: AnchorRotationBasis.gpsCourse,
+      );
     }
-    // 2순위: 입구 → 층 그래프 중심. 입구를 통과한 사람은 건물 안쪽을 향한다.
-    // GPS course보다 거칠지만, 방향을 몰라 awaitingHeading에 멈춰 서면 앵커가
-    // 확정되지 않아 위치 아이콘도 걸음 추적도 아예 없다. 회전이 어긋나면
-    // 사용자가 "위치 지정"으로 다시 잡을 수 있으므로 되돌릴 수 있는 오차다.
-    var sumX = 0.0;
-    var sumY = 0.0;
-    for (final node in graph.nodes) {
-      sumX += node.xM;
-      sumY += node.yM;
-    }
-    final dx = sumX / graph.nodes.length - anchorFloorPoint.eastM;
-    final dy = sumY / graph.nodes.length - anchorFloorPoint.northM;
-    // 입구가 그래프 중심과 사실상 같은 점이면 방향 벡터가 0이 된다.
-    if (dx * dx + dy * dy < 1e-6) return null;
-    return PdrLocalPoint(dx, dy);
+    // 2순위: 찍은 자리에 놓인 **복도의 축**. 사람은 복도를 따라 걷지, 층 중심을
+    // 향해 걷지 않는다 — 중심 방향을 각도로 쓰던 예전 폴백이 실기기에서 궤적을
+    // 51° 비스듬히 돌려 놓았다(`docs/client/android-heading-drift.md` 7절).
+    // 중심은 앞뒤를 고르는 힌트로만 남긴다.
+    final axis = corridorAxisAtAnchor(
+      graph: graph,
+      anchorFloorPoint: anchorFloorPoint,
+      inwardHint: inwardHintFromGraphCentroid(graph, anchorFloorPoint),
+    );
+    if (axis == null) return null;
+    return (direction: axis, basis: AnchorRotationBasis.corridorAxis);
   }
 
   /// 좌표열 전체가 **가려지지 않는 띠**에 들어오도록 카메라를 맞춘다.

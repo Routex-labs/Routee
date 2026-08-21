@@ -443,12 +443,24 @@ class MapMatchedFloorPoint {
     required this.point,
     required this.edgeId,
     required this.distanceToGraphM,
+    required this.tangentEast,
+    required this.tangentNorth,
     this.state = MapMatchState.tracking,
   });
 
   final PdrLocalPoint point;
   final String edgeId;
   final double distanceToGraphM;
+
+  /// 붙은 선분의 진행 방향 단위 벡터(floor local_m). 부호는 간선의 from→to다.
+  ///
+  /// 방위를 모르는 기기가 앵커 회전각을 이 축에서 가져간다
+  /// (`entry/anchor_corridor_axis.dart`). 후보 점수를 매길 때 이미 계산해 둔
+  /// 값이라 여기서 다시 재지 않는다 — 다시 재면 "가장 가까운 선분"의 정의가
+  /// 두 곳으로 갈린다.
+  final double tangentEast;
+  final double tangentNorth;
+
   final MapMatchState state;
 }
 
@@ -647,6 +659,8 @@ class _MatchedCandidate {
     point: point,
     edgeId: edge.id,
     distanceToGraphM: distanceToGraphM,
+    tangentEast: tangentEast,
+    tangentNorth: tangentNorth,
     state: state,
   );
 }

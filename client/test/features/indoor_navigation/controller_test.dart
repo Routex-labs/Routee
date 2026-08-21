@@ -333,6 +333,61 @@ void main() {
     });
   });
 
+  group('복도 축으로 잡은 회전각의 앞뒤 뒤집기', () {
+    Future<void> anchorOnCorridorAxis() async {
+      await driver.startGuidance(floorId: 'F1');
+      source.emitRaw(
+        motionEvent(
+          tMs: 1000,
+          heading: 0,
+          source: 'fused_orientation_provider',
+          headingErrorDeg: 180,
+        ),
+      );
+      await settle();
+      await driver.confirmAnchorByPin(floorPointM: const PdrLocalPoint(5, 7));
+      await driver.confirmAnchorByFloorDirection(
+        floorDirection: const PdrLocalPoint(1, 0),
+        basis: AnchorRotationBasis.corridorAxis,
+      );
+    }
+
+    test('회전각만 180° 돌고 찍은 자리는 안 움직인다', () async {
+      await anchorOnCorridorAxis();
+      final before = driver.currentCalibration.anchor!;
+      await driver.flipAnchorRotation();
+      final after = driver.currentCalibration.anchor!;
+
+      expect(
+        normalizePdrRotation(after.rotationDeg - before.rotationDeg).abs(),
+        closeTo(180, 1e-9),
+      );
+      // 앵커 원점이 움직이면 사용자가 찍은 자리가 사라진다. 뒤집기는 그 점을
+      // 중심으로 한 점대칭이어야 한다.
+      expect(after.anchorLocalM.eastM, before.anchorLocalM.eastM);
+      expect(after.anchorLocalM.northM, before.anchorLocalM.northM);
+    });
+
+    test('근거가 뒤집힘으로 바뀌어 두 번 판정되지 않는다', () async {
+      await anchorOnCorridorAxis();
+      expect(
+        driver.currentCalibration.anchor!.rotationBasis,
+        AnchorRotationBasis.corridorAxis,
+      );
+      await driver.flipAnchorRotation();
+      expect(
+        driver.currentCalibration.anchor!.rotationBasis,
+        AnchorRotationBasis.corridorAxisFlipped,
+      );
+    });
+
+    test('앵커가 없으면 아무 일도 하지 않는다', () async {
+      await driver.startGuidance(floorId: 'F1');
+      await driver.flipAnchorRotation();
+      expect(driver.currentCalibration.anchor, isNull);
+    });
+  });
+
   test('arbitrary 기준: pin 후 heading 보정까지 요구한다', () async {
     await driver.startGuidance(floorId: 'F1');
     source.emitRaw(
@@ -360,6 +415,7 @@ void main() {
 
     await driver.confirmAnchorByFloorDirection(
       floorDirection: const PdrLocalPoint(0, 1),
+      basis: AnchorRotationBasis.corridorAxis,
     );
     expect(driver.currentCalibration.phase, CalibrationPhase.calibrated);
     expect(driver.currentCalibration.anchor!.rotationDeg, closeTo(90, 1e-9));
