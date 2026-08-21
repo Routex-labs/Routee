@@ -50,11 +50,15 @@ class PdrMotionBridge(
     private val fopMatrix = FloatArray(9)
     private val orientation = FloatArray(3)
     private val gravity = FloatArray(3)
+    private val magnetic = FloatArray(3)
+    private val inclinationMatrix = FloatArray(9)
+    private val magneticRotationMatrix = FloatArray(9)
     private val linearAccel = FloatArray(3)
     private val rawAccel = FloatArray(3)
     private val gyro = FloatArray(3)
     private var hasRotation = false
     private var hasGravity = false
+    private var hasMagnetic = false
     private var hasLinearAccel = false
     private var hasGyro = false
     private var rotationSource = "unavailable"
@@ -80,6 +84,7 @@ class PdrMotionBridge(
     private var rotationHeadingAccuracyDeg = -1.0
     private var magneticAccuracy = "unknown"
     private var magneticField = 0.0
+    private var magneticInclinationDeg = -1.0
     private var magneticFieldBaseline: Double? = null
     private var accelMagnitude = 0.0
     private var gyroZ = 0.0
@@ -316,7 +321,7 @@ class PdrMotionBridge(
                 hasGravity = true
             }
             Sensor.TYPE_GYROSCOPE -> updateGyro(event)
-            Sensor.TYPE_MAGNETIC_FIELD -> magneticField = magnitude(event.values)
+            Sensor.TYPE_MAGNETIC_FIELD -> updateMagnetic(event.values)
             Sensor.TYPE_STEP_COUNTER -> updateStepCounter(event.values[0], event.timestamp)
             Sensor.TYPE_STEP_DETECTOR -> updateStepDetector(event.timestamp)
             Sensor.TYPE_PRESSURE -> updatePressure(event.values[0], event.timestamp)
@@ -384,6 +389,29 @@ class PdrMotionBridge(
         val gain = (dt / tau).coerceIn(0.0, 1.0)
         val delta = signedDelta(rawRotationHeadingDeg, gyroHeadingDeg)
         gyroHeadingDeg = normalizeDegrees(gyroHeadingDeg + gain * delta)
+    }
+
+    /**
+     * 자기장 표본. 세기와 **복각**을 함께 낸다.
+     *
+     * 세기만으로는 "이 값이 이상하다"까지고, 지구 자기장이 아니라는 말은 못 한다.
+     * 복각은 자기 벡터가 수평면에서 얼마나 기울었는지이고 위도로 정해진다
+     * (서울 약 53°). 세기와 복각이 **함께** 벗어나면 국소 왜곡이 확정된다 —
+     * 센서 눈금이 어긋난 것이라면 세기만 틀리고 복각은 남는다.
+     */
+    private fun updateMagnetic(values: FloatArray) {
+        copy3(values, magnetic)
+        hasMagnetic = true
+        magneticField = magnitude(values)
+        if (!hasGravity) return
+        // 중력과 자기 벡터가 나란하면 행렬이 안 나온다. 그때는 직전 값을 둔다.
+        if (SensorManager.getRotationMatrix(
+                magneticRotationMatrix, inclinationMatrix, gravity, magnetic,
+            )
+        ) {
+            magneticInclinationDeg =
+                Math.toDegrees(SensorManager.getInclination(inclinationMatrix).toDouble())
+        }
     }
 
     private fun updateGyro(event: SensorEvent) {
@@ -715,6 +743,7 @@ class PdrMotionBridge(
                 "headingSource" to selectedHeadingSource,
                 "yawDeg" to yawDeg, "pitchDeg" to pitchDeg, "rollDeg" to rollDeg,
                 "magneticAccuracy" to magneticAccuracy, "magneticField" to magneticField,
+                "magneticInclinationDeg" to magneticInclinationDeg,
                 "walkDirDeg" to walkDirDeg, "walkDirConfidence" to walkDirConfidence,
                 "motionTimestamp" to motionTimestampMs, "motionHz" to motionHz,
                 "stepPeakCount" to stepPeakCount, "latestStepPeakMs" to latestStepPeakMs,
