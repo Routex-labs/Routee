@@ -44,6 +44,7 @@ void main() {
   group('describeHeadingLog', () {
     String line({
       double? magneticFieldUt = 50,
+      double? magneticInclinationDeg = 53,
       double? headingErrorDeg = 12,
       double? markerBearingDeg = 200,
       double cameraBearingDeg = 30,
@@ -56,6 +57,7 @@ void main() {
       walkOffsetDeg: 1.2,
       headingConverged: true,
       magneticFieldUt: magneticFieldUt,
+      magneticInclinationDeg: magneticInclinationDeg,
       headingErrorDeg: headingErrorDeg,
       magneticAccuracy: 'unknown',
       headingSource: 'sensor_manager/rotation_vector',
@@ -86,14 +88,30 @@ void main() {
       );
     });
 
+    test('복각은 서울 값에서 벗어나면 의심으로 적는다', () {
+      // 세기와 복각이 **함께** 벗어나야 국소 왜곡이다. 세기만 틀리면 눈금
+      // 문제일 수 있어 이 자리가 둘을 가른다.
+      expect(line(magneticInclinationDeg: 53), contains('복각=53°(정상)'));
+      expect(line(magneticInclinationDeg: 62), contains('복각=62°(정상)'));
+      expect(line(magneticInclinationDeg: 80), contains('복각=80°(의심)'));
+      expect(line(magneticInclinationDeg: 10), contains('복각=10°(의심)'));
+    });
+
+    test('복각 허용 폭은 자세 잡음보다 넓고 왜곡보다 좁다', () {
+      expect(inclinationToleranceDeg, greaterThan(5));
+      expect(inclinationToleranceDeg, lessThan(30));
+    });
+
     test('값을 못 받은 자리는 빈칸이 아니라 표시가 남는다', () {
       final text = line(
         magneticFieldUt: null,
+        magneticInclinationDeg: null,
         headingErrorDeg: -1,
         markerBearingDeg: null,
         headingTrustworthy: null,
       );
       expect(text, contains('자기장=모름'));
+      expect(text, contains('복각=모름'));
       expect(text, contains('오차=모름'));
       expect(text, contains('마커=—'));
       expect(text, contains('신뢰=—'));

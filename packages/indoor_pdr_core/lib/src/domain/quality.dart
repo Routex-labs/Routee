@@ -30,6 +30,7 @@ class PdrQualityFeatures {
     required this.headingConverged,
     required this.headingSpreadDeg,
     this.magneticFieldUt,
+    this.magneticInclinationDeg,
     this.headingTrustworthy = false,
   });
 
@@ -59,6 +60,13 @@ class PdrQualityFeatures {
   /// 지표 어디서나 25~65 µT라, 이 범위를 크게 벗어난 값은 나침반이 지구가 아닌
   /// 무언가를 보고 있다는 뜻이다. 값을 못 받았으면 null이다.
   final double? magneticFieldUt;
+
+  /// 자기 벡터가 수평면에서 기운 각(도). 위도로 정해진다 — 서울 약 53°.
+  ///
+  /// [magneticFieldUt]와 **짝으로 읽는다.** 세기만 벗어나면 눈금이 어긋난
+  /// 것일 수 있지만, 세기와 복각이 함께 벗어나면 그 자리의 자기장이 지구
+  /// 것이 아니라는 뜻이다. 그때 나침반은 어느 방향도 못 가리킨다.
+  final double? magneticInclinationDeg;
   final double cadenceHz;
   final double pitchDeg;
   final double rollDeg;

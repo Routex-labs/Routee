@@ -20,6 +20,7 @@ class HeadingEvent {
     this.walkDirConfidence,
     this.magneticAccuracy,
     this.magneticField,
+    this.magneticInclinationDeg,
     this.rotationHeadingAccuracyDeg,
     this.headingSource,
   });
@@ -37,6 +38,10 @@ class HeadingEvent {
   final double? walkDirConfidence;
   final String? magneticAccuracy;
   final double? magneticField;
+
+  /// 자기 벡터가 수평면에서 기운 각(도). 위도로 정해지며 서울은 약 53°다.
+  /// 값을 못 받았으면 null, 기기가 못 냈으면 음수다.
+  final double? magneticInclinationDeg;
   final double? rotationHeadingAccuracyDeg;
   final String? headingSource;
 }

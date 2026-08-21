@@ -32,6 +32,7 @@ const _rank = <String, int>{
 /// 않는다. 이 한 파일을 특별 취급하는 대신 규칙을 느슨하게 하면 검사가 의미를 잃는다.
 const _rootFileRank = <String, int>{
   'app.dart': 5,
+  'heading_probe_main.dart': 5,
   'main.dart': 5,
   'pdr_device_harness_main.dart': 5,
   _serviceLocator: 5,

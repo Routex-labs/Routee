@@ -28,6 +28,7 @@ String describeHeadingLog({
   required double? walkOffsetDeg,
   required bool? headingConverged,
   required double? magneticFieldUt,
+  required double? magneticInclinationDeg,
   required double? headingErrorDeg,
   required String? magneticAccuracy,
   required String? headingSource,
@@ -49,6 +50,7 @@ String describeHeadingLog({
     'rv=${d(deviceBearingDeg)}',
     'gyro=${d(gyroBearingDeg)}',
     '자기장=${describeMagneticField(magneticFieldUt)}',
+    '복각=${_describeInclination(magneticInclinationDeg)}',
     '오차=${_describeError(headingErrorDeg)}',
     '자력계=${magneticAccuracy ?? '—'}',
     'src=${headingSource ?? '—'}',
@@ -98,6 +100,23 @@ String describeMagneticField(double? fieldUt) {
   final ratio = (fieldUt / nominalEarthFieldUt).toStringAsFixed(1);
   final verdict = isMagneticFieldPlausible(fieldUt) ? '정상' : '의심';
   return '${fieldUt.toStringAsFixed(1)}µT($ratio배·$verdict)';
+}
+
+/// 서울의 자기 복각(도). 위도로 정해지므로 이 앱이 도는 범위에서는 상수로 둔다.
+const seoulMagneticInclinationDeg = 53.0;
+
+/// 복각이 서울 값에서 이만큼 넘게 벗어나면 그 자리 자기장은 지구 것이 아니다.
+///
+/// 넉넉하다. 기기 자세와 센서 잡음으로 몇 도는 흔들리고, 이 판정으로 잡으려는
+/// 것은 왜곡된 자리에서 나타나는 수십 도짜리 어긋남이다.
+const inclinationToleranceDeg = 15.0;
+
+/// 복각과 그 값으로 내린 결론. 음수·null은 기기가 값을 안 준 것이다.
+String _describeInclination(double? inclinationDeg) {
+  if (inclinationDeg == null || inclinationDeg < -90) return '모름';
+  final off = (inclinationDeg - seoulMagneticInclinationDeg).abs();
+  final verdict = off <= inclinationToleranceDeg ? '정상' : '의심';
+  return '${inclinationDeg.toStringAsFixed(0)}°($verdict)';
 }
 
 String _describeError(double? errorDeg) {

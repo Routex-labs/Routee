@@ -344,6 +344,7 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
         walkOffsetDeg: features?.walkOffsetDeg,
         headingConverged: features?.headingConverged,
         magneticFieldUt: features?.magneticFieldUt,
+        magneticInclinationDeg: features?.magneticInclinationDeg,
         headingErrorDeg: features?.rotationHeadingAccuracyDeg,
         magneticAccuracy: features?.magneticAccuracy,
         headingSource: features?.headingSource,
