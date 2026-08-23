@@ -238,6 +238,11 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
       storeName: origin.name,
     );
     _notifyRouteStateIfChanged();
+    if (!mounted) return;
+    // 야외와 **같은 약속**이다 — 시작을 누르면 화면이 내 자리로 내려간다. 실내는
+    // 걸음이 카메라를 끌고 가지만([_indoorFollowActive]) 그건 다음 걸음부터라,
+    // 첫 걸음을 떼기 전까지는 경로 전체를 보던 화면 그대로 서 있었다.
+    await _recenterOnCurrentPosition();
   }
 
   /// 안내 시작 판정에 쓸, 지금 지도에 그려진 야외 경로의 좌표열.
@@ -308,7 +313,22 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
       _guidanceStarted = true;
     });
     _notifyRouteStateIfChanged();
-    if (_routeIsDriving) await startFollowingCurrentLocation();
+    // **시작을 누른 순간 화면이 내 자리로 내려간다.** 계획 카드가 떠 있는 동안
+    // 카메라는 경로 전체를 담으려고 물러서 있는데, 시작해도 그대로 두면 화면은
+    // 여전히 "지도를 보고 있다"에 머문다 — 따라가야 할 화면이 아니다. 한동안
+    // 자동차에만 걸려 있어서, 걷는 사람은 시작을 눌러도 아무 일도 안 일어났다.
+    //
+    // **대중교통만 뺀다.** 타고 가는 구간은 내가 걷는 것이 아니라, 카메라가 나를
+    // 확대해 따라가면 여정 전체가 화면 귀퉁이로 밀린다
+    // (`transit_guidance_does_not_follow_test.dart`).
+    //
+    // 배율이 갈리는 이유는 보는 거리가 달라서다 — 자동차는 다음 교차로가 화면에
+    // 들어와야 하고, 걸을 때는 지금 서 있는 통로가 보여야 한다.
+    if (_transitItinerary == null) {
+      await startFollowingCurrentLocation(
+        zoom: _routeIsDriving ? carGuidanceZoom : walkingViewZoom,
+      );
+    }
   }
 
   /// 안내만 끈다 — 경로선·후보·목적지는 남는다. **뒤로가기가 부른다.**

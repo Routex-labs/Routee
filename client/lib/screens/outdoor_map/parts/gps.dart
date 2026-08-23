@@ -498,20 +498,26 @@ extension OutdoorMapGps on OutdoorMapBodyState {
     _replaceSnack('입구를 기준으로 실내 위치를 잡았습니다. 걸음 추적을 시작합니다.');
   }
 
-  /// 자동차 안내를 시작한다 — 카메라를 현재 위치로 확대하고, 이후 위치가 갱신될
+  /// 야외 안내를 시작한다 — 카메라를 현재 위치로 확대하고, 이후 위치가 갱신될
   /// 때마다 그 자리를 따라간다.
+  ///
+  /// [zoom]이 수단마다 다른 이유는 **보는 거리가 달라서**다. 자동차는 다음
+  /// 교차로가 화면에 들어와야 하고([carGuidanceZoom]), 걸을 때는 지금 서 있는
+  /// 통로가 보여야 한다([walkingViewZoom]).
   ///
   /// 위치를 아직 못 잡았어도 **켜 둔다.** 신호가 잡히는 순간 첫 위치가 카메라를
   /// 데려가므로, 여기서 포기하면 터널을 나오며 안내를 시작한 사용자가 영영
   /// 따라가지 못한다. 대신 지금 아무 일도 안 일어나는 이유는 알린다.
-  Future<void> startFollowingCurrentLocation() async {
+  Future<void> startFollowingCurrentLocation({
+    double zoom = carGuidanceZoom,
+  }) async {
     _followingUser = true;
     final position = _position;
     if (position == null) {
       _showSnack('현재 위치를 아직 못 잡았습니다. 신호가 잡히면 그 자리로 지도를 옮깁니다.');
       return;
     }
-    await _moveCameraToUser(position, zoom: carGuidanceZoom);
+    await _moveCameraToUser(position, zoom: zoom);
   }
 
   /// 따라가기를 멈춘다. 안내가 끝나거나(경로 삭제) 카메라의 주인이 바뀌는
