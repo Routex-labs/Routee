@@ -58,7 +58,6 @@ import '../../models/building/building_graph.dart';
 import '../../models/route/directions_route.dart';
 import '../../widgets/directions_route_options_panel.dart';
 import '../../widgets/transit_style.dart' show formatTransitFare;
-import 'widgets/directions_route_detail_sheet.dart';
 import '../../models/building/floor_graph.dart';
 import '../../models/building/floor_plan.dart';
 import '../../models/route/indoor_route.dart';

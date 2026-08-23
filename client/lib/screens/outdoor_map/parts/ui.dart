@@ -661,34 +661,18 @@ extension OutdoorMapUi on OutdoorMapBodyState {
     );
   }
 
-  /// 후보 패널과 상세보기 버튼을 묶어 [EtaCard.routeOptions]에 얹는다.
-  /// 디자인시스템 카드에 상세보기 전용 슬롯이 없어 우리가 직접 붙인다.
+  /// 자동차 후보가 여럿일 때 고르는 줄. 하나뿐이면 null이라 카드는 **제목부터
+  /// 시작한다.**
+  ///
+  /// **`상세보기`를 걷어냈다.** 턴 목록을 시트로 한 겹 더 띄웠는데, 지도에 이미
+  /// 그려진 선보다 알려 주는 것이 적었다 — 카드만 높아져서 정작 봐야 할 경로를
+  /// 그만큼 더 가렸다. 경로를 자세히 보는 자리는 지도 자체다.
   Widget? _directionsRouteExtras(BuildContext context, DirectionsRoute route) {
-    final panel = _directionsRouteOptions.length > 1
-        ? DirectionsRouteOptionsPanel(
-            options: _directionsRouteOptions,
-            selectedIndex: _selectedDirectionsOptionIndex,
-            onSelect: (index) => unawaited(selectDirectionsOption(index)),
-          )
-        : null;
-    final detailButton = route.steps.isEmpty
-        ? null
-        : Align(
-            alignment: AlignmentDirectional.centerEnd,
-            child: TextButton(
-              onPressed: () => showDirectionsRouteDetailSheet(
-                context,
-                route: route,
-                destinationLabel: _userDestinationLabel ?? '목적지',
-              ),
-              child: const Text('상세보기'),
-            ),
-          );
-    if (panel == null && detailButton == null) return null;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [?panel, ?detailButton],
+    if (_directionsRouteOptions.length <= 1) return null;
+    return DirectionsRouteOptionsPanel(
+      options: _directionsRouteOptions,
+      selectedIndex: _selectedDirectionsOptionIndex,
+      onSelect: (index) => unawaited(selectDirectionsOption(index)),
     );
   }
 
