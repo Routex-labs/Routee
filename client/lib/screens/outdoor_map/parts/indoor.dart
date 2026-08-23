@@ -1271,6 +1271,40 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     await _syncIndoorOverlayFade(scope: IndoorOverlaySyncScope.labels);
   }
 
+  /// 고른 시설이 **한 화면에 다 들어오도록 물러선다.**
+  ///
+  /// 시설을 고르는 사람이 알고 싶은 것은 "이 층 어디에 있나"인데, 그 직전 화면은
+  /// 매장 하나를 보던 배율이라 강조된 칸이 화면 밖이기 일쑤였다 — 종류를 바꿔
+  /// 눌러도 도면이 그대로라 **아무 일도 안 일어난 것처럼** 보인다(실기기 확인).
+  ///
+  /// **층 전체가 아니라 그 시설들만 담는다.** 화장실 둘이 한쪽에 몰려 있으면
+  /// 굳이 층 끝까지 물러설 이유가 없고, 흩어져 있으면 상자가 알아서 커진다.
+  /// 아래를 비우는 높이는 셸이 이미 내려 준다([OutdoorMapBody.bottomOverlayLiftPx])
+  /// — 시트가 떠 있으면 그 높이가 그 값에 들어 있다. **지도가 시트를 알지 않고
+  /// 높이만 값으로 받는다**는 그 필드의 계약을 여기서도 그대로 쓴다.
+  Future<void> _fitCameraToFacilityHighlight() async {
+    final plan = _floorPlan;
+    if (plan == null || !_indoorEntered) return;
+    final polygons = facilityHighlightPolygons(
+      stores: plan.stores,
+      selection: widget.categorySelection,
+    );
+    if (polygons.isEmpty) return;
+    final box = routeBoxFor([
+      for (final polygon in polygons) ...polygon,
+    ], minSideM: facilityFitMinSideM);
+    if (box == null) return;
+    await _animateCameraToFitBox(
+      box,
+      topChromePx: floorFitTopChromePx,
+      bottomChromePx: widget.bottomOverlayLiftPx,
+      duration: floorSwitchZoomDuration,
+      // 시설 하나만 고르면 상자가 작아 배율이 끝까지 올라간다. 그러면 도면이
+      // 한 칸으로 가득 차, 물러서라고 만든 동작이 되레 더 들어가 버린다.
+      maxZoom: facilityFitMaxZoom,
+    );
+  }
+
   /// 지금 강조할 폴리곤들과 그 색을 고를 대분류. 매장을 탭했으면 그 하나,
   /// 편의시설을 종류로 골랐으면 이 층의 그 종류 전부다
   /// ([facilityHighlightPolygons]가 고른다).

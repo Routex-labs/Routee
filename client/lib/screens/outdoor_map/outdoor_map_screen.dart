@@ -1056,6 +1056,13 @@ class OutdoorMapBodyState extends State<OutdoorMapBody> {
       unawaited(_applyCategoryFilter());
       // 시설 선택은 타일 필터가 아니라 강조 소스가 그린다([_highlightedPolygons]).
       unawaited(_syncHighlightLayer());
+      // 칠하는 것만으로는 부족하다 — 그 칸이 화면 안에 있어야 칠한 것이 보인다
+      // ([_fitCameraToFacilityHighlight]). 소분류가 바뀔 때만 움직인다: 대분류만
+      // 고른 상태는 칠할 것이 없어 옮길 이유도 없다.
+      if (widget.categorySelection?.subcategory !=
+          oldWidget.categorySelection?.subcategory) {
+        unawaited(_fitCameraToFacilityHighlight());
+      }
     }
   }
 
