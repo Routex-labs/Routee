@@ -528,17 +528,25 @@ extension OutdoorMapGps on OutdoorMapBodyState {
   /// 안내 중 "내 위치로" 버튼. **bearing과 tilt는 건드리지 않는다** — 정북으로
   /// 돌아가면 화면 위쪽이 갈 방향과 어긋난다. 배율도 [walkingViewZoom]까지만 당긴다.
   ///
-  /// **팔로우를 다시 켜는 유일한 문이다.** 지도를 손으로 움직이면 팔로우가
-  /// 물리는데([_releaseFollowCameraToUser]), 그걸 푸는 자리가 없으면 안내가 끝날
+  /// **팔로우를 다시 켜는 유일한 문이다.** 지도를 손으로 움직이면 두 팔로우가
+  /// 함께 물리는데([_releaseFollowCamera]), 그걸 푸는 자리가 없으면 안내가 끝날
   /// 때까지 화면이 사용자를 따라가지 않는다.
+  ///
+  /// **실내·야외 어느 쪽이든 이 버튼 하나다.** 실내는 PDR 위치로, 야외는 마지막
+  /// 좌표로 돌아간다 — 사용자에게는 같은 "내 위치로"라, 어느 쪽인지 가려 두 개를
+  /// 만들 이유가 없다.
   Future<void> _recenterOnCurrentPosition() async {
     final controller = _mapController;
     if (controller == null || !_styleReady) return;
-    final here = _pdrCurrentWgs84();
+    final here = _pdrCurrentWgs84() ?? _positionPoint;
     // 위치를 아직 못 그리는 상태면 되돌릴 자리도 없다. 버튼 노출 조건이 같은
     // 값을 보므로([_canRecenterOnCurrentPosition]) 보통은 여기 안 걸린다.
     if (here == null) return;
     _followCameraReleasedByUser = false;
+    // 야외 안내라면 따라가기도 다시 켠다. 버튼을 누른 사람이 원한 것은 "지금
+    // 내 자리"가 아니라 **"다시 나를 따라와라"**다 — 한 번 데려다 놓고 그대로
+    // 두면 다음 걸음부터 또 뒤에 남는다.
+    if (_guidanceActive && !_indoorLocationVisible) _followingUser = true;
     // 이 애니메이션이 도는 동안은 팔로우를 재운다. 안 재우면 같은 프레임에 두
     // 명령이 겹쳐, 눌러서 돌아가는 도중에 화면이 한 번 튄다.
     _holdFollowCamera(recenterDuration);
@@ -552,8 +560,12 @@ extension OutdoorMapGps on OutdoorMapBodyState {
 
   /// "내 위치로" 버튼을 띄울지. 누를 자리가 없는 버튼을 띄우지 않기 위해
   /// [_recenterOnCurrentPosition]이 실제로 쓰는 값과 **같은 값**을 본다.
+  ///
+  /// 야외도 포함한다 — 한동안 실내에만 떠서, 걷는 안내 중 지도를 한 번 밀면
+  /// 화면을 되돌릴 손잡이가 아예 없었다.
   bool get _canRecenterOnCurrentPosition =>
-      _indoorLocationVisible && _pdrCurrentWgs84() != null;
+      (_indoorLocationVisible && _pdrCurrentWgs84() != null) ||
+      _positionPoint != null;
 
   /// 내 위치가 찍힌 층으로 도면을 되돌리고 카메라를 그 자리에 놓는다.
   ///

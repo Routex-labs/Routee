@@ -170,7 +170,7 @@ extension OutdoorMapUi on OutdoorMapBodyState {
           // 그걸 신호로 쓴다. 지도 위 Flutter 버튼(내 위치 등)은 Stack에서
           // 먼저 히트되므로 여기까지 내려오지 않는다.
           Listener(
-            onPointerDown: (_) => _releaseFollowCameraToUser(),
+            onPointerDown: (_) => _releaseFollowCamera(),
             child: MapLibreMap(
               styleString: _baseMapStyle(),
               initialCameraPosition: CameraPosition(

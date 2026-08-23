@@ -435,12 +435,18 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
       _retiringIndoorBlocks.isEmpty &&
       !_applyingFloorTransition;
 
-  /// 지도에 손이 닿았다 — 팔로우를 물린다.
+  /// 지도에 손이 닿았다 — **두 팔로우를 다 물린다.**
   ///
-  /// 안 물리면 다음 걸음이 곧바로 화면을 되돌려 놓아 지도를 조작할 수 없다.
+  /// 안 물리면 다음 걸음(실내)이나 다음 좌표(야외)가 곧바로 화면을 되돌려 놓아
+  /// 지도를 조작할 수 없다. 한동안 실내 것만 물려서, 안내 중 야외 지도를 옮기면
+  /// 1초 만에 제자리로 끌려왔다 — 잠깐 다른 데를 보는 것조차 안 됐다.
+  ///
   /// 되돌아오는 문은 "내 위치" 버튼 하나다([_recenterOnCurrentPosition]).
   /// setState하지 않는다 — 이 값으로 갈리는 위젯이 없다.
-  void _releaseFollowCameraToUser() => _followCameraReleasedByUser = true;
+  void _releaseFollowCamera() {
+    _followCameraReleasedByUser = true;
+    _stopFollowingUser();
+  }
 
   /// 다른 카메라 주인이 도는 동안 팔로우를 재운다. **애니메이션을 거는 쪽이**
   /// 자기 길이만큼 불러 준다 — 여기서 상태를 뒤져 맞히려 들면, 주인이 하나
