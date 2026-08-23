@@ -875,13 +875,33 @@ class PlaceContactSection extends StatelessWidget {
       label: '$tel에 전화',
       child: InkWell(
         onTap: () => _call(context),
-        child: RoutexInfoRow(
-          label: '전화번호',
-          value: tel,
-          icon: infoIconFor('전화번호'),
-          // 아이콘만으로는 누가 받는 번호인지 말하지 못한다. 운영 정보 줄과 같은
-          // 이유로 라벨 글자를 남긴다.
-          keepLabel: true,
+        // **누를 수 있다는 표시가 줄 안에 있어야 한다.** 눌리기는 눌렸지만
+        // 화면에는 그럴 낌새가 없어서, 번호를 눈으로만 읽고 지나가는 줄이었다
+        // (ripple은 누른 **뒤에야** 보인다).
+        //
+        // 표시는 SNS 링크 줄과 **같은 꺾쇠**다(`RoutexLinkList`) — 이 시트에서
+        // 이미 "누르면 밖으로 나간다"를 뜻하는 기호라, 새 기호를 하나 더 만들면
+        // 사용자가 둘이 다른 일인 줄 안다. 수화기를 한 번 더 그리지 않는 이유도
+        // 같다: 왼쪽 아이콘과 겹쳐 보여 무엇이 눌리는 자리인지 흐려진다.
+        child: Row(
+          children: [
+            Expanded(
+              child: RoutexInfoRow(
+                label: '전화번호',
+                value: tel,
+                icon: infoIconFor('전화번호'),
+                // 아이콘만으로는 누가 받는 번호인지 말하지 못한다. 운영 정보 줄과
+                // 같은 이유로 라벨 글자를 남긴다.
+                keepLabel: true,
+              ),
+            ),
+            const SizedBox(width: RoutexSpacing.controlGap),
+            Icon(
+              RoutexIcons.forward,
+              size: RoutexMetrics.iconMedium,
+              color: context.routexColors.contentSecondary,
+            ),
+          ],
         ),
       ),
     );

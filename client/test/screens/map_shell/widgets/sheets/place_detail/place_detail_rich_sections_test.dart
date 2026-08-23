@@ -1160,6 +1160,19 @@ void main() {
       expect(find.text('복사'), findsNothing);
     });
 
+    // 눌리기는 눌렸지만 그럴 낌새가 화면에 없으면, 번호를 눈으로만 읽고 지나간다.
+    // ripple은 누른 뒤에야 보이므로 표시가 되지 못한다.
+    testWidgets('전화번호 줄은 누를 수 있다는 표시를 SNS 줄과 같은 꺾쇠로 둔다', (tester) async {
+      await tester.pumpWidget(
+        subject(const PlaceContactSection(tel: '02-3277-0132')),
+      );
+
+      expect(find.byIcon(RoutexIcons.forward), findsOneWidget);
+      // 수화기를 한 번 더 그리지는 않는다 — 왼쪽 아이콘과 겹쳐 보여 무엇이 눌리는
+      // 자리인지 흐려진다.
+      expect(find.byIcon(Icons.call_outlined), findsOneWidget);
+    });
+
     testWidgets('tapping the contact row dials the number as shown', (
       tester,
     ) async {
