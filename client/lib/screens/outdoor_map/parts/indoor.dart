@@ -244,10 +244,8 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
   ///   - 밖 + 실내 위치가 잡혀 있던 사람 → 야외로 되돌리고 자동 진입을 재무장한다.
   ///   - 모름 → 아무것도 하지 않는다.
   ///
-  /// 이탈 기준이 [_indoorEnteredByGps]가 아니라 [_indoorPositionPlaced]인 이유는
-  /// **걸어서 들어온 사람을 놓치기 때문**이다. 앵커가 있다는 건 앱이 이 사람을
-  /// 건물 안이라고 믿는다는 뜻이고, 그 믿음은 밖으로 나온 순간 틀린 것이 된다.
-  /// 도면만 구경하는 사용자는 앵커가 없어 예전처럼 화면이 안 닫힌다.
+  /// 이탈 기준은 [_indoorConfirmedByGps] 하나다 — **들여보낸 쪽만 내보낸다.**
+  /// 확대해서 먼저 들어온 사람도 좌표가 "안"이라고 말하는 순간 그 계약에 든다.
   void _applyBuildingVerdict(Position position, {Duration? sinceLastFix}) {
     final judgement = judgeBuildingFromGps(
       fix: GpsFix(
@@ -278,21 +276,36 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     );
     switch (judgement.verdict) {
       case GpsBuildingVerdict.inside:
+        // 이미 실내여도 **표식은 남긴다.** 확대로 먼저 들어온 뒤 좌표가 따라오는
+        // 순서에서, 여기서 그냥 나가면 그 사람은 "GPS가 확인한 적 없는" 실내로
+        // 남아 정말 나갈 때 자동 이탈이 안 걸린다.
+        _indoorConfirmedByGps = true;
         if (_indoorEntered || !_gpsEntryArmed) return;
         if (!widget.startupLoading) {
           ScaffoldMessenger.of(
             context,
           ).showSnackBar(const SnackBar(content: Text('건물 감지 중...')));
         }
-        // _setIndoorEntered가 이 표식을 보므로 **먼저** 세운다.
-        _indoorEnteredByGps = true;
         _setIndoorEntered(true, source: 'gps');
         unawaited(_askEntryFloorThenTrack(position));
       case GpsBuildingVerdict.outside:
         // 건물을 확실히 벗어났다. 다음 진입을 다시 자동으로 잡을 수 있게 한다.
         _gpsEntryArmed = true;
         if (!_indoorEntered) return;
-        if (!_indoorEnteredByGps && !_indoorPositionPlaced) return;
+        // **들여보낸 쪽만 내보낼 수 있다.** 좌표가 이 실내 상태를 한 번도 "안"
+        // 이라고 확인한 적 없다면(확대해서 도면만 편 경우) 이번 좌표는 "나갔다"가
+        // 아니라 처음부터 밖이었다는 뜻이다.
+        //
+        // 한동안 여기에 `|| _indoorPositionPlaced`가 붙어 있었다. 그래서 **손으로
+        // 찍은 위치가 GPS 한 건에 지워졌다** — 도면을 펴 놓고 "지도에서 내 위치
+        // 지정"으로 자리를 찍는 순간, 다음 좌표가 도면을 접고 카메라를 GPS로
+        // 끌고 갔다(실기기 확인). 사람이 직접 찍은 것을 센서 판정이 뒤집는 셈이라,
+        // 앵커는 이탈의 근거가 아니라 **지켜야 할 값**이다.
+        //
+        // 이 갈래로 안 나가도 출구는 둘 남는다 — 축소(줌 이탈)와 건물 밖 탭
+        // ([_exitIndoorByOutsideTap]). GPS가 들여보내지 않았으니 GPS가 내보내는
+        // 자동 계약도 애초에 성립하지 않는다.
+        if (!_indoorConfirmedByGps) return;
         // 앵커 배치 대기 중이었다면 함께 종료해 하단 바 버튼 톤도 되돌린다.
         if (_placingPdrAnchor) _setPlacingAnchor(false);
         // **이 자리가 유일하게 "정말로 나갔다"고 말할 수 있는 곳이다.**
@@ -818,13 +831,6 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     _setIndoorEntered(false, source: 'outsideTap');
   }
 
-  /// 실내 위치가 지금 잡혀 있는지. 자동 이탈을 허용할지 가르는 기준이다
-  /// ([_applyBuildingVerdict]).
-  ///
-  /// 앵커만으로 판단한다 — 궤적은 세션이 끝난 뒤에도 남아 "지금 안에 있다"의
-  /// 근거가 못 된다.
-  bool get _indoorPositionPlaced => _pdrTrailState.anchor != null;
-
   /// [_indoorEntered] 상태 변경을 한 곳으로 모은 헬퍼. setState·상위 통지에 더해
   /// dim scrim·마커·페이드까지 여기서 함께 갱신한다.
   ///
@@ -859,7 +865,7 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     // 자동으로 들어왔다는 표식은 야외로 나가는 순간 내린다. 남겨 두면 다음에
     // 사용자가 건물을 직접 탭해 연 도면까지 GPS가 제멋대로 닫는다
     // ([_applyBuildingVerdict]의 outside 갈래).
-    if (!value) _indoorEnteredByGps = false;
+    if (!value) _indoorConfirmedByGps = false;
     // **정말로 나갔을 때만** 층 질문을 다시 열어 둔다. 도면만 접은 사용자는 같은
     // 자리에 그대로 있어서, 다시 펼 때마다 묻는 것은 답을 아는 질문을 되묻는 것이다.
     if (!value && leftBuilding) {

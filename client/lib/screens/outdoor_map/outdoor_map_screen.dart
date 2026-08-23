@@ -1156,12 +1156,16 @@ class OutdoorMapBodyState extends State<OutdoorMapBody> {
   /// 한 프레임 떴다 사라져, 정작 읽어야 할 사람이 못 읽는다.
   EscalatorDetectionEvent? _lastEscalatorEvent;
 
-  /// 이번 실내 상태가 **자동 진입**으로 켜졌는지.
+  /// 이번 실내 상태를 **GPS가 "안"이라고 확인했는지.**
   ///
   /// 자동 이탈은 자동 진입을 되돌리기 위한 것이다. 사용자가 건물을 직접 탭해서
   /// 도면을 연 경우까지 자동으로 닫으면, 입구 앞에 서서 층 도면을 보려던 사람의
   /// 화면이 신호가 잡히는 순간 제멋대로 닫힌다.
-  bool _indoorEnteredByGps = false;
+  ///
+  /// **"들여보냈는가"가 아니라 "안이라고 말한 적 있는가"다.** 확대해서 먼저
+  /// 도면을 연 뒤 좌표가 따라오는 순서가 실제로 있는데, 진입 시점만 보면 그
+  /// 사람은 영영 자동 이탈 밖에 남는다([_applyBuildingVerdict]).
+  bool _indoorConfirmedByGps = false;
 
   /// 이번 진입에서 "몇 층에 계신가요?"를 이미 물었는지([_askEntryFloor]).
   ///
