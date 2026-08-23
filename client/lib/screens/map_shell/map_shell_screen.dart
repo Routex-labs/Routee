@@ -1181,6 +1181,24 @@ class _MapShellScreenState extends State<MapShellScreen> {
     _ => MapTab.map,
   };
 
+  /// 지금 줄에 설 탭.
+  ///
+  /// **이벤트는 건물 안에서만 선다.** 밖에서 열던 오늘 목록 시트는 여기서
+  /// 걷어냈다 — 야외 지도에는 이 건물 말고도 볼 것이 있는데, 그 화면에서 한
+  /// 건물의 행사를 상시로 내걸면 앱이 그 건물 전용처럼 보인다. 더현대에 들어서는
+  /// 순간 탭이 **하나 늘고**, 그때부터 하단 판([_issueDiaryVisible])과 같은 것을
+  /// 켜고 끈다.
+  ///
+  /// 오늘 열리는 것이 없으면 들어가도 서지 않는다 — 눌러도 아무 일이 없는 탭은
+  /// 없는 것만 못하다.
+  List<MapTab> get _visibleTabs => [
+    for (final tab in MapTab.values)
+      if (tab != MapTab.events || _eventsTabAvailable) tab,
+  ];
+
+  bool get _eventsTabAvailable =>
+      _indoorContextActive && _openDiaryPages.isNotEmpty;
+
   Widget _buildTabBar() {
     return Positioned(
       left: 0,
@@ -1188,6 +1206,7 @@ class _MapShellScreenState extends State<MapShellScreen> {
       bottom: 0,
       child: MapTabBar(
         key: _tabBarKey,
+        tabs: _visibleTabs,
         selected: _activeTab,
         onSelected: _onTabSelected,
       ),
@@ -1212,13 +1231,9 @@ class _MapShellScreenState extends State<MapShellScreen> {
     }
   }
 
-  /// 이벤트 탭. 건물 안에서는 판을 켜고 끄고, 밖에서는 오늘 목록 시트를 연다 —
-  /// 밖에서는 얹을 판이 없다(판은 실내 전용이다).
+  /// 이벤트 탭. 하단 판을 켜고 끈다. 이 탭은 건물 안에서만 서므로
+  /// ([_visibleTabs]) 여기에 야외 갈래는 없다.
   void _onEventsTab() {
-    if (!_indoorContextActive) {
-      unawaited(_onEventsPressed());
-      return;
-    }
     setState(() => _issueDiaryDismissed = !_issueDiaryDismissed);
   }
 
