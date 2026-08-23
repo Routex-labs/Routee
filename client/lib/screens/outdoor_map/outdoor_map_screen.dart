@@ -243,6 +243,7 @@ class OutdoorMapBody extends StatefulWidget {
     this.facilitiesActive = false,
     this.bottomOverlayLiftPx = 0,
     this.bottomCardLiftPx = 0,
+    this.topChromeBottomPx,
     this.categorySelection,
     this.onFloorChanged,
     this.onFloorTransitionChanged,
@@ -365,6 +366,11 @@ class OutdoorMapBody extends StatefulWidget {
   /// 닿는 표면이라 탭 줄이 먹는 높이를 안전영역까지 통째로 비켜야 한다. 셸의
   /// `_tabBarLiftPx`가 그 값이고, 안내가 시작되면 탭 줄이 접히므로 0이 된다.
   final double bottomCardLiftPx;
+
+  /// 상단 바가 끝나는 y를 **재 주는 함수.** 없으면 상수로 대신한다
+  /// ([routeFitTopInsetPx]). 값이 아니라 함수인 이유와 무엇을 재야 하는지는
+  /// 셸의 `_topBarBottomPx`에 있다.
+  final double Function()? topChromeBottomPx;
 
   /// 지금 카테고리 필터에서 고른 값. 실내 진입 오버레이의 매장 강조에 쓴다.
   ///

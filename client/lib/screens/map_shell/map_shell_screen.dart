@@ -819,6 +819,7 @@ class _MapShellScreenState extends State<MapShellScreen> {
       // ([_buildBottomBar]도 이 값을 먼저 더한다). 두 곳이 따로 세면 한쪽만
       // 고쳐지는 날이 온다.
       bottomCardLiftPx: _tabBarLiftPx(context),
+      topChromeBottomPx: _topBarBottomPx,
       // 실내 화면과 같은 선택을 넘긴다. 야외 지도도 실내 진입
       // 오버레이가 켜지면 같은 도면을 그리므로, 안 넘기면 칩을
       // 눌러도 강조가 안 뜬다.
@@ -1170,6 +1171,25 @@ class _MapShellScreenState extends State<MapShellScreen> {
           ? _lockMaps(_mapLockOverlayTouch)
           : _unlockMaps(_mapLockOverlayTouch),
     );
+  }
+
+  /// 상단 **바**가 끝나는 y(논리 px). 못 재면 0.
+  ///
+  /// 경로 전체를 담을 때 위로 비울 높이다. 상수로 두면 안 되는 이유는 높이가
+  /// 상태마다 달라서다 — 검색창 한 줄일 때와 길찾기 두 칸 + 이동 수단 줄일 때가
+  /// 크게 차이 나서, 상수(120)로 맞춰 뒀더니 길찾기 화면에서 경로의 시작점이
+  /// 바 뒤로 잘렸다.
+  ///
+  /// **재는 것은 [MapTopBar] 하나다.** 그 위 Column 전체를 재면 검색 결과·후보
+  /// 목록([Flexible])까지 딸려 들어가, 목록이 펼쳐진 순간 측정값이 화면 높이가
+  /// 되고 경로가 아래로 짓눌려 카드 뒤로 통째로 들어간다(실기기에서 그렇게 깨졌다).
+  ///
+  /// **값이 아니라 함수로 넘긴다** — 지도가 카메라를 맞추는 그 시점에 재야 방금
+  /// 두 칸으로 늘어난 바를 잰다.
+  double _topBarBottomPx() {
+    final box = _topBarKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return 0;
+    return box.localToGlobal(Offset.zero).dy + box.size.height;
   }
 
   /// 탭 줄이 먹는 높이. 안전영역까지 합친 값이라 위에 얹히는 것들이 이만큼

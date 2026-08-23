@@ -124,6 +124,13 @@ const routeFitSideInsetPx = 16.0;
 const routeFitTopInsetPx = 120.0;
 const routeFitBottomInsetPx = 180.0;
 
+/// 끝점 핀이 잘리지 않게 위아래로 더 비우는 높이(논리 px).
+///
+/// 카메라는 **좌표**를 담지, 그 좌표 위에 세우는 핀의 크기는 모른다. 출발·도착
+/// 핀은 좌표에서 위로 솟아 있어서 좌표에 딱 맞게 담으면 경로 양 끝의 핀이
+/// 잘린다 — 하필 사용자가 제일 먼저 찾는 두 점이다.
+const routeFitPinAllowancePx = 44.0;
+
 /// 여백을 다 빼고도 남겨야 하는 세로 띠(논리 px). 여백 합이 화면을 넘으면
 /// MapLibre가 `화면 - 여백`(<= 0)으로 줌을 계산해 카메라가 튄다.
 const routeFitMinBandPx = 120.0;

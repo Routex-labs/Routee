@@ -498,9 +498,21 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
           points,
           viewport: viewport,
           // 상태 표시줄은 기기마다 달라 상수로 못 박는다.
-          topInsetPx: MediaQuery.paddingOf(context).top + routeFitTopInsetPx,
+          // 위는 셸이 재 준 상단 바 바닥([OutdoorMapBody.topChromeBottomPx]).
+          // 상태바 여백까지 이미 포함한 화면 좌표다. 못 재면 상수로 대신한다.
+          topInsetPx:
+              math.max(
+                widget.topChromeBottomPx?.call() ?? 0,
+                MediaQuery.paddingOf(context).top + routeFitTopInsetPx,
+              ) +
+              routeFitPinAllowancePx,
+          // 카드는 탭 줄 **위에** 앉는다([_bottomDockedCard]) — 아래가 가려지는
+          // 높이는 카드 높이 + 그 리프트다. 리프트를 빼먹었더니 경로가 카드 쪽으로
+          // 밀려 화면 가운데에 오지 않았다(실기기 확인).
           bottomInsetPx: math.max(
-            _bottomCardHeightPx(),
+            _bottomCardHeightPx() +
+                widget.bottomCardLiftPx +
+                routeFitPinAllowancePx,
             viewport.height * bottomSheetFraction,
           ),
         ),
