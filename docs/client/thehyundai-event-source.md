@@ -119,8 +119,7 @@ robots(`Allow: /` · `Disallow: /api/`, `/styleguide`)는 위 경로를 막지 �
 진입점이 셋이고, **원본 웹과 같은 층 구조로 내려간다.**
 
 ```
-맨 아래 "이벤트" 탭 ─ 건물 밖 ──→ 목록 시트(오늘 전체)
-                    └ 건물 안 ──→ 판을 켜고 끈다
+맨 아래 "이벤트" 탭 ─ 건물 안에서만 선다 ──→ 판을 켜고 끈다
 건물 안 : 바닥에 붙은 이슈 다이어리 판
              ├ 접힘: 쪽 카드 한 줄 ──→ 목록 시트(그 쪽만)
              └ 펼침: 오늘 전체 목록 ─┐
@@ -154,7 +153,7 @@ robots(`Allow: /` · `Disallow: /api/`, `/styleguide`)는 위 경로를 막지 �
 | 하단 이슈 다이어리 판 | `.../widgets/chrome/issue_diary_panel.dart` |
 | 제목 폰트 | `client/assets/fonts/PlayfairDisplay-Variable.ttf` · `pubspec.yaml` |
 | 포스터 화면 | `.../widgets/sheets/event_poster_view.dart` |
-| pill·줄·핸들러·제목 교체 | `map_shell_screen.dart` · `parts/sheets.dart` |
+| 탭·줄·핸들러·제목 교체 | `map_shell_screen.dart` · `parts/sheets.dart` |
 
 ### 정한 것
 
@@ -164,9 +163,11 @@ robots(`Allow: /` · `Disallow: /api/`, `/styleguide`)는 위 경로를 막지 �
   `POP-UP ICONIC B2`로 검색해도 찾아져야 한다.
 - **매칭은 이름이 아니라 `placeId`로 한다.** 같은 팝업 칸에 행사가 며칠씩 갈아드는데
   이름으로 맞추면 `POP-UP EAST`처럼 이름 겹치는 칸에서 엉뚱한 행사가 붙는다.
-- **진입점은 맨 아래 탭 줄 하나다.** 건물 밖에서는 목록 시트를 열고(진입까지 맡는다 —
-  `enterBuildingIfNeeded: true`, 공유 링크와 같은 맥락), 안에서는 판을 켜고 끈다. 지도 위
-  pill은 걷어냈다.
+- **진입점은 맨 아래 탭 줄 하나이고, 그 탭은 건물 안에서만 선다.** 야외 지도에는 이 건물
+  말고도 볼 것이 있어서, 한 건물의 행사를 상시로 내걸면 앱이 그 건물 전용으로 보인다.
+  더현대에 들어서는 순간 탭이 하나 늘고, 그때부터 판을 켜고 끈다. 지도 위 pill도 걷어냈다.
+- **오늘 열리는 것이 없으면 들어가도 탭이 서지 않는다.** 눌러도 아무 일이 없는 탭은 없는
+  것만 못하다. 판단은 판을 그릴지 정하는 것과 같은 목록(`diariesOpenOn`)이 한다.
 - **판은 끌어내려 아주 치울 수 있다**(`dismissHeight`, 접힘의 55%). 지도를 넓게 보려는
   사람에게 판을 강요하지 않는다. 돌아오는 길이 탭 줄이라 치워도 길을 잃지 않는다.
   건물을 나갔다 오면 치운 것이 풀린다 — 치운 뜻은 "지금 이 화면에서 비켜라"였다.

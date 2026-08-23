@@ -68,22 +68,12 @@ extension _MapShellSheets on _MapShellScreenState {
     await _runSheetChain(() => _showStoreInfo(resolved, focusOnMap: true));
   }
 
-  /// 지도 위 "이벤트" pill. 오늘 열리는 행사를 고르면 **검색 후보를 고른 것과
-  /// 같은 경로**로 상세를 연다 — 진입점마다 따로 만들면 한쪽만 층을 옮긴다.
-  Future<void> _onEventsPressed() async {
-    final entry = await EventsSheet.show(
-      context,
-      onCloseAll: _requestCloseSheetChain,
-    );
-    await _openPickedEvent(entry);
-  }
-
   /// 행사 목록에서 고른 매장으로 상세를 연다. 진입점(pill·쪽 카드)이 무엇이든
   /// 여기 하나로 모인다 — 따로 만들면 한쪽만 층을 옮기거나 한쪽만 강조가 빠진다.
   Future<void> _openPickedEvent(StoreIndexEntry? entry) async {
     if (!mounted || entry == null) return;
-    // 이벤트를 보는 사람은 아직 건물 밖일 수 있다 — 공유 링크와 같은 맥락이라
-    // 진입까지 맡긴다. 밖이라고 포기하면 pill이 야외에서 아무것도 못 연다.
+    // 진입은 맡겨 둔다. 이 목록은 건물 안에서만 열리지만(하단 판), 오버레이가
+    // 꺼진 사이에 고른 것까지 포기하면 눌러도 아무 일이 없는 줄이 된다.
     final resolved = await _outdoorKey.currentState?.resolveIndexEntry(
       entry,
       enterBuildingIfNeeded: true,

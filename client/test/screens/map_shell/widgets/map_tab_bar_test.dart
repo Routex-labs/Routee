@@ -10,6 +10,7 @@ import 'package:navigation_client/theme/app_theme.dart';
 /// 보이므로 여기서 못 박는다.
 void main() {
   Widget host({
+    List<MapTab> tabs = MapTab.values,
     MapTab selected = MapTab.map,
     ValueChanged<MapTab>? onSelected,
   }) => MaterialApp(
@@ -17,7 +18,11 @@ void main() {
     home: Scaffold(
       body: Align(
         alignment: Alignment.bottomCenter,
-        child: MapTabBar(selected: selected, onSelected: onSelected ?? (_) {}),
+        child: MapTabBar(
+          tabs: tabs,
+          selected: selected,
+          onSelected: onSelected ?? (_) {},
+        ),
       ),
     ),
   );
@@ -42,6 +47,18 @@ void main() {
     // 채운 아이콘으로 바뀐다 — 굵기가 안 보이는 작은 글자를 아이콘이 받쳐 준다.
     expect(find.byIcon(MapTab.events.activeIcon), findsOneWidget);
     expect(find.byIcon(MapTab.map.icon), findsOneWidget);
+  });
+
+  testWidgets('준 탭만 선다 — 뺀 탭은 자리도 안 먹는다', (tester) async {
+    // 야외의 줄이다. 이벤트는 건물 안에서만 서므로 여기서는 빠진다.
+    const outdoor = [MapTab.map, MapTab.directions, MapTab.saved];
+    await tester.pumpWidget(host(tabs: outdoor));
+
+    expect(find.byKey(const Key('map-tab-events')), findsNothing);
+    expect(find.text('이벤트'), findsNothing);
+    for (final tab in outdoor) {
+      expect(find.byKey(Key('map-tab-${tab.name}')), findsOneWidget);
+    }
   });
 
   testWidgets('누른 탭을 그대로 넘긴다', (tester) async {
