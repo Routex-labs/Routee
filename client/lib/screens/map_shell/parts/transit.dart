@@ -202,9 +202,13 @@ extension _MapShellTransit on _MapShellScreenState {
     );
   }
 
-  /// 후보 목록을 띄우고, 확정한 하나를 지도에 그린 뒤 **안내까지 시작한다.**
+  /// 후보 목록을 띄우고, 고른 하나를 **확정해 지도에 그린다.**
   /// **첫 조회와 뒤로가기가 같이 쓴다** — 고른 뒤의 흐름을 두 벌로 만들면 한쪽만
   /// 고쳐진다.
+  ///
+  /// **안내는 여기서 걸지 않는다.** 목록을 닫으면 지도 위 요약 카드가 그 확정된
+  /// 경로를 들고 `안내 시작`을 내민다([TransitSummaryCard]) — 상세 페이지를 한
+  /// 겹 더 쌓아 그 버튼을 감췄던 옛 흐름은 중첩 시트였다.
   ///
   /// 목록이 떠 있는 동안에는 요약 카드를 접는다([_transitRoutesSheetOpen]).
   Future<void> _pickTransitRoute(
@@ -218,7 +222,6 @@ extension _MapShellTransit on _MapShellScreenState {
         () => TransitRoutesSheet.show(
           context,
           routes: routes,
-          destinationLabel: destination.title,
           onCloseAll: _requestCloseSheetChain,
           // 누른 줄로 지도를 갈아친다. 미리보기와 **같은 함수**라 TMAP 호출은
           // 한 건도 안 늘고, 고르지 않고 닫으면 마지막에 본 후보가 그대로 남는다.
@@ -307,14 +310,9 @@ extension _MapShellTransit on _MapShellScreenState {
         );
         if (!mounted) return;
       }
-
-      // **여기까지 왔다는 것은 상세에서 `안내 시작`을 눌렀다는 뜻이다** — 목록은
-      // 그 버튼에서만 값을 돌려준다(TransitRoutesSheet.show). 확정만 하고 멈추면
-      // 하단 카드가 같은 버튼을 한 번 더 내밀어 두 번 누르게 된다.
-      //
-      // 계획 카드의 버튼과 **같은 함수**를 탄다. 경로에서 멀면 그쪽 가드가 막고
-      // 안내 문구만 뜨는데, 그때 카드에 버튼이 남는 것이 맞는 동작이다.
-      await outdoor.startGuidanceForPickedRoute();
+      // 여기서 멈춘다. 목록이 닫혔으니 지도 위 요약 카드가 이 확정된 경로로
+      // 돌아와 `안내 시작`을 내민다 — 안내를 걸지 말지는 그 버튼에서 사용자가
+      // 정한다.
     } finally {
       if (mounted) setState(() => _transitRoutesSheetOpen = false);
     }

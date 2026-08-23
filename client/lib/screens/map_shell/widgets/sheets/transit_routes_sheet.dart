@@ -5,7 +5,6 @@ import '../../../../models/route/transit_route.dart';
 import '../../../../widgets/map_overlay_guard.dart';
 import '../../../../domain/route/transit_itinerary_filter.dart';
 import '../../../../widgets/transit_itinerary_card.dart';
-import 'transit_route_detail_sheet.dart';
 
 /// 시트가 처음 덮는 화면 비율. 후보를 미리 그리는 쪽이 카메라 아래 여백을
 /// 이만큼 비워야 경로가 시트 뒤에 잠기지 않는다 — 그래서 숫자를 여기 하나만
@@ -22,33 +21,27 @@ class TransitRoutesSheet extends StatefulWidget {
   const TransitRoutesSheet({
     super.key,
     required this.routes,
-    required this.destinationLabel,
     required this.onCloseAll,
     required this.onPreview,
   });
 
   final TransitRoutes routes;
 
-  /// 상세 화면이 "OO까지"에 쓸 도착지 이름. 목록 자신은 안 적는다 — 화면 위
-  /// 길찾기 바가 이미 말하고 있어서 두 번 적으면 후보 한 장이 밀린다.
-  final String destinationLabel;
-
   /// 고르지 않고 목록이 닫혔을 때. 시트 chain 전체를 접으라는 신호다.
   final VoidCallback onCloseAll;
 
-  /// 카드를 눌렀을 때 **지도에 그릴** 후보. 확정이 아니라 미리보기라, 이 뒤에도
-  /// 목록은 그대로 남아 다른 후보를 이어서 볼 수 있다.
+  /// 카드를 눌렀을 때 **지도에 그릴** 후보. 이 뒤에 목록이 곧바로 닫히므로
+  /// 실질적으로는 확정 그림이다([_pick] 근거).
   final ValueChanged<TransitItinerary> onPreview;
 
-  /// 후보 목록을 띄우고, 사용자가 **확정한** 경로 하나를 돌려준다.
+  /// 후보 목록을 띄우고, 사용자가 **고른** 경로 하나를 돌려준다.
   ///
-  /// 카드를 누르는 것은 고르는 것이 아니라 지도를 갈아치우고 상세를 열어 보는
-  /// 것이다 — 확정은 상세 하단 `안내 시작`뿐이라, 그때만 값이 나오고 그 밖에는
-  /// null이다.
+  /// 카드를 누르면 그 자리에서 목록이 닫히고 그 후보로 확정된다 — 상세 페이지를
+  /// 한 겹 더 쌓지 않는다([_pick] 근거). 안내를 실제로 걸지는 지도 위 요약
+  /// 카드의 `안내 시작`이 맡는다([TransitSummaryCard]).
   static Future<TransitItinerary?> show(
     BuildContext context, {
     required TransitRoutes routes,
-    required String destinationLabel,
     required VoidCallback onCloseAll,
     required ValueChanged<TransitItinerary> onPreview,
   }) {
@@ -60,7 +53,6 @@ class TransitRoutesSheet extends StatefulWidget {
       builder: (context) => MapOverlayGuard(
         child: TransitRoutesSheet(
           routes: routes,
-          destinationLabel: destinationLabel,
           onCloseAll: onCloseAll,
           onPreview: onPreview,
         ),
@@ -81,21 +73,12 @@ class _TransitRoutesSheetState extends State<TransitRoutesSheet> {
 
   void _markIntentional() => _intentionalPop = true;
 
-  /// 카드 한 장을 눌렀을 때. **여기서는 아직 아무것도 확정되지 않는다** —
-  /// 지도를 그 후보로 갈아치우고 상세를 한 겹 위에 띄운다. 거기서 `안내 시작`을
-  /// 눌렀을 때만(true) 그 경로를 결과로 목록을 닫는다. 뒤로 닫히면(null) 목록에
-  /// 그대로 머물러 다른 후보를 이어서 볼 수 있다 — 견주는 단계가 이것이다.
-  ///
-  /// 상세를 띄우기 **전에** 그린다. 뒤에 그리면 상세를 닫기 전까지 지도가 앞
-  /// 후보를 들고 있어, 뒤로 나온 순간 화면이 한 번 더 바뀐다.
+  /// 카드 한 장을 눌렀을 때. **그 자리에서 확정하고 목록을 닫는다** — 상세
+  /// 페이지를 한 겹 더 쌓으면 후보 목록 위에 상세가, 그 위에 지도 요약 카드가
+  /// 겹치는 중첩 시트가 된다. 지도로 돌아가면 요약 카드가 `안내 시작`을 들고
+  /// 있으니, 여기서는 지도만 갈아치우고 물러선다.
   Future<void> _pick(TransitItinerary itinerary) async {
     widget.onPreview(itinerary);
-    final start = await TransitRouteDetailSheet.show(
-      context,
-      itinerary: itinerary,
-      destinationLabel: widget.destinationLabel,
-    );
-    if (!mounted || start != true) return;
     _markIntentional();
     Navigator.of(context).pop(itinerary);
   }
