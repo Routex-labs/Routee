@@ -525,8 +525,10 @@ extension OutdoorMapGps on OutdoorMapBodyState {
   /// 한 건이 곧바로 되돌려 놓아 지도를 조작할 수 없다.
   void _stopFollowingUser() => _followingUser = false;
 
-  /// 안내 중 "내 위치로" 버튼. **bearing과 tilt는 건드리지 않는다** — 정북으로
-  /// 돌아가면 화면 위쪽이 갈 방향과 어긋난다. 배율도 [walkingViewZoom]까지만 당긴다.
+  /// 안내 중 "내 위치로" 버튼. **실내는 bearing·tilt를 건드리지 않는다** — 정북
+  /// 으로 돌아가면 화면 위쪽이 갈 방향과 어긋난다. **야외는 정북·평면으로
+  /// 되돌린다** — 야외에는 세워 둘 방향이 없고, 남아 있는 bearing은 직전 실내
+  /// 나침반 추종이 새어 나온 값일 뿐이다. 배율도 [walkingViewZoom]까지만 당긴다.
   ///
   /// **팔로우를 다시 켜는 유일한 문이다.** 지도를 손으로 움직이면 두 팔로우가
   /// 함께 물리는데([_releaseFollowCamera]), 그걸 푸는 자리가 없으면 안내가 끝날
@@ -555,6 +557,7 @@ extension OutdoorMapGps on OutdoorMapBodyState {
       here,
       minZoom: walkingViewZoom,
       duration: recenterDuration,
+      keepBearing: _indoorLocationVisible,
     );
   }
 

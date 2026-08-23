@@ -207,24 +207,39 @@ Future<void> animateCameraToPoints(
 }
 
 /// [point]로 카메라를 옮긴다. [zoom]을 주면 배율까지 함께 정한다.
+///
+/// **bearing·tilt는 항상 정북·평면으로 되돌린다.** 야외 GPS 따라가기 전용
+/// 함수라, 직전에 실내 나침반 추종([_moveFollowCamera])이 남겨 둔 회전이
+/// 그대로 야외 화면까지 새어 나오는 것을 막는다 — 야외는 방향 없이 보여주던
+/// 화면으로 돌아가는 것이 맞다.
 Future<void> animateCameraToPoint(
   MapLibreMapController controller,
   ll.LatLng point, {
   double? zoom,
 }) async {
-  final target = toGlLatLng(point);
+  final camera = controller.cameraPosition;
   await controller.animateCamera(
-    zoom == null
-        ? CameraUpdate.newLatLng(target)
-        : CameraUpdate.newLatLngZoom(target, zoom),
+    CameraUpdate.newCameraPosition(
+      CameraPosition(
+        target: toGlLatLng(point),
+        zoom: zoom ?? camera?.zoom ?? 0,
+        bearing: 0,
+        tilt: 0,
+      ),
+    ),
   );
 }
 
-/// 지금 방향·기울기를 유지한 채 [point]로 돌아간다.
+/// [point]로 돌아간다. [keepBearing]이 true면 지금 방향·기울기를 유지하고,
+/// false면 정북·평면으로 되돌린다.
 ///
-/// **bearing과 tilt는 건드리지 않는다.** 개요 연출이 경로 축에 맞춰 세워 둔
-/// 방향이 여기서 정북으로 돌아가면, 돌아온 화면의 위쪽이 갈 방향과 어긋난다.
-/// 배율도 [minZoom]까지만 당기고 그보다 확대돼 있으면 그대로 둔다 — 무언가를
+/// **실내는 유지, 야외는 되돌린다.** 실내는 개요 연출이 경로 축에 맞춰 세워 둔
+/// 방향이 있어 여기서 정북으로 돌아가면 화면 위쪽이 갈 방향과 어긋난다. 야외는
+/// 그런 방향이 없으므로(따라가기도 늘 정북, [animateCameraToPoint]) 남아 있는
+/// bearing은 실내 나침반 추종이 새어 나온 값일 뿐이다 — 정북으로 되돌리는 것이
+/// "방향 없이 보여주던" 원래 화면이다.
+///
+/// 배율은 [minZoom]까지만 당기고 그보다 확대돼 있으면 그대로 둔다 — 무언가를
 /// 들여다보려 당겨 둔 배율을 버튼 한 번에 되돌리면, 위치로 돌아가는 대신 방금
 /// 보던 것을 잃는다.
 Future<void> recenterKeepingBearing(
@@ -232,6 +247,7 @@ Future<void> recenterKeepingBearing(
   ll.LatLng point, {
   required double minZoom,
   required Duration duration,
+  bool keepBearing = true,
 }) async {
   final camera = controller.cameraPosition;
   await controller.animateCamera(
@@ -239,8 +255,8 @@ Future<void> recenterKeepingBearing(
       CameraPosition(
         target: toGlLatLng(point),
         zoom: math.max(camera?.zoom ?? minZoom, minZoom),
-        bearing: camera?.bearing ?? 0,
-        tilt: camera?.tilt ?? 0,
+        bearing: keepBearing ? (camera?.bearing ?? 0) : 0,
+        tilt: keepBearing ? (camera?.tilt ?? 0) : 0,
       ),
     ),
     duration: duration,
