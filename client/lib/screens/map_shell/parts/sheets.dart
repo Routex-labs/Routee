@@ -590,12 +590,21 @@ extension _MapShellSheets on _MapShellScreenState {
   /// 화면의 3분의 1을 왕복해(260ms + 380ms) 매장을 훑을수록 눈이 피로하다.
   /// 시트가 이미 그 자리에 있으니 움직일 이유가 없다 — 내용만 바꾼다.
   Future<void> _openStoreFromMap(PoiSearchResult match) async {
+    // **안내 중에는 카메라를 옮기지 않는다.** 따라가는 화면에서 매장을 눌렀다고
+    // 지도가 그쪽으로 끌려가면 내가 어디쯤 왔는지를 잃는다 — 궁금한 것은 그
+    // 매장이 무엇인가이고, 그 답은 시트가 준다. 안내가 끝날 때까지 카메라의
+    // 주인은 내 위치다.
+    final focusOnMap = !_guidanceActive;
     // **카테고리를 켜 놓고 누른 매장은 보러 간 것이다.** 칩으로 그 대분류만
     // 남겨 놓고 하나를 고르는 흐름이라 예전 그대로 완전히 포커스한다.
     // 그냥 도면을 훑다 누른 것은 다르다 — 화면이 통째로 끌려가면 방금까지
     // 보던 자리를 잃으므로 그 절반까지만 간다.
     final focusRatio = _categorySelection == null ? 0.5 : 1.0;
-    if (_swapOpenPlaceDetail(match, focusOnMap: true, focusRatio: focusRatio)) {
+    if (_swapOpenPlaceDetail(
+      match,
+      focusOnMap: focusOnMap,
+      focusRatio: focusRatio,
+    )) {
       return;
     }
     await _runSheetChain(
@@ -604,7 +613,11 @@ extension _MapShellSheets on _MapShellScreenState {
       // 매장이 시트 뒤로 들어갔다. 배율을 고정한 채 자리만 맞추는 것
       // (`keepZoom`)도 답이 아니었다 — 도면 전체가 보이는 상태에서는 리프트가
       // 수십 px이라 화면이 그대로였다. 배율까지 같은 비율로 함께 끈다.
-      () => _showStoreInfo(match, focusOnMap: true, focusRatio: focusRatio),
+      () => _showStoreInfo(
+        match,
+        focusOnMap: focusOnMap,
+        focusRatio: focusRatio,
+      ),
     );
   }
 }
