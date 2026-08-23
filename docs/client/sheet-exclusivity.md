@@ -27,8 +27,6 @@
 | NearbyStoreSheet | **GPS 건물 진입 감지** | ✅ |
 | StoreClusterSheet | 겹친 매장 탭 | ✅ |
 | RouteStepsSheet | 경로 단계(안내 중) | ✅ |
-| DirectionsRouteDetailSheet | 경로 상세(안내 중) | ✅ |
-| TransitRouteDetailSheet | 목록 안에서 | ❌ 의도적 중첩(`PageRoute`) |
 | EntryFloorPrompt | GPS 진입 | ❌ 전체화면(`PageRouteBuilder`) |
 | 사진 뷰어 | 상세 시트 안 | ❌ 의도적(`DialogRoute`) |
 | PDR 보정 입력 | 디버그 | ❌ `DialogRoute` |
@@ -57,7 +55,7 @@
 
 ### 왜 `ModalBottomSheetRoute`만 세나
 
-의도적으로 겹치는 셋(대중교통 상세·사진 뷰어·PDR 입력)이 전부 `PageRoute`/`DialogRoute`라
+의도적으로 겹치는 둘(사진 뷰어·PDR 입력)이 전부 `PageRoute`/`DialogRoute`라
 **표시를 붙이지 않아도 자동으로 예외**가 된다. 규약을 모르는 사람이 새 시트를 만들어도
 기본값이 "겹치지 않음"이고, 예외를 아는 사람만 다른 route 타입을 쓴다.
 
