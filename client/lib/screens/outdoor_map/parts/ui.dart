@@ -7,6 +7,30 @@
 part of '../outdoor_map_screen.dart';
 
 extension OutdoorMapUi on OutdoorMapBodyState {
+  /// 화면 바닥에 도킹하는 카드(도착·ETA·대중교통 요약)를 **탭 줄 위에 앉힌다.**
+  ///
+  /// 카드는 지도 Stack 안이고 탭 줄은 셸 Stack의 윗층이라, `bottom: 0`으로 두면
+  /// 탭 줄이 카드의 아랫부분을 덮는다 — 실기기에서 지표 줄("1.2km · 거리")이
+  /// 통째로 사라지고 `안내 시작` 버튼의 아래 모서리가 잘렸다. 겹치는 구간은
+  /// **카드가 뜬 뒤 시작을 누르기 전까지 전부**다: 탭 줄이 접히는 조건은
+  /// `_guidanceActive`(=시작을 누른 뒤)이므로 그 전에는 늘 둘 다 바닥에 있다.
+  ///
+  /// **띄운 만큼 카드의 아래 안전영역은 끈다.** 그 영역은 탭 줄이 이미 자기
+  /// [SafeArea]로 갖고 있어, 두면 두 번 세어 카드 밑에 흰 띠가 남는다.
+  Widget _bottomDockedCard(Widget card) {
+    final lift = widget.bottomCardLiftPx;
+    return Positioned(
+      left: 0,
+      right: 0,
+      bottom: lift,
+      child: MediaQuery.removePadding(
+        context: context,
+        removeBottom: lift > 0,
+        child: card,
+      ),
+    );
+  }
+
   void _showSnack(String message, {Duration? duration}) =>
       _showSnackGuarded(message, replace: false, duration: duration);
 
@@ -550,11 +574,8 @@ extension OutdoorMapUi on OutdoorMapBodyState {
         // 여기까지 안내해 놓고 "그래서 이 매장이 뭔데"로 가는 길을 끊지 않는다 —
         // 상세를 못 여는 목적지(placeId 없는 POI)에서만 그 버튼이 빠진다.
         if (arrived != null)
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: IndoorArrivalCard(
+          _bottomDockedCard(
+            IndoorArrivalCard(
               key: _arrivalCardKey,
               destinationName: arrived.name,
               destinationFloor: arrived.floor,
@@ -576,11 +597,8 @@ extension OutdoorMapUi on OutdoorMapBodyState {
         // 정보·안내 종료)를 말한다. 지나쳐 걸어가 안내가 되살아나면(`arrived`가
         // 풀리면) 이 카드가 다시 돌아온다.
         if (indoorRouteDestination != null && !_showingArrivalOnly)
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: EtaCard(
+          _bottomDockedCard(
+            EtaCard(
               key: _etaCardKey,
               distanceMeters: indoorEta.distanceM,
               // 시간은 비용 기준 — 엘리베이터 대기·탑승 시간이 여기 들어 있다.
@@ -604,11 +622,8 @@ extension OutdoorMapUi on OutdoorMapBodyState {
         // 후보 목록이 덮고 있는 동안에는 아예 안 그린다([OutdoorMapBody.transitRoutesSheetOpen]).
         else if (_transitItinerary case final itinerary?
             when !widget.transitRoutesSheetOpen)
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: TransitSummaryCard(
+          _bottomDockedCard(
+            TransitSummaryCard(
               key: _etaCardKey,
               itinerary: itinerary,
               label: _transitLabel ?? '목적지까지',
@@ -620,11 +635,8 @@ extension OutdoorMapUi on OutdoorMapBodyState {
             ),
           )
         else if (route != null)
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: EtaCard(
+          _bottomDockedCard(
+            EtaCard(
               key: _etaCardKey,
               distanceMeters: _outdoorEta(route).distanceM,
               minutes: _outdoorEta(route).minutes,

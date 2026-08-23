@@ -12,6 +12,7 @@ import 'package:navigation_client/repositories/place/mock_destination_repository
 import 'package:navigation_client/screens/map_shell/map_shell_screen.dart';
 import 'package:navigation_client/screens/map_shell/widgets/chrome/map_bottom_bar.dart';
 import 'package:navigation_client/screens/map_shell/widgets/chrome/map_overlay_scroll_row.dart';
+import 'package:navigation_client/screens/map_shell/widgets/chrome/map_tab_bar.dart';
 import 'package:navigation_client/widgets/eta_card.dart';
 import 'package:navigation_client/widgets/directions_route_options_panel.dart';
 import 'package:navigation_client/screens/map_shell/widgets/search/route_field_results.dart';
@@ -154,10 +155,15 @@ void main() {
     expect(find.byType(EtaCard), findsOneWidget);
     expect(find.byType(MapBottomBar), findsNothing);
     expect(find.byType(MapOverlayScrollRow), findsNothing);
+    // 한동안 이 줄은 **화면 바닥**(= Scaffold 높이)을 기대했다. 그 값이 곧
+    // 버그였다 — 시작을 누르기 전에는 탭 줄도 바닥에 있어서, 카드가 화면 끝까지
+    // 내려가면 지표 줄과 버튼 모서리가 그 줄 뒤로 들어간다. 카드가 붙을 바닥은
+    // 화면이 아니라 **탭 줄의 윗변**이다
+    // (`eta_card_clears_tab_bar_test.dart`가 겹침 자체를 못 박는다).
     expect(
       tester.getBottomLeft(find.byType(EtaCard)).dy,
-      tester.getSize(find.byType(Scaffold).first).height,
-      reason: '안내 시작 전 경로 요약도 화면 하단에 붙어야 한다',
+      tester.getTopLeft(find.byType(MapTabBar)).dy,
+      reason: '안내 시작 전 경로 요약은 탭 줄 위에 붙어야 한다',
     );
     // 고른 값이 그 칸에 그대로 남아, 다시 눌러 고칠 수 있다.
     expect(find.byKey(const Key('route-draft-destination')), findsNothing);

@@ -243,6 +243,7 @@ class OutdoorMapBody extends StatefulWidget {
     this.onFacilitiesTap,
     this.facilitiesActive = false,
     this.bottomOverlayLiftPx = 0,
+    this.bottomCardLiftPx = 0,
     this.categorySelection,
     this.onFloorChanged,
     this.onFloorTransitionChanged,
@@ -357,6 +358,14 @@ class OutdoorMapBody extends StatefulWidget {
   /// 지도가 시트를 아는 대신 **높이만 값으로 받는다.** 시트가 늘거나 바뀌어도
   /// 이 화면은 그대로다.
   final double bottomOverlayLiftPx;
+
+  /// 바닥에 도킹하는 카드(도착·ETA·대중교통 요약)를 **탭 줄 위로** 올리는 높이.
+  ///
+  /// [bottomOverlayLiftPx]와 **다른 값이다.** 그쪽은 안전영역을 빼고 주지만
+  /// (받는 층 선택기가 제 [SafeArea]로 이미 올라와 있다), 카드는 화면 바닥까지
+  /// 닿는 표면이라 탭 줄이 먹는 높이를 안전영역까지 통째로 비켜야 한다. 셸의
+  /// `_tabBarLiftPx`가 그 값이고, 안내가 시작되면 탭 줄이 접히므로 0이 된다.
+  final double bottomCardLiftPx;
 
   /// 지금 카테고리 필터에서 고른 값. 실내 진입 오버레이의 매장 강조에 쓴다.
   ///

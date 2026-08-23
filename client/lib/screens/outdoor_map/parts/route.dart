@@ -1076,7 +1076,10 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
     await _animateCameraToFitBox(
       box,
       topChromePx: guidanceFitTopChromePx,
-      bottomChromePx: guidanceFitBottomChromePx,
+      // 상수는 **카드 높이**다. 그 카드가 탭 줄 위로 올라가 있으면 비울 자리도
+      // 그만큼 늘어난다([OutdoorMapBody.bottomCardLiftPx]) — 안 더하면 경로
+      // 아랫부분이 탭 줄 뒤로 들어간다.
+      bottomChromePx: guidanceFitBottomChromePx + widget.bottomCardLiftPx,
       duration: duration,
       maxZoom: routeFitMaxZoom,
     );

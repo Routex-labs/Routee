@@ -815,6 +815,10 @@ class _MapShellScreenState extends State<MapShellScreen> {
           : null,
       facilitiesActive: _facilitiesSheetOpen,
       bottomOverlayLiftPx: _bottomOverlayLiftPx(context),
+      // 바닥에 도킹하는 카드는 **하단 바와 같은 값**으로 탭 줄을 비킨다
+      // ([_buildBottomBar]도 이 값을 먼저 더한다). 두 곳이 따로 세면 한쪽만
+      // 고쳐지는 날이 온다.
+      bottomCardLiftPx: _tabBarLiftPx(context),
       // 실내 화면과 같은 선택을 넘긴다. 야외 지도도 실내 진입
       // 오버레이가 켜지면 같은 도면을 그리므로, 안 넘기면 칩을
       // 눌러도 강조가 안 뜬다.
@@ -865,7 +869,18 @@ class _MapShellScreenState extends State<MapShellScreen> {
       // (resizeToAvoidBottomInset: false), 여기서 바닥을 직접 올려 검색
       // 패널이 키보드 밑으로 들어가지 않게 한다. 예전에는 상단 바 높이를
       // 상수로 가정해 별도 계산했지만, 이제는 Column의 실제 높이를 쓴다.
-      bottom: MediaQuery.viewInsetsOf(context).bottom,
+      //
+      // **탭 줄도 같은 이유로 비킨다.** 목록은 [Flexible]이라 자리가 있는 만큼
+      // 늘어나는데, 그 자리를 화면 끝까지 주면 마지막 줄이 탭 줄 뒤로 들어간다
+      // (`ㄱ`부터 치고 목록이 길어지면 늘 그랬다).
+      //
+      // **더하지 않고 큰 쪽을 쓴다.** 키보드는 탭 줄을 통째로 덮으므로
+      // (`resizeToAvoidBottomInset: false`라 탭 줄은 그 밑에 그대로 있다) 둘을
+      // 더하면 키보드가 올라온 동안 패널이 탭 줄 높이만큼 떠 버린다.
+      bottom: math.max(
+        MediaQuery.viewInsetsOf(context).bottom,
+        _tabBarLiftPx(context),
+      ),
       // 상태 표시줄 여백은 이 Column 전체가 한 번만 먹는다. 예전에는
       // MapTopBar가 자기 안에서 SafeArea를 썼는데, 그 위에 다른 줄(이동
       // 수단)이 오는 순간 둘이 각자 여백을 먹어 간격이 두 배가 된다.
