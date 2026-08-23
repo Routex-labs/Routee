@@ -274,6 +274,13 @@ class _PlaceMenuSectionState extends State<PlaceMenuSection> {
   }
 }
 
+/// 키보드가 다 올라왔다고 보는 정적(靜寂) 길이([_MenuSearchFieldState._follow]).
+///
+/// 애니메이션 **길이**가 아니라 틱 사이의 간격을 재는 값이라 기기마다 달라지지
+/// 않는다. 두 프레임보다 넉넉하고(느린 기기의 프레임 하나를 끊지 않는다) 손이
+/// 기다림을 느끼기에는 짧은 자리다.
+const _settleGap = Duration(milliseconds: 80);
+
 /// 검색창을 붙이는 최소 메뉴 수.
 const _menuSearchThreshold = 20;
 
@@ -401,6 +408,9 @@ class _MenuSearchFieldState extends State<_MenuSearchField>
   /// 마지막 빌드에서 본 키보드 높이. [build]가 기록한다.
   var _keyboardInset = 0.0;
 
+  /// 키보드가 다 올라왔는지 재는 시계([_follow]).
+  Timer? _settleTimer;
+
   @override
   void initState() {
     super.initState();
@@ -410,6 +420,7 @@ class _MenuSearchFieldState extends State<_MenuSearchField>
 
   @override
   void dispose() {
+    _settleTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _focusNode
       ..removeListener(_onFocusChanged)
@@ -419,7 +430,10 @@ class _MenuSearchFieldState extends State<_MenuSearchField>
   }
 
   void _onFocusChanged() {
-    if (!_focusNode.hasFocus) return;
+    if (!_focusNode.hasFocus) {
+      _stopFollowing();
+      return;
+    }
     // 이미 다른 입력칸을 쓰다 넘어온 경우라 키보드가 떠 있다. 기다릴 것이 없다.
     if (_keyboardInset > 0) {
       _reveal();
@@ -428,7 +442,7 @@ class _MenuSearchFieldState extends State<_MenuSearchField>
     }
   }
 
-  /// 키보드가 실제로 올라온 순간을 여기서 잡는다.
+  /// 키보드가 **올라오는 동안** 여기로 틱이 온다(끝이 아니라 매 프레임이다).
   ///
   /// 고정 지연(`Future.delayed`)으로 맞추지 않는 이유는 그 값이 기기·키보드마다 다른
   /// 애니메이션 길이를 추측한 숫자이기 때문이다 — 느린 기기에서 먼저 스크롤해 버리면
@@ -445,20 +459,48 @@ class _MenuSearchFieldState extends State<_MenuSearchField>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_revealPending) return;
       if (MediaQuery.viewInsetsOf(context).bottom <= 0) return;
+      // **여기서 끝내면 안 된다.** 이 콜백이 처음 오는 순간의 키보드 높이는
+      // 10px 남짓이다(실측) — 아직 올라오는 중이고, 그만큼만 아래가 비어 있어
+      // 스크롤이 갈 수 있는 거리도 그것뿐이다. 목표 위치는 그 거리를 넘어서
+      // **잘린 채로** 멎고, 키보드가 다 오르면 다시 그 아래에 깔린다. 검색창이
+      // 안 올라오던 원인이 이것이다.
+      //
+      // 그래서 오르는 **동안 계속 따라간다**. 매 틱 애니메이션 없이 맞추므로
+      // 키보드와 같은 속도로 함께 올라오고, 조용해지면 한 번 부드럽게 앉힌다.
+      _follow();
+    });
+  }
+
+  /// 키보드가 오르는 동안 매 틱 따라붙고, 틱이 그치면 마지막으로 한 번 맞춘다.
+  ///
+  /// **고정 지연으로 끝을 맞히지 않는다**(옛 주석의 이유 그대로 — 애니메이션
+  /// 길이는 기기·키보드마다 다르다). 여기서 재는 것은 길이가 아니라 **조용해짐**
+  /// 이다: 마지막 틱으로부터 [_settleGap]이 지나도록 새 틱이 없으면 다 오른 것이다.
+  void _follow() {
+    _reveal(animated: false);
+    _settleTimer?.cancel();
+    _settleTimer = Timer(_settleGap, () {
+      if (!mounted) return;
       _revealPending = false;
       _reveal();
     });
   }
 
+  void _stopFollowing() {
+    _revealPending = false;
+    _settleTimer?.cancel();
+    _settleTimer = null;
+  }
+
   /// 검색창을 화면 위쪽으로 올린다. 끝에 붙이지 않고 조금 띄우는(0.08) 이유는
   /// 검색이 결과를 보려고 하는 일이라, 입력칸만 보이고 아래가 키보드면 친 보람이
   /// 없기 때문이다.
-  void _reveal() {
+  void _reveal({bool animated = true}) {
     if (!mounted) return;
     Scrollable.ensureVisible(
       context,
       alignment: 0.08,
-      duration: const Duration(milliseconds: 280),
+      duration: animated ? const Duration(milliseconds: 280) : Duration.zero,
       curve: Curves.easeOutCubic,
     );
   }
@@ -875,13 +917,33 @@ class PlaceContactSection extends StatelessWidget {
       label: '$tel에 전화',
       child: InkWell(
         onTap: () => _call(context),
-        child: RoutexInfoRow(
-          label: '전화번호',
-          value: tel,
-          icon: infoIconFor('전화번호'),
-          // 아이콘만으로는 누가 받는 번호인지 말하지 못한다. 운영 정보 줄과 같은
-          // 이유로 라벨 글자를 남긴다.
-          keepLabel: true,
+        // **누를 수 있다는 표시가 줄 안에 있어야 한다.** 눌리기는 눌렸지만
+        // 화면에는 그럴 낌새가 없어서, 번호를 눈으로만 읽고 지나가는 줄이었다
+        // (ripple은 누른 **뒤에야** 보인다).
+        //
+        // 표시는 SNS 링크 줄과 **같은 꺾쇠**다(`RoutexLinkList`) — 이 시트에서
+        // 이미 "누르면 밖으로 나간다"를 뜻하는 기호라, 새 기호를 하나 더 만들면
+        // 사용자가 둘이 다른 일인 줄 안다. 수화기를 한 번 더 그리지 않는 이유도
+        // 같다: 왼쪽 아이콘과 겹쳐 보여 무엇이 눌리는 자리인지 흐려진다.
+        child: Row(
+          children: [
+            Expanded(
+              child: RoutexInfoRow(
+                label: '전화번호',
+                value: tel,
+                icon: infoIconFor('전화번호'),
+                // 아이콘만으로는 누가 받는 번호인지 말하지 못한다. 운영 정보 줄과
+                // 같은 이유로 라벨 글자를 남긴다.
+                keepLabel: true,
+              ),
+            ),
+            const SizedBox(width: RoutexSpacing.controlGap),
+            Icon(
+              RoutexIcons.forward,
+              size: RoutexMetrics.iconMedium,
+              color: context.routexColors.contentSecondary,
+            ),
+          ],
         ),
       ),
     );

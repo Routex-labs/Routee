@@ -118,17 +118,6 @@ void main() {
     return find.byType(AppMenuSheet).evaluate().isNotEmpty;
   }
 
-  /// 맨 아래 탭 줄의 이벤트. **야외에서만 시트를 연다** — 실내에서는 같은 탭이
-  /// 하단 판을 켜고 끄고, 시트는 그 판의 쪽 카드에서 열린다.
-  Future<bool> openEventsTab(WidgetTester tester) async {
-    await tester.tap(
-      find.byKey(const Key('map-tab-events')),
-      warnIfMissed: false,
-    );
-    await drain(tester);
-    return find.byType(EventsSheet).evaluate().isNotEmpty;
-  }
-
   /// 실내에서 그 시트가 떠 있는 상태. 판의 쪽 카드를 누르면 열리는 것과 같은
   /// 시트를 직접 띄운다 — 판에 오늘 카드가 몇 장인지는 스냅샷 날짜에 달려 있어,
   /// 카드를 눌러 여는 길로 만들면 날짜가 지나는 순간 이 표가 통째로 헛돈다.
@@ -149,7 +138,8 @@ void main() {
       return find.byType(BuildingInfoSheet).evaluate().isNotEmpty;
     },
     '상단 바 메뉴': openMenu,
-    '이벤트 탭': openEventsTab,
+    // 이벤트는 여기에 없다. 탭 줄의 이벤트는 **건물 안에서만 서고**, 야외에서
+    // 오늘 목록 시트를 여는 입구는 이제 하나도 없다([MapShellScreen] 탭 목록).
   };
 
   final indoorEntries = <String, Future<bool> Function(WidgetTester)>{

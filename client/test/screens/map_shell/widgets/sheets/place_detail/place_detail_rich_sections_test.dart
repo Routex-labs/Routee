@@ -548,14 +548,27 @@ void main() {
       await tester.pumpAndSettle();
       final afterFocus = controller.offset;
 
-      // 키보드가 올라온다.
-      tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+      // **한 번에 300으로 올리지 않는다.** 실기기의 키보드는 애니메이션이라
+      // 첫 틱이 10px 남짓이고(S23 실측), 그 순간에는 아래에 비워 둔 자리도
+      // 그만큼뿐이라 스크롤이 목표까지 못 간다. 한 걸음으로 재면 그 잘림이
+      // 안 잡혀서, 고쳐지지 않은 코드도 통과하던 자리다.
+      for (final inset in [12.0, 90.0, 200.0, 300.0]) {
+        tester.view.viewInsets = FakeViewPadding(bottom: inset);
+        await tester.pump(const Duration(milliseconds: 16));
+      }
       await tester.pumpAndSettle();
 
       expect(
         controller.offset,
         greaterThan(afterFocus),
         reason: '키보드가 올라온 뒤 검색창을 위로 올려야 한다',
+      );
+      // 재는 것은 스크롤 숫자가 아니라 **눈에 보이는가**다. 뷰포트가 600이고
+      // 키보드가 300이면 보이는 곳은 y<300뿐이다.
+      expect(
+        tester.getRect(find.byType(TextField)).bottom,
+        lessThan(300),
+        reason: '검색창이 키보드 위에 온전히 서야 한다',
       );
     });
 
@@ -1158,6 +1171,19 @@ void main() {
       // 복사 버튼을 두지 않는다. 48dp 상자가 줄을 부풀려 라벨과 숫자 사이가
       // 벌어지고, 이 화면에서 하려는 일은 복사가 아니라 거는 것이다.
       expect(find.text('복사'), findsNothing);
+    });
+
+    // 눌리기는 눌렸지만 그럴 낌새가 화면에 없으면, 번호를 눈으로만 읽고 지나간다.
+    // ripple은 누른 뒤에야 보이므로 표시가 되지 못한다.
+    testWidgets('전화번호 줄은 누를 수 있다는 표시를 SNS 줄과 같은 꺾쇠로 둔다', (tester) async {
+      await tester.pumpWidget(
+        subject(const PlaceContactSection(tel: '02-3277-0132')),
+      );
+
+      expect(find.byIcon(RoutexIcons.forward), findsOneWidget);
+      // 수화기를 한 번 더 그리지는 않는다 — 왼쪽 아이콘과 겹쳐 보여 무엇이 눌리는
+      // 자리인지 흐려진다.
+      expect(find.byIcon(Icons.call_outlined), findsOneWidget);
     });
 
     testWidgets('tapping the contact row dials the number as shown', (

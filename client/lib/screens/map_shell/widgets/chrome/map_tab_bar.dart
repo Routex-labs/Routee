@@ -9,6 +9,10 @@ import '../../../../theme/app_theme.dart';
 /// 위에 뜨는 시트·모드다. 그래서 [MapTab.map]만 "돌아오는 자리"이고 나머지는 각자
 /// 자기 것을 연다. 대신 지금 켜져 있는 것은 [selected]로 표시해, 누른 것이 어디에
 /// 남아 있는지 보이게 한다.
+///
+/// **줄에 설 탭은 부르는 쪽이 정한다**([tabs]) — 어떤 탭은 지금 이 자리에서만
+/// 뜻이 있다(이벤트는 건물 안에서만). 여기서 조건을 알면 화면이 늘 때마다 이
+/// 위젯이 함께 불어난다.
 enum MapTab {
   map('지도', Icons.map_outlined, Icons.map),
   directions('길찾기', Icons.alt_route_outlined, Icons.alt_route),
@@ -29,9 +33,13 @@ const double kMapTabBarHeight = 56;
 class MapTabBar extends StatelessWidget {
   const MapTabBar({
     super.key,
+    required this.tabs,
     required this.selected,
     required this.onSelected,
   });
+
+  /// 이 줄에 세울 탭, 왼쪽부터의 순서 그대로.
+  final List<MapTab> tabs;
 
   final MapTab selected;
   final ValueChanged<MapTab> onSelected;
@@ -49,7 +57,7 @@ class MapTabBar extends StatelessWidget {
           height: kMapTabBarHeight,
           child: Row(
             children: [
-              for (final tab in MapTab.values)
+              for (final tab in tabs)
                 Expanded(
                   child: _TabItem(
                     key: Key('map-tab-${tab.name}'),
