@@ -11,7 +11,6 @@ import 'package:navigation_client/repositories/place/destination_repository.dart
 import 'package:navigation_client/repositories/place/mock_destination_repository.dart';
 import 'package:navigation_client/repositories/routing/transit_repository.dart';
 import 'package:navigation_client/screens/map_shell/map_shell_screen.dart';
-import 'package:navigation_client/screens/map_shell/widgets/sheets/transit_route_detail_sheet.dart';
 import 'package:navigation_client/screens/map_shell/widgets/sheets/transit_routes_sheet.dart';
 import 'package:navigation_client/screens/outdoor_map/widgets/transit_summary_card.dart';
 import 'package:navigation_client/service_locator.dart';
@@ -23,10 +22,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 /// `대중교통` 칩이 자동차·도보와 **같은 그림**을 내는지에 대한 회귀 테스트.
 ///
-/// 조회가 끝나면 목록을 열기 전에 첫 후보를 미리 그리고, 그 뒤에는 카드를 누른
-/// 그 후보로 갈아친다(확정은 아니다). 그 미리보기는
-/// **지도에만** 나타난다 — 목록이 떠 있는 동안 요약 카드까지 뜨면 시트가 두
-/// 겹이다. 그리고 상세의 `안내 시작`은 확정과 안내를 한 번에 한다.
+/// 조회가 끝나면 목록을 열기 전에 첫 후보를 미리 그린다. 목록에서 카드를 누르면
+/// 그 후보로 갈아치우며 **그 자리에서 목록이 닫힌다** — 확정은 이미 됐고, 남은
+/// 것은 지도 위 요약 카드의 `안내 시작`뿐이다. 그 미리보기는 **지도에만**
+/// 나타난다 — 목록이 떠 있는 동안 요약 카드까지 뜨면 시트가 두 겹이다.
 /// 하네스(`fix()`·`drain()`·저장소 교체)는 `back_steps_out_of_route_test.dart`와 같다.
 class _FakeTransitRepository implements TransitRepository {
   _FakeTransitRepository(this.answer);
@@ -215,18 +214,29 @@ void main() {
       .widget<TransitSummaryCard>(find.byType(TransitSummaryCard))
       .itinerary;
 
-  /// 첫 후보의 상세를 열어 `안내 시작`으로 확정한다. 같은 글자가 하단 카드에도
-  /// 있을 수 있어 상세 안으로 좁혀 찾는다.
-  Future<void> pickFirstCandidate(WidgetTester tester) async {
+  /// 첫 후보를 고른다 — 그 자리에서 목록이 닫히고 지도 위 요약 카드가 그
+  /// 후보로 돌아온다. 안내는 아직 안 걸린다.
+  Future<void> selectFirstCandidate(WidgetTester tester) async {
     await tester.tap(find.byType(TransitItineraryCard).first);
     await drain(tester);
+  }
+
+  /// 요약 카드의 `안내 시작`을 누른다. 같은 글자가 화면 다른 곳에도 있을 수
+  /// 있어 카드 안으로 좁혀 찾는다.
+  Future<void> startGuidanceFromSummaryCard(WidgetTester tester) async {
     await tester.tap(
       find.descendant(
-        of: find.byType(TransitRouteDetailSheet),
+        of: find.byType(TransitSummaryCard),
         matching: find.text('안내 시작'),
       ),
     );
     await drain(tester);
+  }
+
+  /// 첫 후보를 고르고 곧바로 안내까지 시작한다.
+  Future<void> pickFirstCandidate(WidgetTester tester) async {
+    await selectFirstCandidate(tester);
+    await startGuidanceFromSummaryCard(tester);
   }
 
   testWidgets('목록이 떠 있는 동안에는 요약 카드를 감춘다', (WidgetTester tester) async {
@@ -263,52 +273,49 @@ void main() {
     expect(previewed(tester).fare, 1500, reason: '미리 그리는 것은 첫(최적) 후보다');
   });
 
-  testWidgets('다른 카드를 누르면 지도 경로가 그 후보로 갈아탄다', (WidgetTester tester) async {
-    await tapTransit(
-      tester,
-      TransitRoutes.ok([_itinerary(1500), _itinerary(1600)]),
-    );
-
-    // 두 번째 후보의 상세를 열었다가 아무것도 안 고르고 나온다.
-    await tester.tap(find.byType(TransitItineraryCard).at(1));
-    await drain(tester);
-    await tester.binding.handlePopRoute();
-    await drain(tester);
-    // 목록도 닫는다 — 요약 카드는 목록이 덮는 동안 감춰져 있어 이때만 읽힌다.
-    await tester.binding.handlePopRoute();
-    await drain(tester);
-
-    expect(
-      previewed(tester).fare,
-      1600,
-      reason: '고르지 않고 닫아도 마지막에 본 후보가 지도에 남아야 한다',
-    );
-  });
-
-  testWidgets('상세를 열었다 뒤로 닫으면 목록만 남고 카드는 계속 감춰져 있다', (
+  testWidgets('다른 카드를 누르면 지도 경로가 그 후보로 갈아타며 목록도 함께 닫힌다', (
     WidgetTester tester,
   ) async {
     await tapTransit(
       tester,
       TransitRoutes.ok([_itinerary(1500), _itinerary(1600)]),
     );
-    await tester.tap(find.byType(TransitItineraryCard).first);
-    await drain(tester);
-    expect(find.byType(TransitRouteDetailSheet), findsOneWidget);
 
-    await tester.binding.handlePopRoute();
+    await tester.tap(find.byType(TransitItineraryCard).at(1));
     await drain(tester);
 
-    expect(find.byType(TransitRouteDetailSheet), findsNothing);
     expect(
       find.byType(TransitRoutesSheet),
-      findsOneWidget,
-      reason: '견주던 목록이 남아야 한다',
+      findsNothing,
+      reason: '카드를 누르면 그 자리에서 목록이 닫힌다',
     );
-    expect(find.byType(TransitSummaryCard), findsNothing);
+    expect(previewed(tester).fare, 1600);
   });
 
-  testWidgets('상세의 안내 시작이 안내까지 건다', (WidgetTester tester) async {
+  testWidgets('카드를 고르면 안내는 아직 안 걸린 채 요약 카드로 돌아온다', (WidgetTester tester) async {
+    await tapTransit(
+      tester,
+      TransitRoutes.ok([_itinerary(1500), _itinerary(1600)]),
+    );
+    await selectFirstCandidate(tester);
+
+    expect(find.byType(TransitRoutesSheet), findsNothing);
+    expect(
+      find.byType(TransitSummaryCard),
+      findsOneWidget,
+      reason: '목록이 닫혔으니 카드가 돌아온다',
+    );
+    expect(
+      find.descendant(
+        of: find.byType(TransitSummaryCard),
+        matching: find.text('안내 시작'),
+      ),
+      findsOneWidget,
+      reason: '고르는 것과 안내를 거는 것은 다른 동작이다',
+    );
+  });
+
+  testWidgets('요약 카드의 안내 시작이 안내까지 건다', (WidgetTester tester) async {
     await tapTransit(
       tester,
       TransitRoutes.ok([_itinerary(1500), _itinerary(1600)]),

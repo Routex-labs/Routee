@@ -12,8 +12,11 @@ import 'package:navigation_client/service_locator.dart';
 import 'package:navigation_client/theme/app_theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// 자동차를 보고 나서 대중교통으로 갈아탄 뒤 안내를 시작하면, **카메라가
-/// 자동차 따라가기로 들어가는지**에 대한 회귀 테스트.
+/// 안내를 시작할 때 **카메라가 나를 따라가는지**에 대한 회귀 테스트.
+///
+/// 규칙은 둘이다 — **걷거나 운전하면 따라가고, 대중교통은 아니다.** 타고 가는
+/// 구간은 내가 걷는 것이 아니라, 카메라가 나를 확대해 따라가면 여정 전체가
+/// 화면 귀퉁이로 밀린다.
 ///
 /// 증상: 대중교통 상세의 `안내 시작` 직후 지도가 사용자 위치로 끌려가
 /// 경로가 화면 귀퉁이로 밀렸다. 원인은 `_routeIsDriving`가 자동차 화면에서
@@ -110,6 +113,48 @@ void main() {
       find.text('현재 위치를 아직 못 잡았습니다. 신호가 잡히면 그 자리로 지도를 옮깁니다.'),
       findsNothing,
       reason: '대중교통 안내가 자동차 따라가기(startFollowingCurrentLocation)를 켰다',
+    );
+  });
+
+  testWidgets('도보 안내를 시작하면 카메라가 나를 따라간다', (WidgetTester tester) async {
+    // 한동안 따라가기가 **자동차에만** 걸려 있었다. 그래서 걷는 사람은 `안내
+    // 시작`을 눌러도 화면이 경로 전체를 내려다보는 그대로였다 — 시작한 줄
+    // 모르겠고, 따라가야 할 화면으로도 안 읽혔다.
+    //
+    // 위 테스트와 **같은 자리를 거꾸로 읽는다**: 좌표가 없을 때 따라가기가
+    // 켜지면 그 문구가 뜬다. 좌표를 안 주는 이유도 같다 — 켜졌는지가 화면에
+    // 드러나는 유일한 자리다.
+    final key = GlobalKey<OutdoorMapBodyState>();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light,
+        home: Scaffold(body: OutdoorMapBody(key: key)),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 100));
+
+    // 좌표가 하나뿐인 경로다. 안내 시작 가드는 2개 이상일 때만 위치를 묻는다 —
+    // 좌표 없이도 시작 갈래까지 들어가려면 그 가드를 지나야 한다.
+    await key.currentState!.showPlannedRoadRoute(
+      DirectionsRoute(
+        points: const [somewhere],
+        distanceMeters: 400,
+        durationSeconds: 300,
+      ),
+      origin: somewhere,
+      destination: somewhere,
+      label: '어딘가',
+      driving: false,
+    );
+    await tester.pump();
+
+    await key.currentState!.startGuidanceForPickedRoute();
+    await tester.pump();
+
+    expect(
+      find.text('현재 위치를 아직 못 잡았습니다. 신호가 잡히면 그 자리로 지도를 옮깁니다.'),
+      findsOneWidget,
+      reason: '도보 안내를 시작했는데 카메라가 내 자리로 오지 않았다',
     );
   });
 }

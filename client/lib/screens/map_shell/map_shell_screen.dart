@@ -815,6 +815,11 @@ class _MapShellScreenState extends State<MapShellScreen> {
           : null,
       facilitiesActive: _facilitiesSheetOpen,
       bottomOverlayLiftPx: _bottomOverlayLiftPx(context),
+      // 바닥에 도킹하는 카드는 **하단 바와 같은 값**으로 탭 줄을 비킨다
+      // ([_buildBottomBar]도 이 값을 먼저 더한다). 두 곳이 따로 세면 한쪽만
+      // 고쳐지는 날이 온다.
+      bottomCardLiftPx: _tabBarLiftPx(context),
+      topChromeBottomPx: _topBarBottomPx,
       // 실내 화면과 같은 선택을 넘긴다. 야외 지도도 실내 진입
       // 오버레이가 켜지면 같은 도면을 그리므로, 안 넘기면 칩을
       // 눌러도 강조가 안 뜬다.
@@ -865,7 +870,18 @@ class _MapShellScreenState extends State<MapShellScreen> {
       // (resizeToAvoidBottomInset: false), 여기서 바닥을 직접 올려 검색
       // 패널이 키보드 밑으로 들어가지 않게 한다. 예전에는 상단 바 높이를
       // 상수로 가정해 별도 계산했지만, 이제는 Column의 실제 높이를 쓴다.
-      bottom: MediaQuery.viewInsetsOf(context).bottom,
+      //
+      // **탭 줄도 같은 이유로 비킨다.** 목록은 [Flexible]이라 자리가 있는 만큼
+      // 늘어나는데, 그 자리를 화면 끝까지 주면 마지막 줄이 탭 줄 뒤로 들어간다
+      // (`ㄱ`부터 치고 목록이 길어지면 늘 그랬다).
+      //
+      // **더하지 않고 큰 쪽을 쓴다.** 키보드는 탭 줄을 통째로 덮으므로
+      // (`resizeToAvoidBottomInset: false`라 탭 줄은 그 밑에 그대로 있다) 둘을
+      // 더하면 키보드가 올라온 동안 패널이 탭 줄 높이만큼 떠 버린다.
+      bottom: math.max(
+        MediaQuery.viewInsetsOf(context).bottom,
+        _tabBarLiftPx(context),
+      ),
       // 상태 표시줄 여백은 이 Column 전체가 한 번만 먹는다. 예전에는
       // MapTopBar가 자기 안에서 SafeArea를 썼는데, 그 위에 다른 줄(이동
       // 수단)이 오는 순간 둘이 각자 여백을 먹어 간격이 두 배가 된다.
@@ -1092,12 +1108,17 @@ class _MapShellScreenState extends State<MapShellScreen> {
       // 탭 줄은 늘 바닥에 있으므로 그 높이는 **더한다**. 나머지 둘(ETA 카드·시설
       // 시트)은 같은 자리를 두고 다투므로 높은 쪽 하나만 쓴다 — 더하면 둘 다 떠
       // 있을 때 바가 화면 밖으로 밀린다.
-      bottom:
-          _tabBarLiftPx(context) +
-          math.max(
-            routeVisible ? _etaBarLiftHeight : 0,
-            _facilitiesSheetLiftPx(context),
-          ),
+      // 시설 시트가 떠 있으면 **그 높이만** 쓴다. 시트는 라우트라 탭 줄을 이미
+      // 덮고 있어, 탭 줄까지 더하면 바가 시트에서 그만큼 떠 버린다
+      // ([_bottomOverlayLiftPx]와 같은 이유·같은 계산이다). 바는 제 SafeArea로
+      // 올라오므로 안전영역은 여기서 뺀다.
+      bottom: _facilitiesSheetLiftPx(context) > 0
+          ? math.max(
+              0,
+              _facilitiesSheetLiftPx(context) -
+                  MediaQuery.paddingOf(context).bottom,
+            )
+          : _tabBarLiftPx(context) + (routeVisible ? _etaBarLiftHeight : 0),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1152,6 +1173,25 @@ class _MapShellScreenState extends State<MapShellScreen> {
     );
   }
 
+  /// 상단 **바**가 끝나는 y(논리 px). 못 재면 0.
+  ///
+  /// 경로 전체를 담을 때 위로 비울 높이다. 상수로 두면 안 되는 이유는 높이가
+  /// 상태마다 달라서다 — 검색창 한 줄일 때와 길찾기 두 칸 + 이동 수단 줄일 때가
+  /// 크게 차이 나서, 상수(120)로 맞춰 뒀더니 길찾기 화면에서 경로의 시작점이
+  /// 바 뒤로 잘렸다.
+  ///
+  /// **재는 것은 [MapTopBar] 하나다.** 그 위 Column 전체를 재면 검색 결과·후보
+  /// 목록([Flexible])까지 딸려 들어가, 목록이 펼쳐진 순간 측정값이 화면 높이가
+  /// 되고 경로가 아래로 짓눌려 카드 뒤로 통째로 들어간다(실기기에서 그렇게 깨졌다).
+  ///
+  /// **값이 아니라 함수로 넘긴다** — 지도가 카메라를 맞추는 그 시점에 재야 방금
+  /// 두 칸으로 늘어난 바를 잰다.
+  double _topBarBottomPx() {
+    final box = _topBarKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return 0;
+    return box.localToGlobal(Offset.zero).dy + box.size.height;
+  }
+
   /// 탭 줄이 먹는 높이. 안전영역까지 합친 값이라 위에 얹히는 것들이 이만큼
   /// 띄우면 정확히 탭 줄 위에 앉는다.
   double _tabBarLiftPx(BuildContext context) => _guidanceActive
@@ -1163,16 +1203,22 @@ class _MapShellScreenState extends State<MapShellScreen> {
   /// **안전영역을 빼고 준다** — 받는 쪽이 제 [SafeArea]로 이미 그만큼 올라와
   /// 있어서, 여기서 더하면 두 번 세어 선택기가 붕 뜬다.
   ///
-  /// 탭 줄은 늘 바닥에 있으므로 **더하고**, 그 위를 다투는 둘(시설 시트·이슈
-  /// 다이어리 판)은 높은 쪽만 쓴다. 판은 **접힌 높이만** 센다 — 펼치면 화면의
-  /// 3분의 2라, 거기까지 선택기를 올리면 화면 한가운데에 매달린다. 펼친 동안은
-  /// 층이 아니라 행사를 보는 중이다.
-  double _bottomOverlayLiftPx(BuildContext context) =>
-      (_guidanceActive ? 0 : kMapTabBarHeight) +
-      math.max(
-        _facilitiesSheetLiftPx(context),
-        _issueDiaryVisible ? IssueDiaryPanel.peekHeight : 0,
-      );
+  /// **시설 시트는 라우트라 탭 줄 위에 그려진다** — 그 높이 안에 탭 줄도 안전영역도
+  /// 이미 들어 있다. 둘을 또 더했더니 층 선택기와 위치 버튼이 시트에서 한 뼘쯤
+  /// 떠서, 시트와 아무 상관 없는 자리에 매달린 것처럼 보였다(실기기 확인).
+  ///
+  /// 이슈 다이어리 판은 반대다. 라우트가 아니라 탭 줄 **위에** 앉는 chrome이라
+  /// 둘을 더해야 판 위에 선다. 판은 **접힌 높이만** 센다 — 펼치면 화면의 3분의
+  /// 2라, 거기까지 선택기를 올리면 화면 한가운데에 매달린다. 펼친 동안은 층이
+  /// 아니라 행사를 보는 중이다.
+  double _bottomOverlayLiftPx(BuildContext context) {
+    final facilities = _facilitiesSheetLiftPx(context);
+    if (facilities > 0) {
+      return math.max(0, facilities - MediaQuery.paddingOf(context).bottom);
+    }
+    return (_guidanceActive ? 0 : kMapTabBarHeight) +
+        (_issueDiaryVisible ? IssueDiaryPanel.peekHeight : 0);
+  }
 
   /// 지금 켜져 있는 것을 탭 줄에 표시한다. 아무것도 아니면 지도가 켜진 자리다.
   MapTab get _activeTab => switch (null) {

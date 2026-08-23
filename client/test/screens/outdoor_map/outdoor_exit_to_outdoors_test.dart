@@ -291,6 +291,82 @@ void main() {
 
     await settleSensorWarmup(tester);
   });
+
+  /// 확대해서 도면만 편 상태를 만든다. **GPS는 계속 건물 밖이다** — 책상에서
+  /// `starbucks`를 검색해 도면을 보는 것과 같은 상태다.
+  Future<void> openFloorPlanWithoutGps(
+    WidgetTester tester,
+    StreamController<Position> positions,
+  ) async {
+    watchPosition = () => positions.stream;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light,
+        home: Scaffold(body: OutdoorMapBody()),
+      ),
+    );
+    await drain(tester);
+    positions.add(fix(wellOutside, 8));
+    await tester.pump(const Duration(milliseconds: 50));
+    await drain(tester);
+    tester
+        .state<OutdoorMapBodyState>(find.byType(OutdoorMapBody))
+        // ignore: invalid_use_of_visible_for_testing_member
+        .enterIndoorForTest();
+    await drain(tester);
+    expect(
+      find.byType(FloorSelector),
+      findsOneWidget,
+      reason: '테스트 전제(확대로 도면을 폄)가 성립하지 않았다',
+    );
+  }
+
+  testWidgets('GPS가 안이라고 말한 적 없으면 밖 좌표가 도면을 접지 않는다', (
+    WidgetTester tester,
+  ) async {
+    // **들여보낸 쪽만 내보낼 수 있다.** 한동안은 "실내 위치가 찍혀 있으면"도
+    // 이탈 근거였는데, 그래서 도면을 펴 놓고 손으로 위치를 지정하는 순간 다음
+    // 좌표 한 건이 도면을 접고 카메라를 GPS로 끌고 갔다(실기기 확인). 사람이
+    // 직접 찍은 것을 센서 판정이 뒤집으면 안 된다.
+    final positions = StreamController<Position>.broadcast();
+    await openFloorPlanWithoutGps(tester, positions);
+
+    positions.add(fix(wellOutside, 8));
+    await tester.pump(const Duration(milliseconds: 50));
+    await drain(tester);
+
+    expect(
+      find.byType(FloorSelector),
+      findsOneWidget,
+      reason: 'GPS가 들여보낸 적 없는 도면을 GPS가 접으면 손으로 찍은 위치가 사라진다',
+    );
+  });
+
+  testWidgets('확대로 들어왔어도 GPS가 안을 확인한 뒤에는 나가면 접힌다', (
+    WidgetTester tester,
+  ) async {
+    // 위 규칙을 "진입 시점"으로만 좁히면 **걸어 들어온 사람을 놓친다** — 확대가
+    // 먼저 켜지고 좌표가 뒤따르는 순서가 실제로 있다. 기준은 "좌표가 이 실내
+    // 상태를 안이라고 확인한 적 있는가"다.
+    final positions = StreamController<Position>.broadcast();
+    await openFloorPlanWithoutGps(tester, positions);
+
+    positions.add(fix(entrance, 8));
+    await tester.pump(const Duration(milliseconds: 50));
+    await drain(tester);
+    expect(
+      find.byType(FloorSelector),
+      findsOneWidget,
+      reason: '테스트 전제(안 좌표로는 도면이 그대로)가 성립하지 않았다',
+    );
+
+    positions.add(fix(wellOutside, 8));
+    await tester.pump(const Duration(milliseconds: 50));
+    await drain(tester);
+    expect(find.byType(FloorSelector), findsNothing);
+
+    await settleSensorWarmup(tester);
+  });
 }
 
 class _GraphBuildingRepository implements BuildingRepository {

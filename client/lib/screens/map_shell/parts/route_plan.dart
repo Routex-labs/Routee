@@ -55,6 +55,9 @@ extension _MapShellRoutePlan on _MapShellScreenState {
     RoutePlanField? focusField,
   }) async {
     _closeSearch();
+    // 이 함수는 [_onRouteFieldFocused]를 거치지 않고 칸을 직접 연다. 시트를
+    // 걷는 일도 그래서 여기 한 번 더 있다([_closeSheetsUnderTopPanel]).
+    _closeSheetsUnderTopPanel();
     // 자동완성 원본은 여기서 한 번만 받아 둔다. 결과를 기다리지 않으므로
     // 목록은 먼저 뜨고, 도착하면 후보 줄만 뒤늦게 채워진다.
     unawaited(_loadRouteStoreIndex());
@@ -131,6 +134,8 @@ extension _MapShellRoutePlan on _MapShellScreenState {
 
   void _onRouteFieldFocused(RoutePlanField field, String query) {
     if (_routeEditingField == field) return;
+    // 후보 목록도 검색 패널과 **같은 자리**를 쓴다([_closeSheetsUnderTopPanel]).
+    _closeSheetsUnderTopPanel();
     setState(() => _routeEditingField = field);
     unawaited(_searchRouteCandidates(query));
   }

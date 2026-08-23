@@ -45,7 +45,6 @@ void main() {
         home: Scaffold(
           body: TransitRoutesSheet(
             routes: routes,
-            destinationLabel: '목적지',
             onCloseAll: () {},
             onPreview: (_) {},
           ),

@@ -35,8 +35,21 @@ extension _MapShellSearch on _MapShellScreenState {
     setState(() => _reachByNodeId = reach);
   }
 
+  /// 상단 패널(검색 결과·길찾기 후보)이 켜지기 직전에 **떠 있는 시트를 걷는다.**
+  ///
+  /// 그 패널은 라우트가 아니라 화면 위쪽 표면이라 [SheetStackGuard]가 세지
+  /// 못한다. 시트는 아래쪽에 그대로 남아 **두 장이 한 화면에 겹친다** — 매장
+  /// 상세를 열어 둔 채 검색창을 눌러 치면 결과 목록과 상세가 함께 떴다(실기기
+  /// 확인). 시트를 여는 쪽은 이미 반대 방향을 지키고 있다([_closeSearch]).
+  ///
+  /// **입구마다 막지 않는다.** 시트를 걷는 일은 관찰자 한 곳이 맡고
+  /// ([SheetStackGuard.closeOpenSheets]), 여기서는 "패널이 켜진다"만 알린다 —
+  /// 시트가 늘어도 이 줄은 그대로다.
+  void _closeSheetsUnderTopPanel() => sheetStackGuard.closeOpenSheets();
+
   void _activateSearch() {
     if (_searchActive) return;
+    _closeSheetsUnderTopPanel();
     setState(() {
       _searchActive = true;
       // **실내 도면을 보는 중에도 바깥을 함께 찾는다.** 실내일 때 껐더니 기능이

@@ -88,7 +88,19 @@ extension _MapShellCategory on _MapShellScreenState {
     _categorySheetClosing = showing;
     final picked = await showing;
     if (identical(_categorySheetClosing, showing)) _categorySheetClosing = null;
-    if (_closeSheetChainRequested || picked == null || !mounted) return false;
+    if (!mounted) return false;
+    if (_closeSheetChainRequested || picked == null) {
+      // **목록이 그냥 닫혔다 — 첫 매장에 걸어 둔 강조를 여기서 걷는다.**
+      // 카메라를 그 매장으로 옮기면서 강조도 함께 서는데
+      // ([_focusCategoryFirstStore] → `focusStore`), 지우는 자리가 매장 상세
+      // 쪽에만 있었다. 그래서 목록을 X로 닫으면 그 칸 하나가 도면에 남고,
+      // 칩을 꺼도 남아 되돌릴 수단이 화면에서 사라졌다(실기기 확인).
+      //
+      // **상세로 이어지는 아래 갈래에서는 지우지 않는다** — 그쪽이 자기
+      // 매장으로 곧바로 다시 세우므로, 여기서 지우면 한 프레임이 빈다.
+      _outdoorKey.currentState?.clearHighlight();
+      return false;
+    }
     return _showStoreInfo(picked, focusOnMap: true);
   }
 

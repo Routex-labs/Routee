@@ -32,6 +32,29 @@ class SheetStackGuard extends NavigatorObserver {
   int get caughtStackings => _caught;
   int _caught = 0;
 
+  /// 지금 떠 있는 시트를 **전부 걷는다.** 걷은 장수를 돌려준다.
+  ///
+  /// 시트가 아닌 라우트(전체화면·다이얼로그)는 애초에 세지 않으므로 건드리지
+  /// 않는다 — 예외의 기준이 [didPush]와 같은 한 곳에 있다.
+  ///
+  /// 상단 패널(검색·길찾기 후보)이 켜질 때 셸이 부른다. 그 패널은 라우트가 아닌
+  /// 화면 위쪽 표면이라 이 관찰자가 세지 못하는데, 시트는 아래쪽에 그대로 남아
+  /// **두 표면이 한 화면에 겹친다**(실기기 확인 — 매장 상세를 열어 둔 채 검색하면
+  /// 결과 목록과 상세가 함께 떴다).
+  ///
+  /// `pop`이 아니라 `removeRoute`인 이유는 겹침을 걷을 때와 같다 — `PopScope`를
+  /// 깨우면 "사용자가 끌어내려 닫았다"는 신호가 되어 chain 전체가 접힌다.
+  int closeOpenSheets() {
+    if (_open.isEmpty) return 0;
+    final closing = _open.toList();
+    _open.clear();
+    _publish();
+    for (final route in closing) {
+      route.navigator?.removeRoute(route);
+    }
+    return closing.length;
+  }
+
   /// 테스트가 앱을 새로 띄울 때 부른다 — 앞 테스트가 두고 간 라우트는 이미
   /// 버려진 Navigator의 것이라 세면 안 된다.
   @visibleForTesting

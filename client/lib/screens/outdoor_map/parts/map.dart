@@ -9,6 +9,7 @@ part of '../outdoor_map_screen.dart';
 extension OutdoorMapMap on OutdoorMapBodyState {
   /// 카메라를 [position]으로 옮긴다. [zoom]을 주면 그 값으로 확대하고, 없으면
   /// 지금 배율을 유지한다 — 따라가는 동안 사용자가 맞춘 배율을 빼앗지 않는다.
+  /// bearing·tilt는 [animateCameraToPoint]가 항상 정북·평면으로 되돌린다.
   Future<void> _moveCameraToUser(Position position, {double? zoom}) async {
     final controller = _mapController;
     if (controller == null || !_styleReady) return;

@@ -58,7 +58,6 @@ import '../../models/building/building_graph.dart';
 import '../../models/route/directions_route.dart';
 import '../../widgets/directions_route_options_panel.dart';
 import '../../widgets/transit_style.dart' show formatTransitFare;
-import 'widgets/directions_route_detail_sheet.dart';
 import '../../models/building/floor_graph.dart';
 import '../../models/building/floor_plan.dart';
 import '../../models/route/indoor_route.dart';
@@ -243,6 +242,8 @@ class OutdoorMapBody extends StatefulWidget {
     this.onFacilitiesTap,
     this.facilitiesActive = false,
     this.bottomOverlayLiftPx = 0,
+    this.bottomCardLiftPx = 0,
+    this.topChromeBottomPx,
     this.categorySelection,
     this.onFloorChanged,
     this.onFloorTransitionChanged,
@@ -357,6 +358,19 @@ class OutdoorMapBody extends StatefulWidget {
   /// 지도가 시트를 아는 대신 **높이만 값으로 받는다.** 시트가 늘거나 바뀌어도
   /// 이 화면은 그대로다.
   final double bottomOverlayLiftPx;
+
+  /// 바닥에 도킹하는 카드(도착·ETA·대중교통 요약)를 **탭 줄 위로** 올리는 높이.
+  ///
+  /// [bottomOverlayLiftPx]와 **다른 값이다.** 그쪽은 안전영역을 빼고 주지만
+  /// (받는 층 선택기가 제 [SafeArea]로 이미 올라와 있다), 카드는 화면 바닥까지
+  /// 닿는 표면이라 탭 줄이 먹는 높이를 안전영역까지 통째로 비켜야 한다. 셸의
+  /// `_tabBarLiftPx`가 그 값이고, 안내가 시작되면 탭 줄이 접히므로 0이 된다.
+  final double bottomCardLiftPx;
+
+  /// 상단 바가 끝나는 y를 **재 주는 함수.** 없으면 상수로 대신한다
+  /// ([routeFitTopInsetPx]). 값이 아니라 함수인 이유와 무엇을 재야 하는지는
+  /// 셸의 `_topBarBottomPx`에 있다.
+  final double Function()? topChromeBottomPx;
 
   /// 지금 카테고리 필터에서 고른 값. 실내 진입 오버레이의 매장 강조에 쓴다.
   ///
@@ -1047,6 +1061,13 @@ class OutdoorMapBodyState extends State<OutdoorMapBody> {
       unawaited(_applyCategoryFilter());
       // 시설 선택은 타일 필터가 아니라 강조 소스가 그린다([_highlightedPolygons]).
       unawaited(_syncHighlightLayer());
+      // 칠하는 것만으로는 부족하다 — 그 칸이 화면 안에 있어야 칠한 것이 보인다
+      // ([_fitCameraToFacilityHighlight]). 소분류가 바뀔 때만 움직인다: 대분류만
+      // 고른 상태는 칠할 것이 없어 옮길 이유도 없다.
+      if (widget.categorySelection?.subcategory !=
+          oldWidget.categorySelection?.subcategory) {
+        unawaited(_fitCameraToFacilityHighlight());
+      }
     }
   }
 
@@ -1147,12 +1168,16 @@ class OutdoorMapBodyState extends State<OutdoorMapBody> {
   /// 한 프레임 떴다 사라져, 정작 읽어야 할 사람이 못 읽는다.
   EscalatorDetectionEvent? _lastEscalatorEvent;
 
-  /// 이번 실내 상태가 **자동 진입**으로 켜졌는지.
+  /// 이번 실내 상태를 **GPS가 "안"이라고 확인했는지.**
   ///
   /// 자동 이탈은 자동 진입을 되돌리기 위한 것이다. 사용자가 건물을 직접 탭해서
   /// 도면을 연 경우까지 자동으로 닫으면, 입구 앞에 서서 층 도면을 보려던 사람의
   /// 화면이 신호가 잡히는 순간 제멋대로 닫힌다.
-  bool _indoorEnteredByGps = false;
+  ///
+  /// **"들여보냈는가"가 아니라 "안이라고 말한 적 있는가"다.** 확대해서 먼저
+  /// 도면을 연 뒤 좌표가 따라오는 순서가 실제로 있는데, 진입 시점만 보면 그
+  /// 사람은 영영 자동 이탈 밖에 남는다([_applyBuildingVerdict]).
+  bool _indoorConfirmedByGps = false;
 
   /// 이번 진입에서 "몇 층에 계신가요?"를 이미 물었는지([_askEntryFloor]).
   ///
