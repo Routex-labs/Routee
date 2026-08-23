@@ -548,14 +548,27 @@ void main() {
       await tester.pumpAndSettle();
       final afterFocus = controller.offset;
 
-      // 키보드가 올라온다.
-      tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+      // **한 번에 300으로 올리지 않는다.** 실기기의 키보드는 애니메이션이라
+      // 첫 틱이 10px 남짓이고(S23 실측), 그 순간에는 아래에 비워 둔 자리도
+      // 그만큼뿐이라 스크롤이 목표까지 못 간다. 한 걸음으로 재면 그 잘림이
+      // 안 잡혀서, 고쳐지지 않은 코드도 통과하던 자리다.
+      for (final inset in [12.0, 90.0, 200.0, 300.0]) {
+        tester.view.viewInsets = FakeViewPadding(bottom: inset);
+        await tester.pump(const Duration(milliseconds: 16));
+      }
       await tester.pumpAndSettle();
 
       expect(
         controller.offset,
         greaterThan(afterFocus),
         reason: '키보드가 올라온 뒤 검색창을 위로 올려야 한다',
+      );
+      // 재는 것은 스크롤 숫자가 아니라 **눈에 보이는가**다. 뷰포트가 600이고
+      // 키보드가 300이면 보이는 곳은 y<300뿐이다.
+      expect(
+        tester.getRect(find.byType(TextField)).bottom,
+        lessThan(300),
+        reason: '검색창이 키보드 위에 온전히 서야 한다',
       );
     });
 
