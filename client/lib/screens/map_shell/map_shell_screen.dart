@@ -1107,12 +1107,17 @@ class _MapShellScreenState extends State<MapShellScreen> {
       // 탭 줄은 늘 바닥에 있으므로 그 높이는 **더한다**. 나머지 둘(ETA 카드·시설
       // 시트)은 같은 자리를 두고 다투므로 높은 쪽 하나만 쓴다 — 더하면 둘 다 떠
       // 있을 때 바가 화면 밖으로 밀린다.
-      bottom:
-          _tabBarLiftPx(context) +
-          math.max(
-            routeVisible ? _etaBarLiftHeight : 0,
-            _facilitiesSheetLiftPx(context),
-          ),
+      // 시설 시트가 떠 있으면 **그 높이만** 쓴다. 시트는 라우트라 탭 줄을 이미
+      // 덮고 있어, 탭 줄까지 더하면 바가 시트에서 그만큼 떠 버린다
+      // ([_bottomOverlayLiftPx]와 같은 이유·같은 계산이다). 바는 제 SafeArea로
+      // 올라오므로 안전영역은 여기서 뺀다.
+      bottom: _facilitiesSheetLiftPx(context) > 0
+          ? math.max(
+              0,
+              _facilitiesSheetLiftPx(context) -
+                  MediaQuery.paddingOf(context).bottom,
+            )
+          : _tabBarLiftPx(context) + (routeVisible ? _etaBarLiftHeight : 0),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1178,16 +1183,22 @@ class _MapShellScreenState extends State<MapShellScreen> {
   /// **안전영역을 빼고 준다** — 받는 쪽이 제 [SafeArea]로 이미 그만큼 올라와
   /// 있어서, 여기서 더하면 두 번 세어 선택기가 붕 뜬다.
   ///
-  /// 탭 줄은 늘 바닥에 있으므로 **더하고**, 그 위를 다투는 둘(시설 시트·이슈
-  /// 다이어리 판)은 높은 쪽만 쓴다. 판은 **접힌 높이만** 센다 — 펼치면 화면의
-  /// 3분의 2라, 거기까지 선택기를 올리면 화면 한가운데에 매달린다. 펼친 동안은
-  /// 층이 아니라 행사를 보는 중이다.
-  double _bottomOverlayLiftPx(BuildContext context) =>
-      (_guidanceActive ? 0 : kMapTabBarHeight) +
-      math.max(
-        _facilitiesSheetLiftPx(context),
-        _issueDiaryVisible ? IssueDiaryPanel.peekHeight : 0,
-      );
+  /// **시설 시트는 라우트라 탭 줄 위에 그려진다** — 그 높이 안에 탭 줄도 안전영역도
+  /// 이미 들어 있다. 둘을 또 더했더니 층 선택기와 위치 버튼이 시트에서 한 뼘쯤
+  /// 떠서, 시트와 아무 상관 없는 자리에 매달린 것처럼 보였다(실기기 확인).
+  ///
+  /// 이슈 다이어리 판은 반대다. 라우트가 아니라 탭 줄 **위에** 앉는 chrome이라
+  /// 둘을 더해야 판 위에 선다. 판은 **접힌 높이만** 센다 — 펼치면 화면의 3분의
+  /// 2라, 거기까지 선택기를 올리면 화면 한가운데에 매달린다. 펼친 동안은 층이
+  /// 아니라 행사를 보는 중이다.
+  double _bottomOverlayLiftPx(BuildContext context) {
+    final facilities = _facilitiesSheetLiftPx(context);
+    if (facilities > 0) {
+      return math.max(0, facilities - MediaQuery.paddingOf(context).bottom);
+    }
+    return (_guidanceActive ? 0 : kMapTabBarHeight) +
+        (_issueDiaryVisible ? IssueDiaryPanel.peekHeight : 0);
+  }
 
   /// 지금 켜져 있는 것을 탭 줄에 표시한다. 아무것도 아니면 지도가 켜진 자리다.
   MapTab get _activeTab => switch (null) {
