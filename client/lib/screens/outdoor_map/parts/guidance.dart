@@ -324,7 +324,13 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
     //
     // 배율이 갈리는 이유는 보는 거리가 달라서다 — 자동차는 다음 교차로가 화면에
     // 들어와야 하고, 걸을 때는 지금 서 있는 통로가 보여야 한다.
-    if (_transitItinerary == null) {
+    if (_indoorLocationVisible) {
+      // **실내 위치로 서 있는 사람을 GPS로 데려가지 않는다.** 그 좌표는 건물
+      // 밖이라(도면을 펴 놓고 손으로 위치를 찍은 경우가 특히 그렇다) 화면이
+      // 통째로 튀고 보던 도면과 경로를 잃는다. 실내는 걸음이 카메라를 끌고
+      // 간다([_indoorFollowActive]) — 여기서는 첫 자리만 잡아 준다.
+      await _recenterOnCurrentPosition();
+    } else if (_transitItinerary == null) {
       await startFollowingCurrentLocation(
         zoom: _routeIsDriving ? carGuidanceZoom : walkingViewZoom,
       );
