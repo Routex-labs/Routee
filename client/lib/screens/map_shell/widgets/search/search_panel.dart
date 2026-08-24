@@ -21,6 +21,7 @@ import '../../../../models/place/poi_search_result.dart';
 import '../../../../models/place/store_index_entry.dart';
 import '../../../../theme/app_theme.dart';
 import '../../../../domain/category/category_label_order.dart';
+import '../../../../domain/category/category_taxonomy.dart';
 import '../../../../domain/store/reach_label.dart';
 import '../../../../domain/geo/distance_format.dart';
 import '../../../../domain/category/subcategory_label.dart';
@@ -1109,9 +1110,14 @@ class _SearchPanelState extends State<SearchPanel> {
     // 몇인지와 무관하게 묶인 전체다** — 19곳 중 3곳만 도달 가능하다고 `등 3곳`
     // 으로 적으면 없는 사실을 만들어 낸다.
     final count = suggestion.stores.length;
-    final floorLine = count > 1
-        ? '${store.floorName} 등 $count곳'
-        : store.floorName;
+    // **에스컬레이터에는 `도착`을 달지 않는다**([kNonDestinationSubcategoryValues]).
+    // 그 줄에서 경로를 그리면 탑승구가 아니라 옆 복도 노드에서 끝난다. 버튼만
+    // 조용히 빼면 "왜 이 줄만 다르지"가 되므로 층 옆에 그 사실을 적는다.
+    final locationOnly = isNonDestinationSubcategory(store.subcategory);
+    final floorLine = [
+      if (count > 1) '${store.floorName} 등 $count곳' else store.floorName,
+      if (locationOnly) '위치만 표시',
+    ].join(' · ');
     return RoutexListCell(
       key: Key('suggestion-${store.id}'),
       // 돋보기와 핀 2종만 쓰는 네이버 관례를 따른다. 교정 후보만 다른 아이콘으로
@@ -1134,10 +1140,13 @@ class _SearchPanelState extends State<SearchPanel> {
       // 묶인 후보(화장실 19곳)의 `도착`은 **대표 한 곳**으로 간다. 그 대표가
       // 위에서 고른 가장 가까운 곳이라([nearestByWalkingDistance]) 목록을 펼쳐
       // 고르는 것과 같은 답이면서 두 탭이 준다.
-      trailingActionLabel: store.entranceNodeId == null ? null : '도착',
+      trailingActionLabel: store.entranceNodeId == null || locationOnly
+          ? null
+          : '도착',
       trailingActionIcon: RoutexIcons.directions,
       onTrailingAction:
           store.entranceNodeId == null ||
+              locationOnly ||
               widget.onSuggestionDestination == null
           ? null
           : () => widget.onSuggestionDestination!(store),
@@ -1594,12 +1603,17 @@ class _SearchPanelState extends State<SearchPanel> {
     // 아래 첫 줄의 "경로 안내 불가"가 이미 말한다.
     final nodeId = store.nodeId;
     final reach = nodeId == null ? null : widget.reachByNodeId?[nodeId];
+    // 에스컬레이터는 도착지로 삼지 않는다 — 후보 줄과 같은 규칙이고 같은 이유다
+    // ([kNonDestinationSubcategoryValues]).
+    final locationOnly = isNonDestinationSubcategory(store.subcategory);
     // 층은 **항상** 남긴다. 예전에는 reason이 층을 통째로 대체해서, 다섯 행이 같은
     // 문장을 되풀이하는 동안 정작 몇 층인지가 화면에서 사라졌다.
     final reason = distinctiveReason(match?.reason, sharedReasons);
-    final floorLine = nodeId == null
-        ? '${store.floor} · 경로 안내 불가'
-        : store.floor;
+    final floorLine = switch (null) {
+      _ when nodeId == null => '${store.floor} · 경로 안내 불가',
+      _ when locationOnly => '${store.floor} · 위치만 표시',
+      _ => store.floor,
+    };
     final firstLine = reason == null ? floorLine : '$floorLine · $reason';
     return RoutexListCell(
       // 후보 행과 같은 리듬이다. 예전에는 결과 행만 굵은 이름·파란 핀이라, 같은
@@ -1617,9 +1631,10 @@ class _SearchPanelState extends State<SearchPanel> {
       // 끝 버튼은 행 본문과 **다른 동작**이라 터치 타깃이 갈린다(Kit이 나눈다).
       // 노드가 없는 매장은 경로를 못 그리므로 버튼도 없다 — 그 사실은 위
       // `경로 안내 불가`가 이미 말한다.
-      trailingActionLabel: nodeId == null ? null : '도착',
+      trailingActionLabel: nodeId == null || locationOnly ? null : '도착',
       trailingActionIcon: RoutexIcons.directions,
-      onTrailingAction: nodeId == null || widget.onStoreDestination == null
+      onTrailingAction:
+          nodeId == null || locationOnly || widget.onStoreDestination == null
           ? null
           : () => widget.onStoreDestination!(store),
       onPressed: () => widget.onStorePicked(store),

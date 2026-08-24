@@ -121,6 +121,26 @@ void main() {
     });
   });
 
+  group('isNonDestinationSubcategory', () {
+    test('에스컬레이터는 영어·한글 어느 표기로 와도 도착지가 아니다', () {
+      // 층을 옮기는 수단이라 도착 노드가 탑승구가 아닌 옆 복도 노드다. 경로를
+      // 그리면 도착지 이름이 `복도`로 뜬다.
+      expect(isNonDestinationSubcategory('에스컬레이터'), isTrue);
+      expect(isNonDestinationSubcategory('escalator'), isTrue);
+      expect(isNonDestinationSubcategory(' Escalator '), isTrue);
+    });
+
+    test('나머지 시설과 매장은 그대로 도착지가 된다', () {
+      // 엘리베이터는 도착 노드가 탑승구와 같은 자리라 안내가 엉뚱한 곳에서
+      // 끝나지 않는다. 쓸어 담으면 시설 시트에서 갈 수 있는 곳이 하나 준다.
+      expect(isNonDestinationSubcategory('엘리베이터'), isFalse);
+      expect(isNonDestinationSubcategory('화장실'), isFalse);
+      expect(isNonDestinationSubcategory('카페·베이커리'), isFalse);
+      expect(isNonDestinationSubcategory(null), isFalse);
+      expect(isNonDestinationSubcategory('   '), isFalse);
+    });
+  });
+
   group('kHiddenSubcategoryValues', () {
     test('시설 시트가 맡은 셋의 영어·한글 표기를 모두 담는다', () {
       // 한 표기만 넣으면 배포 시차로 다른 표기가 들어온 날 그 시설이 카테고리

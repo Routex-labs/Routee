@@ -292,6 +292,22 @@ void main() {
       expect(destination, isNull);
     });
 
+    testWidgets('에스컬레이터에는 버튼 대신 위치만 표시라고 적는다', (tester) async {
+      // 층을 옮기는 수단이라 도착 노드가 탑승구가 아닌 옆 복도 노드다 — 경로를
+      // 그리면 도착지 이름이 `복도`로 뜬다. 노드는 있으므로 버튼만 조용히 빼면
+      // "왜 이 줄만 다르지"가 되어, 그 사실을 줄에 적는다.
+      await tester.pumpWidget(
+        buildSubject(
+          results: [_result(subcategory: '에스컬레이터', category: '편의시설')],
+          onStoreDestination: (_) {},
+        ),
+      );
+      await settleSearch(tester);
+
+      expect(find.textContaining('위치만 표시'), findsOneWidget);
+      expect(find.byTooltip('도착'), findsNothing);
+    });
+
     testWidgets('입구 노드가 없는 매장에는 버튼을 그리지 않는다', (tester) async {
       // 눌러도 경로를 못 그리는 버튼이다. 그 사실은 행의 `경로 안내 불가`가 말한다.
       await tester.pumpWidget(
