@@ -57,21 +57,50 @@ class CorridorReplay {
             as Map<String, dynamic>;
     final expected = json['expected'] as Map<String, dynamic>;
     return CorridorReplay._(
-      platform: (json['device'] as Map<String, dynamic>)['platform'] as String,
-      expectedSteps: expected['confirmed_steps'] as int,
-      expectedDistanceM: (expected['confirmed_distance_m'] as num).toDouble(),
-      events: [
-        for (final event in json['tracker_input_events'] as List)
-          CorridorReplayEvent._(event as Map<String, dynamic>),
-      ],
-    )..floorPath = [
-      for (final point
-          in (json['floor_local_m_before_matching'] as List? ?? const []))
-        PdrLocalPoint(
-          ((point as List)[0] as num).toDouble(),
-          (point[1] as num).toDouble(),
-        ),
-    ];
+        platform:
+            (json['device'] as Map<String, dynamic>)['platform'] as String,
+        expectedSteps: expected['confirmed_steps'] as int,
+        expectedDistanceM: (expected['confirmed_distance_m'] as num).toDouble(),
+        events: [
+          for (final event in json['tracker_input_events'] as List)
+            CorridorReplayEvent._(event as Map<String, dynamic>),
+        ],
+      )
+      ..floorPath = [
+        for (final point
+            in (json['floor_local_m_before_matching'] as List? ?? const []))
+          PdrLocalPoint(
+            ((point as List)[0] as num).toDouble(),
+            (point[1] as num).toDouble(),
+          ),
+      ];
+  }
+
+  /// 앱에서 바로 내보낸 v10+ 디버그 파일을 fixture 복사 없이 재생한다.
+  /// 회귀 fixture와 달리 기대값은 파일의 [summary]에서 읽는다.
+  static CorridorReplay loadDebugFile(String path) {
+    final json =
+        jsonDecode(File(path).readAsStringSync()) as Map<String, dynamic>;
+    final summary = json['summary'] as Map<String, dynamic>;
+    final device = json['device'] as Map<String, dynamic>? ?? const {};
+    return CorridorReplay._(
+        platform: device['platform'] as String? ?? 'unknown',
+        expectedSteps: summary['confirmed_steps'] as int? ?? 0,
+        expectedDistanceM:
+            (summary['confirmed_distance_m'] as num?)?.toDouble() ?? 0,
+        events: [
+          for (final event in json['tracker_input_events'] as List? ?? const [])
+            CorridorReplayEvent._(event as Map<String, dynamic>),
+        ],
+      )
+      ..floorPath = [
+        for (final point
+            in ((json['paths']
+                        as Map<String, dynamic>?)?['confirmed_pdr_local_m']
+                    as List? ??
+                const []))
+          ?CorridorReplayEvent._point(point),
+      ];
   }
 
   /// 이벤트를 순서대로 먹이고 각 시점의 결과를 모은다.
@@ -101,9 +130,7 @@ class CorridorReplay {
       }
       final observation = event.toObservation();
       if (observation == null) continue;
-      samples.add(
-        CorridorReplaySample._(event, tracker.update(observation)),
-      );
+      samples.add(CorridorReplaySample._(event, tracker.update(observation)));
     }
     return CorridorReplayRun._(this, samples);
   }
@@ -124,8 +151,10 @@ class CorridorReplayEvent {
       (_json['sensor_heading_deg'] as num?)?.toDouble();
   bool get hasHeading => _json['has_heading'] as bool? ?? false;
 
-  PdrLocalPoint? get rawConfirmedPosition => _point(_json['raw_confirmed_position']);
-  PdrLocalPoint? get rawPreviewPosition => _point(_json['raw_preview_position']);
+  PdrLocalPoint? get rawConfirmedPosition =>
+      _point(_json['raw_confirmed_position']);
+  PdrLocalPoint? get rawPreviewPosition =>
+      _point(_json['raw_preview_position']);
 
   /// 실측 당시 tracker가 내놓은 위치. 재생 결과와 비교하면 회귀를 볼 수 있다.
   PdrLocalPoint get resultPosition =>
@@ -153,17 +182,43 @@ class CorridorReplayEvent {
       hasHeading: hasHeading,
       rawConfirmedStepPositions: _points(_json['raw_confirmed_step_positions']),
       rawPreviewTailPositions: _points(_json['raw_preview_tail_positions']),
+      rawPreviewTailPeakIds: _nullableInts(_json['raw_preview_tail_peak_ids']),
+      rawPreviewTailPeakTimesMs: _nullableInts(
+        _json['raw_preview_tail_peak_times_ms'],
+      ),
+      confirmedThroughMs:
+          ((_json['applied_batch'] as Map<String, dynamic>?)?['span_end_ms'])
+              as int?,
+      confirmedThroughPeakId:
+          ((_json['applied_batch']
+                  as Map<String, dynamic>?)?['acknowledged_preview_steps'])
+              as int?,
     );
   }
 
   static PdrLocalPoint? _point(Object? raw) {
+    if (raw is Map) {
+      final east = raw['east_m'] as num?;
+      final north = raw['north_m'] as num?;
+      if (east != null && north != null) {
+        return PdrLocalPoint(east.toDouble(), north.toDouble());
+      }
+    }
     if (raw is! List || raw.length < 2) return null;
-    return PdrLocalPoint((raw[0] as num).toDouble(), (raw[1] as num).toDouble());
+    return PdrLocalPoint(
+      (raw[0] as num).toDouble(),
+      (raw[1] as num).toDouble(),
+    );
   }
 
   static List<PdrLocalPoint> _points(Object? raw) => [
     if (raw is List)
       for (final entry in raw) ?_point(entry),
+  ];
+
+  static List<int?> _nullableInts(Object? raw) => [
+    if (raw is List)
+      for (final entry in raw) entry as int?,
   ];
 }
 

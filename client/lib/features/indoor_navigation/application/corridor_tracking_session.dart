@@ -45,6 +45,10 @@ class CorridorTrackingSession {
     required PdrAnchor? anchor,
     required PdrSnapshot? snapshot,
     required int timestampMs,
+    List<String> preferredRouteEdgeIds = const [],
+    List<String> preferredRouteNodeIds = const [],
+    bool preferRouteContinuity = false,
+    bool lockPreferredRouteTerminal = false,
   }) {
     if (graph == null ||
         graph.edges.isEmpty ||
@@ -71,6 +75,12 @@ class CorridorTrackingSession {
           ? anchor.anchorLocalM
           : transform.toFloor(snapshot.position);
       _tracker = CorridorPositionTracker(graph)
+        ..setPreferredRoute(
+          edgeIds: preferredRouteEdgeIds,
+          nodeIds: preferredRouteNodeIds,
+          preferContinuity: preferRouteContinuity,
+          lockTerminal: lockPreferredRouteTerminal,
+        )
         ..reset(
           initialPosition: initialPosition,
           initialHeadingDeg: floorHeadingDeg,
@@ -88,6 +98,13 @@ class CorridorTrackingSession {
       return _tracker!.result;
     }
 
+    _tracker!.setPreferredRoute(
+      edgeIds: preferredRouteEdgeIds,
+      nodeIds: preferredRouteNodeIds,
+      preferContinuity: preferRouteContinuity,
+      lockTerminal: lockPreferredRouteTerminal,
+    );
+
     final observation = CorridorObservation(
       timestampMs: timestampMs,
       rawConfirmedPosition: transform.toFloor(snapshot.position),
@@ -99,11 +116,14 @@ class CorridorTrackingSession {
       hasHeading: snapshot.hasHeading,
       rawConfirmedStepPositions: _newConfirmedFloorPoints(snapshot, transform),
       rawPreviewTailPositions: _previewTailFloorPoints(snapshot, transform),
+      rawPreviewTailPeakIds: _previewTailPeakIds(snapshot),
       // 좌표만으로는 "이 주황 걸음을 이미 태웠는지"를 알 수 없다. accepted peak
       // 시각을 같은 인덱스로 함께 넘겨야 optimistic cursor가 배치 구성과
       // 무관하게 걸음을 한 번만 적용한다.
       rawPreviewTailPeakTimesMs: previewTailPeakTimesMs(snapshot),
       confirmedThroughMs: snapshot.lastAppliedBatch?.spanEndMs,
+      confirmedThroughPeakId:
+          snapshot.lastAppliedBatch?.acknowledgedPreviewSteps,
     );
     final output = _tracker!.update(observation);
     _lastObservation = observation;
@@ -174,10 +194,30 @@ class CorridorTrackingSession {
     return times.skip(start).toList(growable: false);
   }
 
+  List<int?> _previewTailPeakIds(PdrSnapshot snapshot) {
+    final start = _previewTailStart(snapshot);
+    if (start == null) return const [];
+    final firstPathStep =
+        snapshot.preview.steps - (snapshot.preview.path.length - 1);
+    return [
+      for (var index = start; index < snapshot.preview.path.length; index++)
+        firstPathStep + index,
+    ];
+  }
+
   int? _previewTailStart(PdrSnapshot snapshot) {
     final path = snapshot.preview.path;
     if (path.length < 2) return null;
     final times = snapshot.preview.acceptedPeakTimesMs;
+    final acknowledgedSteps =
+        snapshot.lastAppliedBatch?.acknowledgedPreviewSteps;
+    if (acknowledgedSteps != null) {
+      final firstPathStep = snapshot.preview.steps - (path.length - 1);
+      for (var index = 1; index < path.length; index++) {
+        if (firstPathStep + index > acknowledgedSteps) return index - 1;
+      }
+      return null;
+    }
     final confirmedThroughMs = snapshot.lastAppliedBatch?.spanEndMs;
     if (confirmedThroughMs != null && times.length == path.length) {
       for (var index = 1; index < times.length; index++) {

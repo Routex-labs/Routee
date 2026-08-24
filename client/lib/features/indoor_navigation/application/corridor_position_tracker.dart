@@ -30,6 +30,15 @@ class CorridorPositionTracker {
   final CorridorTrackerConfig config;
   final CorridorNetwork _network;
 
+  /// 현재 안내 경로의 방향 있는 간선 열. 맵매칭을 강제로 고정하지는 않고, 실제
+  /// 보행이 graph 꼭짓점을 잘라 지나갈 때도 정확한 다음 간선 가설을 열어 두는
+  /// 약한 prior로만 쓴다.
+  List<String> _preferredRouteEdgeIds = const [];
+  List<String> _preferredRouteNodeIds = const [];
+  bool _preferRouteContinuity = false;
+  bool _lockPreferredRouteTerminal = false;
+  int _lastRouteStraightEpochIndex = -1;
+
   final List<PdrLocalPoint> _correctedPath = [];
   final List<PdrLocalPoint> _previewPath = [];
 
@@ -76,13 +85,40 @@ class CorridorPositionTracker {
   String? _lastConfirmedNodeId;
   String? _leaderEdgeId;
   int _leaderSign = 1;
+  String? _optimisticLeaderEdgeId;
+  int _optimisticLeaderSign = 1;
 
   /// 이번 갱신에서 확정 위치가 나아간 거리(m).
   double _confirmedAdvanceM = 0;
   bool _leaderRelocated = false;
+  String? _routeStraightEpochNodeId;
   final List<OptimisticStepAdvance> _optimisticStepAdvances = [];
 
   bool get isInitialized => _beam.isNotEmpty;
+
+  void setPreferredRoute({
+    required List<String> edgeIds,
+    required List<String> nodeIds,
+    bool preferContinuity = false,
+    bool lockTerminal = false,
+  }) {
+    final routeChanged =
+        !_sameStrings(_preferredRouteEdgeIds, edgeIds) ||
+        !_sameStrings(_preferredRouteNodeIds, nodeIds);
+    if (nodeIds.length != edgeIds.length + 1) {
+      _preferredRouteEdgeIds = const [];
+      _preferredRouteNodeIds = const [];
+      _preferRouteContinuity = false;
+      _lockPreferredRouteTerminal = false;
+      _lastRouteStraightEpochIndex = -1;
+      return;
+    }
+    _preferredRouteEdgeIds = List.unmodifiable(edgeIds);
+    _preferredRouteNodeIds = List.unmodifiable(nodeIds);
+    _preferRouteContinuity = preferContinuity;
+    _lockPreferredRouteTerminal = lockTerminal;
+    if (routeChanged) _lastRouteStraightEpochIndex = -1;
+  }
 
   Hypothesis? get _best => _beam.isEmpty ? null : _beam.first;
 
@@ -121,6 +157,7 @@ class CorridorPositionTracker {
     junctionDistanceM: _junctionDistanceM,
     junctionCandidateEdgeIds: List.unmodifiable(_junctionCandidateEdgeIds),
     leaderRelocated: _leaderRelocated,
+    routeStraightEpochNodeId: _routeStraightEpochNodeId,
     optimisticStepAdvances: List.unmodifiable(_optimisticStepAdvances),
   );
 
@@ -143,8 +180,12 @@ class CorridorPositionTracker {
     _pendingEdgeId = null;
     _leaderEdgeId = null;
     _leaderSign = 1;
+    _optimisticLeaderEdgeId = null;
+    _optimisticLeaderSign = 1;
     _confirmedAdvanceM = 0;
     _leaderRelocated = false;
+    _routeStraightEpochNodeId = null;
+    _lastRouteStraightEpochIndex = -1;
     _optimisticStepAdvances.clear();
     _lastConfirmedSegmentHeadingDeg = null;
     // 두 beam과 식별자 상태를 함께 초기화한다. 하나만 남기면 새 세션의 첫
@@ -198,11 +239,13 @@ class CorridorPositionTracker {
       0.0,
       observation.confirmedDistanceM - _lastConfirmedDistanceM,
     );
+    final hasConfirmedAdvance = deltaSteps > 0 && deltaDistanceM > 0;
 
     final previousCorrected = _correctedPosition;
     _confirmedAdvanceM = 0;
     _leaderRelocated = false;
-    if (deltaSteps > 0 && deltaDistanceM > 0) {
+    _routeStraightEpochNodeId = null;
+    if (hasConfirmedAdvance) {
       final segments = _rawSegments(
         deltaSteps: deltaSteps,
         deltaDistanceM: deltaDistanceM,
@@ -216,6 +259,7 @@ class CorridorPositionTracker {
       }
       _updateHeadingBias();
       _publishConfirmed(transitionsBefore: transitionsBefore);
+      _beginRouteStraightEpochIfReady();
       _confirmedAdvanceM = (_correctedPosition - previousCorrected).distance;
       // 그래프를 따라 실제로 걸었다면 두 끝점의 직선거리는 보행 경로 길이를
       // 넘을 수 없다. 0.5m 여유를 넘는 차이는 빔 1등 교체로 위치 해석이
@@ -234,12 +278,19 @@ class CorridorPositionTracker {
     _confirmedTraveledM = _lastConfirmedDistanceM;
     _lastPreviewSteps = math.max(_lastPreviewSteps, observation.previewSteps);
 
-    // 확정 → optimistic 순서를 지킨다. 확정이 다른 복도로 옮겨 갔는지 먼저
-    // 판단해야, 이번 프레임의 새 peak를 어느 cursor 위에 태울지가 정해진다.
-    _reconcileOptimistic();
+    // 확정 → optimistic 순서를 지킨다. 단, 새 확정 걸음이 없는 heading/
+    // heartbeat snapshot은 optimistic cursor의 lineage를 바꿀 근거가 아니다.
+    // 이때도 reconcile하면 같은 확정점으로 화면만 반복해서 되감긴다.
+    if (hasConfirmedAdvance) {
+      _reconcileOptimistic(
+        observation.confirmedThroughPeakId ?? observation.confirmedThroughMs,
+      );
+    }
     _applyPreviewPeaks(observation);
     _catchUpOptimisticToConfirmed();
-    _forgetAcknowledgedPeakIds(observation.confirmedThroughMs);
+    _forgetAcknowledgedPeakIds(
+      observation.confirmedThroughPeakId ?? observation.confirmedThroughMs,
+    );
     _publishPreview();
     _updateJunctionState();
     return result;
@@ -348,6 +399,14 @@ class CorridorPositionTracker {
 
     final leftoverM = remainingM - appliedM;
     final nodeId = edge.nodeAtTravelEnd(hypothesis.travelSign);
+    if (_lockPreferredRouteTerminal &&
+        _isPreferredRouteTerminalHypothesis(hypothesis) &&
+        nodeId == _preferredRouteNodeIds.last) {
+      // 정확한 탑승 종점에 도달한 뒤 들어오는 걸음은 다른 복도나 역방향
+      // 간선으로 넘기지 않는다. 거리는 unmatched로 계속 소비하므로 preview
+      // 적산을 잃지 않고, 세션의 탑승 고정/이탈 판정이 이어받을 수 있다.
+      return [advanced.withDeadEnd(leftoverM, 0)];
+    }
     final node = _network.nodes[nodeId];
     if (node == null || depth >= config.maxTransitionsPerSegment) {
       return [advanced.withDeadEnd(leftoverM, config.deadEndPenaltyDeg)];
@@ -420,9 +479,17 @@ class CorridorPositionTracker {
       for (final option in _network.recoveryOptionsFromNode(nodeId)) {
         if (option.edge.id == edge.id) continue;
         if (skipM > _junctionZoneRadiusM(option.edge)) continue;
-        // 관측이 지금 간선보다 이쪽을 더 잘 설명할 때만 후보를 연다.
-        if (headingError(observedHeadingDeg, option.bearingDeg) >=
-            headingError(observedHeadingDeg, currentBearing)) {
+        // 보통은 관측이 지금 간선보다 이쪽을 더 잘 설명할 때만 후보를 연다.
+        // 다만 활성 경로의 **정확한 다음 간선**은 후보만 살린다. graph 꼭짓점을
+        // 잘라 걷는 동안 센서 방향이 늦게 돌아도 경로 가설 자체를 잃지 않는다.
+        final preferred = _isPreferredForwardTransition(
+          edgeId: edge.id,
+          nodeId: nodeId,
+          optionEdgeId: option.edge.id,
+        );
+        if (!preferred &&
+            headingError(observedHeadingDeg, option.bearingDeg) >=
+                headingError(observedHeadingDeg, currentBearing)) {
           continue;
         }
         alternatives.add(
@@ -454,6 +521,21 @@ class CorridorPositionTracker {
       openAt(startNodeId, distanceFromStartM, ahead: false);
     }
     return alternatives;
+  }
+
+  bool _isPreferredForwardTransition({
+    required String edgeId,
+    required String nodeId,
+    required String optionEdgeId,
+  }) {
+    for (var index = 0; index < _preferredRouteEdgeIds.length - 1; index++) {
+      if (_preferredRouteEdgeIds[index] == edgeId &&
+          _preferredRouteNodeIds[index + 1] == nodeId &&
+          _preferredRouteEdgeIds[index + 1] == optionEdgeId) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /// 표시 중인 가설이 전환 구간 안이고 도전자가 그 node에 **연결된** 간선인가.
@@ -536,11 +618,15 @@ class CorridorPositionTracker {
   /// 간선으로 넘어간다 — 그 전환은 붙어 있는 간선이라 위치가 튀지 않는다.
   void _electLeader() {
     if (_beam.isEmpty) return;
-    final globalBest = _beam.first;
+    final observed = normalizeBearing(
+      (_lastConfirmedSegmentHeadingDeg ?? _sensorHeadingDeg) + _headingBiasDeg,
+    );
+    final globalBest = _preferredLeader(_beam, observedHeadingDeg: observed);
     final heldId = _leaderEdgeId;
     if (heldId == null) {
       _leaderEdgeId = globalBest.edge.id;
       _leaderSign = globalBest.travelSign;
+      _putLeaderFirst(globalBest);
       return;
     }
     Hypothesis? held;
@@ -558,11 +644,93 @@ class CorridorPositionTracker {
         globalBest.meanErrorDeg < held.meanErrorDeg - marginDeg) {
       _leaderEdgeId = globalBest.edge.id;
       _leaderSign = globalBest.travelSign;
+      _putLeaderFirst(globalBest);
       return;
     }
-    if (!identical(held, globalBest)) {
-      _beam = [held, ..._beam.where((h) => !identical(h, held))];
+    _putLeaderFirst(held);
+  }
+
+  /// 경로 prior는 간선 ID만 보지 않고 저장 방향까지 맞아야 한다. 같은 복도를
+  /// 반대로 걷는 가설까지 우대하면 실제 유턴을 경로 진행으로 오인한다.
+  bool _isPreferredRouteHypothesis(Hypothesis hypothesis) {
+    return _preferredRouteIndex(hypothesis) != null;
+  }
+
+  int? _preferredRouteIndex(Hypothesis hypothesis) {
+    for (var index = 0; index < _preferredRouteEdgeIds.length; index++) {
+      if (_preferredRouteEdgeIds[index] != hypothesis.edge.id) continue;
+      final fromNodeId = _preferredRouteNodeIds[index];
+      final toNodeId = _preferredRouteNodeIds[index + 1];
+      final expectedSign =
+          hypothesis.edge.fromNodeId == fromNodeId &&
+              hypothesis.edge.toNodeId == toNodeId
+          ? 1
+          : hypothesis.edge.fromNodeId == toNodeId &&
+                hypothesis.edge.toNodeId == fromNodeId
+          ? -1
+          : 0;
+      if (expectedSign == hypothesis.travelSign) return index;
     }
+    return null;
+  }
+
+  bool _isPreferredRouteTerminalHypothesis(Hypothesis hypothesis) {
+    if (_preferredRouteEdgeIds.isEmpty) return false;
+    final lastIndex = _preferredRouteEdgeIds.length - 1;
+    if (_preferredRouteEdgeIds[lastIndex] != hypothesis.edge.id) return false;
+    final fromNodeId = _preferredRouteNodeIds[lastIndex];
+    final toNodeId = _preferredRouteNodeIds[lastIndex + 1];
+    final expectedSign =
+        hypothesis.edge.fromNodeId == fromNodeId &&
+            hypothesis.edge.toNodeId == toNodeId
+        ? 1
+        : hypothesis.edge.fromNodeId == toNodeId &&
+              hypothesis.edge.toNodeId == fromNodeId
+        ? -1
+        : 0;
+    return expectedSign == hypothesis.travelSign;
+  }
+
+  /// 평소에는 작은 점수 여유 안에서만 경로 가설을 우대한다. 정확한 에스컬레이터
+  /// 탑승 접근 중에는 raw 걸음 거리는 그대로 쓰면서 연결된 경로 간선 열을
+  /// 유지한다. 단, 관측이 경로 진행 방향과 [CorridorTrackerConfig.reverseTriggerDeg]
+  /// 이상 반대면 실제 유턴일 수 있으므로 강한 우대를 해제한다. 정확한 탑승점
+  /// 근처에서 terminal lock이 열렸다면 몸을 발판 방향으로 돌리는 동작이므로 이
+  /// 각도 탈출구보다 마지막 경로 간선을 우선한다.
+  Hypothesis _preferredLeader(
+    List<Hypothesis> beam, {
+    required double observedHeadingDeg,
+  }) {
+    final globalBest = beam.first;
+    if (_isPreferredRouteHypothesis(globalBest)) return globalBest;
+    final routeBest = _lockPreferredRouteTerminal
+        ? beam.where(_isPreferredRouteTerminalHypothesis).firstOrNull ??
+              beam.where(_isPreferredRouteHypothesis).firstOrNull
+        : beam.where(_isPreferredRouteHypothesis).firstOrNull;
+    if (routeBest == null) return globalBest;
+    if (_lockPreferredRouteTerminal) return routeBest;
+    if (_preferRouteContinuity) {
+      final routeBearing = routeBest.edge.bearingForTravel(
+        routeBest.progressM,
+        routeBest.travelSign,
+      );
+      if (headingError(observedHeadingDeg, routeBearing) <
+          config.reverseTriggerDeg) {
+        return routeBest;
+      }
+    }
+    return routeBest.meanErrorDeg <=
+            globalBest.meanErrorDeg + config.routePreferenceMarginDeg
+        ? routeBest
+        : globalBest;
+  }
+
+  void _putLeaderFirst(Hypothesis leader) {
+    if (identical(_beam.first, leader)) return;
+    _beam = [
+      leader,
+      ..._beam.where((hypothesis) => !identical(hypothesis, leader)),
+    ];
   }
 
   void _publishConfirmed({required int transitionsBefore}) {
@@ -597,6 +765,82 @@ class CorridorPositionTracker {
     } else {
       _state = CorridorTrackingState.straightTracking;
     }
+  }
+
+  /// 연결된 다음 **경로 간선** 위 전진이 충분히 확인된 뒤 새 직선 epoch를 연다.
+  ///
+  /// node에 닿자마자 열지 않는다. 코너를 안쪽으로 자른 후보와 한 번의 큰 배치가
+  /// 잠깐 1등이 된 경우까지 확정해 버리기 때문이다. 반대로 이 시점을 통과하면
+  /// 이전 간선의 회전·방위 비용은 더 이상 현재 직선의 순위를 눌러서는 안 된다.
+  void _beginRouteStraightEpochIfReady() {
+    final best = _best;
+    if (best == null || best.unmatchedM > 0.5) return;
+    final routeIndex = _preferredRouteIndex(best);
+    if (routeIndex == null ||
+        routeIndex <= 0 ||
+        routeIndex <= _lastRouteStraightEpochIndex) {
+      return;
+    }
+    final entryNodeId = _preferredRouteNodeIds[routeIndex];
+    if (best.lastNodeId != entryNodeId) return;
+    final progressFromEntryM = best.travelSign > 0
+        ? best.progressM
+        : best.edge.lengthM - best.progressM;
+    if (progressFromEntryM + 1e-6 < config.routeStraightEpochMinProgressM) {
+      return;
+    }
+
+    // 같은 간선의 반대 방향까지 포함해 근소한 경쟁자가 남아 있으면 아직 새
+    // 기준으로 삼지 않는다. 경로 prior가 1등을 표시했다는 사실만으로는 부족하다.
+    for (final candidate in _beam) {
+      if (identical(candidate, best) ||
+          _preferredRouteIndex(candidate) == routeIndex) {
+        continue;
+      }
+      if (candidate.meanErrorDeg - best.meanErrorDeg <
+          config.ambiguousMarginDeg) {
+        return;
+      }
+    }
+
+    final committed = [
+      for (final candidate in _beam)
+        if (_preferredRouteIndex(candidate) == routeIndex &&
+            candidate.lastNodeId == entryNodeId)
+          candidate.beginStraightEpoch(rawPoint: _rawConfirmedPosition),
+    ];
+    if (committed.isEmpty) return;
+    _beam = _prune(committed);
+    _leaderEdgeId = best.edge.id;
+    _leaderSign = best.travelSign;
+    _electLeader();
+
+    // 화면 cursor는 되감지 않는다. optimistic 후보들의 현재 위치·path·누적
+    // 선행 거리는 그대로 두고 같은 점수 epoch만 연다. 다음 확정 reconcile이
+    // 연결성을 판정하므로 여기서 경로 후보만 남기는 강제 잠금은 하지 않는다.
+    if (_optimisticBeam.isNotEmpty) {
+      _optimisticBeam = _prune([
+        for (final candidate in _optimisticBeam)
+          candidate.beginStraightEpoch(rawPoint: _rawPreviewPosition),
+      ]);
+      _electOptimisticLeader(
+        observedHeadingDeg: normalizeBearing(
+          (_lastConfirmedSegmentHeadingDeg ?? _sensorHeadingDeg) +
+              _headingBiasDeg,
+        ),
+      );
+    }
+
+    final committedBest = _best!;
+    _correctedPosition = committedBest.edge.pointAt(committedBest.progressM);
+    _correctedPath
+      ..clear()
+      ..addAll(committedBest.path);
+    _lastConfirmedNodeId = committedBest.lastNodeId;
+    _pendingEdgeId = null;
+    _state = CorridorTrackingState.straightTracking;
+    _lastRouteStraightEpochIndex = routeIndex;
+    _routeStraightEpochNodeId = entryNodeId;
   }
 
   /// 1등 가설이 뚜렷할 때만 heading bias를 조금씩 복도 방향으로 당긴다.
@@ -666,7 +910,7 @@ class CorridorPositionTracker {
   /// 배치 수신 자체는 marker 이동 이벤트가 아니다. 확정 빔이 optimistic cursor를
   /// 그래프로 따라잡을 수 있는 한(같은 간선이거나 앞으로 연결된 간선), cursor는
   /// 그대로 둔다 — 그게 "배치가 와도 뒤로 가지 않는다"의 구현이다.
-  void _reconcileOptimistic() {
+  void _reconcileOptimistic(int? confirmedThroughMs) {
     final best = _best;
     if (best == null) {
       _optimisticBeam = const [];
@@ -690,14 +934,26 @@ class CorridorPositionTracker {
     )) {
       return;
     }
+    // preview가 아직 몇 걸음 앞서 있는데 배치가 일부 peak만
+    // 확정했다고 그 선행분을 한번에 폐기하지 않는다. 확정 cursor가
+    // 따라잡은 뒤 재배치하면 보정은 유지하면서 뒤점프만 제한된다.
+    if (_optimisticLeadM > config.optimisticRelocationMaxLeadM) {
+      return;
+    }
     // 그래프로 설명되지 않는 1등 교체. 화면을 옛 복도에 남겨 두면 그때부터
-    // 모든 갱신이 틀린 자리에서 시작하므로 확정 쪽으로 되돌린다.
+    // 모든 갱신이 틀린 자리에서 시작한다. 확정 lineage로 바꾸되,
+    // 아직 확정되지 않은 주황 peak는 새 lineage 위에 다시 올려 선행
+    // 거리를 버리지 않는다. 그냥 rebase만 하면 배치가 올 때마다
+    // marker가 확정점으로 몇 m씩 뒤로 튀었다.
     _leaderRelocated = true;
     _rebaseOptimistic(best);
+    _releasePendingPeakIds(confirmedThroughMs);
   }
 
   void _rebaseOptimistic(Hypothesis confirmedLeader) {
     _optimisticBeam = [confirmedLeader.forPreview()];
+    _optimisticLeaderEdgeId = confirmedLeader.edge.id;
+    _optimisticLeaderSign = confirmedLeader.travelSign;
     _optimisticTraveledM = _confirmedTraveledM;
   }
 
@@ -719,7 +975,7 @@ class CorridorPositionTracker {
         distanceM: movement.distance,
         rawPoint: step.rawPoint,
         peakId: step.peakId,
-        occurredAtMs: step.peakId > 0 ? step.peakId : observation.timestampMs,
+        occurredAtMs: step.occurredAtMs ?? observation.timestampMs,
       );
       _optimisticTraveledM += movement.distance;
     }
@@ -775,6 +1031,7 @@ class CorridorPositionTracker {
     }
     if (next.isEmpty) return;
     _optimisticBeam = _prune(next);
+    _electOptimisticLeader(observedHeadingDeg: observed);
     final leader = _optimisticBest!;
     if (peakId != null && occurredAtMs != null) {
       final runnerUp = _optimisticBeam.length > 1 ? _optimisticBeam[1] : null;
@@ -810,6 +1067,54 @@ class CorridorPositionTracker {
     }
   }
 
+  /// 주황 preview도 확정 빔과 같은 1등 교체 관성을 가진다.
+  ///
+  /// 예전에는 `_prune(next).first`를 바로 화면에 내보내서 코너의 1·2등 점수가
+  /// 근소하게 바뀔 때마다 진입 간선과 진출 간선을 왕복했다. 연결된 코너에서는
+  /// 작은 관성만, 떨어진 간선·반대 방향에는 평시 관성을 써 실제 회전과 이탈은
+  /// 계속 허용한다.
+  void _electOptimisticLeader({required double observedHeadingDeg}) {
+    if (_optimisticBeam.isEmpty) return;
+    final globalBest = _preferredLeader(
+      _optimisticBeam,
+      observedHeadingDeg: observedHeadingDeg,
+    );
+
+    final heldEdgeId = _optimisticLeaderEdgeId;
+    if (heldEdgeId == null) {
+      _optimisticLeaderEdgeId = globalBest.edge.id;
+      _optimisticLeaderSign = globalBest.travelSign;
+      _putOptimisticLeaderFirst(globalBest);
+      return;
+    }
+    final held = _optimisticBeam
+        .where(
+          (hypothesis) =>
+              hypothesis.edge.id == heldEdgeId &&
+              hypothesis.travelSign == _optimisticLeaderSign,
+        )
+        .firstOrNull;
+    final marginDeg = held != null && _isJunctionTurn(held, globalBest)
+        ? config.junctionLeaderSwitchMarginDeg
+        : config.leaderSwitchMarginDeg;
+    if (held == null ||
+        globalBest.meanErrorDeg < held.meanErrorDeg - marginDeg) {
+      _optimisticLeaderEdgeId = globalBest.edge.id;
+      _optimisticLeaderSign = globalBest.travelSign;
+      _putOptimisticLeaderFirst(globalBest);
+      return;
+    }
+    _putOptimisticLeaderFirst(held);
+  }
+
+  void _putOptimisticLeaderFirst(Hypothesis leader) {
+    if (identical(_optimisticBeam.first, leader)) return;
+    _optimisticBeam = [
+      leader,
+      ..._optimisticBeam.where((hypothesis) => !identical(hypothesis, leader)),
+    ];
+  }
+
   /// 처음 보는 peak면 기억하고 true. 이미 태운 peak면 false.
   bool _rememberPreviewPeak(int peakId) {
     if (!_appliedPreviewPeakIdSet.add(peakId)) return false;
@@ -829,6 +1134,21 @@ class CorridorPositionTracker {
       if (oldest < 0 || oldest > confirmedThroughMs) break;
       _appliedPreviewPeakIdSet.remove(_appliedPreviewPeakIds.removeAt(0));
     }
+  }
+
+  /// lineage 재해석 후 현재 tail에 남은 preview peak를 다시 태운다.
+  ///
+  /// 실제 시각 ID는 확정 배치 끝 이후분만 풀고, 시각이 없는 예전
+  /// snapshot의 합성 ID는 tail 자체가 pending 범위이므로 모두 풀어 준다.
+  void _releasePendingPeakIds(int? confirmedThroughMs) {
+    _appliedPreviewPeakIds.removeWhere((peakId) {
+      final pending =
+          peakId < 0 ||
+          confirmedThroughMs == null ||
+          peakId > confirmedThroughMs;
+      if (pending) _appliedPreviewPeakIdSet.remove(peakId);
+      return pending;
+    });
   }
 
   void _publishPreview() {
@@ -919,3 +1239,11 @@ class CorridorPositionTracker {
 
 double _clampSigned(double value, double limit) =>
     value.clamp(-limit, limit).toDouble();
+
+bool _sameStrings(List<String> left, List<String> right) {
+  if (left.length != right.length) return false;
+  for (var index = 0; index < left.length; index += 1) {
+    if (left[index] != right[index]) return false;
+  }
+  return true;
+}
