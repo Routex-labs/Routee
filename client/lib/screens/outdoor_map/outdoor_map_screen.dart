@@ -1857,15 +1857,22 @@ class OutdoorMapBodyState extends State<OutdoorMapBody> {
   /// footprint가 매장보다 9 m 넓어 도면이 프레임에서 치우친다.
   ({String floor, Duration duration})? _pendingFloorFit;
 
-  /// 하단 바 '홈'으로 야외에 돌아왔을 때의 이탈. **오버레이만 끄면 부족하다** —
-  /// 확대된 채면 도면이 그대로 보인다. 카메라도 축소하고 실내 앵커 경로도 지운다.
+  /// 하단 바 '홈'·검색의 "밖에서 찾아보기"로 야외에 돌아왔을 때의 이탈.
+  /// **오버레이만 끄면 부족하다** — 확대된 채면 도면이 그대로 보인다. 카메라도
+  /// 축소하고 실내 앵커 경로도 지운다.
   ///
-  /// [_exitIndoorByOutsideTap]과 달리 **재무장한다**(축소까지 하므로 안전하다).
+  /// 줌 트리거는 **재무장한다**(축소까지 하므로 곧바로 되끌려 들어가지 않는다).
+  /// 반면 GPS 자동 진입은 [_exitIndoorByOutsideTap]과 같은 이유로 **끈다** —
+  /// 건물 안에 서서 나온 사람은 GPS가 여전히 "안"이라, 안 끄면 다음 좌표 한 건이
+  /// 그대로 되끌고 들어간다. 축소는 그 좌표를 막지 못한다.
+  ///
+  /// 영구히 죽지는 않는다 — 정말 걸어 나가면 "밖" 판정이 다시 무장한다.
   Future<void> returnToOutdoorView() async {
     if (!_indoorEntered) return;
     if (_placingPdrAnchor) _setPlacingAnchor(false);
     _clearIndoorRoute();
     _autoIndoorEntryArmed = true;
+    _gpsEntryArmed = false;
     _setIndoorEntered(false);
     final controller = _mapController;
     if (controller == null || !_styleReady) return;
