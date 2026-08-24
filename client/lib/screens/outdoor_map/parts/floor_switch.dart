@@ -25,6 +25,16 @@ extension OutdoorMapFloorSwitch on OutdoorMapBodyState {
     // (지하층처럼 층마다 크기가 크게 다르면 정렬이 눈에 띄게 어긋난다).
     // 카메라는 마지막 탭의 이 함수 호출이 맞춘다.
     if (!mounted || _activeFloor != floor) return;
+    // **편의시설을 종류로 골라 둔 채 층을 바꿨다면 새 층의 그 시설들에 맞춘다.**
+    // 시트를 열어 둔 사람이 묻는 것은 "이 층 어디에 있나"인데, 층 전체 fit은
+    // 그 답을 화면 어딘가의 작은 칸으로 만들어 다시 찾게 한다. 그 층에 그
+    // 종류가 없으면 false라, 아래 층 전체 fit으로 떨어진다.
+    //
+    // 도면을 먼저 기다린다 — 시설 폴리곤은 [_floorPlan]에서 나오고, 그것을
+    // 채우는 것이 이 로드다([_fitCameraToActiveFloor]도 같은 것을 기다린다).
+    await _floorGraphLoad;
+    if (!mounted || _activeFloor != floor) return;
+    if (await _fitCameraToFacilityHighlight()) return;
     // 층 그래프가 도착한 뒤라 [_activeFloorOutlineRing]이 새 층 외곽선을 준다
     // (`_switchOverlayFloor`가 `_loadFloorGraph`까지 기다린다).
     await _fitCameraToActiveFloor(duration: floorSwitchZoomDuration);

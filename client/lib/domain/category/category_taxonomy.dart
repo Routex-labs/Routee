@@ -44,6 +44,32 @@ class SubcategoryOption {
 /// 양쪽에 문자열을 따로 적으면 백엔드가 어휘를 고친 날 한쪽만 조용히 어긋난다.
 const String kFacilityCategory = '편의시설';
 
+/// **도착지로 삼지 않는** 시설 소분류.
+///
+/// 에스컬레이터는 층을 옮기는 **수단이지 목적지가 아니다.** 도착 노드가 탑승구가
+/// 아니라 그 옆 복도 노드라, 경로를 그려 끝까지 태우면 도착지 이름이 `복도`로
+/// 뜬다 — 사용자가 고른 것과 다른 곳에 데려다 놓고 도착했다고 말하는 셈이다.
+/// 화면이 이 시설에 대해 할 수 있는 정직한 일은 **어디 있는지 보여 주는 것**
+/// 하나다(시설 시트에서 고르면 그 자리로 카메라가 가고 도면에 강조가 남는다).
+///
+/// 엘리베이터는 여기 없다 — 같은 성질이지만 도착 노드가 탑승구와 같은 자리라
+/// 안내가 엉뚱한 곳에서 끝나지 않는다. 문제가 확인되면 그때 이 집합에 넣는다.
+///
+/// 값은 [kHiddenSubcategoryValues]와 같은 이유로 영어·한글을 함께 담는다.
+const Set<String> kNonDestinationSubcategoryValues = {
+  'escalator',
+  '에스컬레이터',
+};
+
+/// [subcategory]가 도착지로 삼지 않는 시설인가. 대소문자·앞뒤 공백은 무시한다.
+bool isNonDestinationSubcategory(String? subcategory) {
+  final value = subcategory?.trim().toLowerCase();
+  if (value == null || value.isEmpty) return false;
+  return kNonDestinationSubcategoryValues.any(
+    (hidden) => hidden.toLowerCase() == value,
+  );
+}
+
 /// 필터 pill에서 감추는 소분류. 기준은 "**여기서** 눌러 훑어볼 이유가 있는가"다.
 ///
 /// `주차`(787건)는 편의시설 1,095건의 72%를 혼자 차지해 다른 pill을 묻고,

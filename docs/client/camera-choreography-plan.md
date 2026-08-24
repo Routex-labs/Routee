@@ -39,8 +39,12 @@
 
 **Q1을 "개요만"으로 정하면 빚이 하나 따라온다.** 카메라가 걸음을 따라가지 않는데
 안내 중에는 하단 바가 통째로 접혀([shouldFoldGuidanceChrome]) 사용자가 화면을
-자기 위치로 되돌릴 수단이 없다. 그래서 [`GuidanceRecenterButton`](../../client/lib/screens/outdoor_map/widgets/guidance_recenter_button.dart)을
-함께 넣었다 — 접힌 층 선택기 자리에, 안내 중에만.
+자기 위치로 되돌릴 수단이 없다. 그래서 접힌 하단 바 자리에 **"위치 보정"(GPS)
+버튼 하나만** 남겨 둔다 — 자리도 아이콘도 접히기 전과 같다
+([`parts/ui.dart`](../../client/lib/screens/outdoor_map/parts/ui.dart)의
+`guidance-recenter`). 한동안 여기에 화살표(`Icons.near_me`) 버튼을 따로 두었는데,
+하는 일이 같은 버튼이 화면에 둘이 되어 어느 쪽을 눌러야 내 자리로 가는지가
+갈렸다.
 
 ---
 
@@ -113,12 +117,14 @@ GPS가 잡힐 때마다 자동 계산되는 "건물 입구까지" 경로가 화�
 ### 4.3 카메라 추종은 없다 — 되돌릴 수단이 대신 있다
 
 `_syncPdrCurrentLayer`는 마커 레이어만 갱신한다. 걸어도 카메라는 그대로다.
-개요로 물러선 뒤 사용자가 화면을 되돌리는 수단은 `GuidanceRecenterButton`이다
-(안내 중에만, 접힌 층 선택기 자리).
+개요로 물러선 뒤 사용자가 화면을 되돌리는 수단은 안내 중에도 남는 "위치
+보정"(GPS) 버튼이다(접힌 하단 바 자리, `guidance-recenter`).
 
-그 버튼은 **카메라만 옮긴다.** 이름이 비슷한 "위치 보정"은 PDR 앵커를 다시 잡는
-추정 보정이라 다른 조작이다 — 걷는 도중에 앵커를 다시 잡으면 진행률과 이탈
-판정의 기준이 통째로 바뀐다. 그래서 아이콘도 `Icons.near_me`로 달리 뒀다.
+**같은 버튼이지만 하는 일은 하나 얕다.** 평상시의 위치 보정은 PDR 앵커를 다시
+잡는 추정 보정인데, 걷는 도중에 앵커를 다시 잡으면 진행률과 이탈 판정의 기준이
+통째로 바뀐다. 그래서 안내 중에는 `_recenterOnCurrentPosition`(카메라만)으로
+간다 — 사용자에게는 어느 쪽이든 "내 자리로 돌아간다" 하나라, 버튼을 둘로
+가르지 않는다.
 
 ### 4.4 줌아웃 하한은 이탈 임계값이다
 
@@ -415,7 +421,6 @@ client/lib/screens/outdoor_map/outdoor_map_screen.dart
 
 client/lib/screens/outdoor_map/camera/building_orientation.dart   ← 기하 도구·routeBoxFor
 client/lib/screens/outdoor_map/entry/indoor_entry_zoom.dart      ← zoom 정책·임계값
-client/lib/screens/outdoor_map/widgets/guidance_recenter_button.dart           ← 안내 중 되돌릴 수단
 client/lib/domain/guidance/guidance_chrome.dart                     ← 안내 중 chrome 규칙
 ```
 

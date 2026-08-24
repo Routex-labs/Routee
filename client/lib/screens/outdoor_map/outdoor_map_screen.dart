@@ -84,7 +84,6 @@ import 'widgets/floor_selector.dart';
 import 'widgets/map_scale_bar.dart';
 import 'widgets/nearby_store_sheet.dart';
 import 'widgets/floor_switch_escalator_motif.dart';
-import 'widgets/guidance_recenter_button.dart';
 import 'widgets/indoor_arrival_card.dart';
 import 'widgets/route_steps_sheet.dart';
 import '../../map/icon/icon_cache.dart';
