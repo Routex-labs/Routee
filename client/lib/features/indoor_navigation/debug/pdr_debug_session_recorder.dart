@@ -29,7 +29,9 @@ class PdrDebugSessionRecorder {
   // `exit_door_closest_miss`, GPS 좌표별 `meters_outside`.
   // v19가 늘린 것: 도약으로 **거른** GPS 좌표 `gps_rejected_fixes`.
   // v20이 늘린 것: 진입 시각 ~ 첫 실내 위치 사이의 공백 `indoor_position_gaps`.
-  static const schemaVersion = 20;
+  // v21이 바로잡은 것: `actual_marker_position`이 tracker preview 별칭이 아니라
+  // 진행률·고정까지 적용된 제품 마커 좌표를 기록한다.
+  static const schemaVersion = 21;
 
   // **표본 배열에 상한이 없다** — 품질·복도·tracker 입력·경로 진행·기압·층 전이·
   // GPS 차이는 세션이 끝날 때까지 무한히 쌓인다.
@@ -70,6 +72,7 @@ class PdrDebugSessionRecorder {
 
   PdrSnapshot? _latestSnapshot;
   CorridorTrackingResult? _latestCorridorCorrection;
+  PdrLocalPoint? _latestActualMarkerPosition;
   PdrAnchor? _anchor;
   PdrRuntimeStatus _runtimeStatus = const PdrRuntimeStatus.idle();
   Map<String, Object?>? _pedometerFinalize;
@@ -393,10 +396,13 @@ class PdrDebugSessionRecorder {
     required CorridorObservation? observation,
     required bool wasReset,
     required CorridorTrackingResult result,
+    PdrLocalPoint? actualMarkerPosition,
     required PdrSnapshot snapshot,
     required List<int?> previewTailPeakTimesMs,
     DateTime? at,
   }) {
+    _latestActualMarkerPosition =
+        actualMarkerPosition ?? result.previewPosition;
     final now = (at ?? DateTime.now()).toUtc();
     final batch = snapshot.lastAppliedBatch;
     final isNewBatch = batch != null && batch.batchId != _lastLoggedBatchId;
@@ -435,6 +441,7 @@ class PdrDebugSessionRecorder {
           for (final point in observation.rawPreviewTailPositions)
             _pairJson(point),
         ],
+        'raw_preview_tail_peak_ids': observation.rawPreviewTailPeakIds,
         // 꼬리 좌표와 같은 인덱스. 확정 배치 시간창과 대조하는 기준이다.
         'raw_preview_tail_peak_times_ms': previewTailPeakTimesMs,
       },
@@ -445,11 +452,14 @@ class PdrDebugSessionRecorder {
           'span_end_ms': batch.spanEndMs,
           'applied_steps': batch.appliedSteps,
           'applied_distance_m': batch.appliedDistanceM,
-          // 이 배치 시간창에서 확정으로 넘어간 주황 peak. 걸음 수 차감이 아니라
-          // 시간창이 기준이라는 것을 파일만으로 확인할 수 있게 남긴다.
+          'consumed_preview_steps': batch.consumedPreviewSteps,
+          'acknowledged_preview_steps': batch.acknowledgedPreviewSteps,
+          'consumed_preview_peak_ids': _consumedPreviewPeakIds(batch),
+          // 새 로그는 실제 소비 수만큼만 남긴다. 이전 fixture의 null 필드는
+          // 시간창 방식으로 폴백해 재생 호환성을 지킨다.
           'consumed_preview_peak_times_ms': _consumedPreviewPeaks(
             snapshot,
-            spanEndMs: batch.spanEndMs,
+            batch: batch,
           ),
         },
       'result': {
@@ -462,7 +472,9 @@ class PdrDebugSessionRecorder {
         'position': _pairJson(result.correctedPosition),
         'corrected_heading_deg': result.correctedHeadingDeg,
         'preview_position': _pairJson(result.previewPosition),
-        'actual_marker_position': _pairJson(result.previewPosition),
+        'actual_marker_position': _pairJson(
+          actualMarkerPosition ?? result.previewPosition,
+        ),
         'preview_heading_deg': result.previewHeadingDeg,
         'map_matched_heading_deg': result.previewHeadingDeg,
         'preview_candidate_edge_ids': result.previewCandidateEdgeIds,
@@ -483,6 +495,7 @@ class PdrDebugSessionRecorder {
             : null,
         'junction_candidate_edge_ids': result.junctionCandidateEdgeIds,
         'leader_relocated': result.leaderRelocated,
+        'route_straight_epoch_node_id': result.routeStraightEpochNodeId,
         'optimistic_step_advances': [
           for (final step in result.optimisticStepAdvances)
             _optimisticStepAdvanceJson(step),
@@ -504,14 +517,42 @@ class PdrDebugSessionRecorder {
   /// 직전 배치 끝 ~ 이번 배치 끝 사이에 찍힌 accepted preview peak.
   List<int> _consumedPreviewPeaks(
     PdrSnapshot snapshot, {
-    required int? spanEndMs,
+    required PdrAppliedBatch batch,
   }) {
+    final acknowledged = batch.acknowledgedPreviewSteps;
+    final consumed = batch.consumedPreviewSteps;
+    if (acknowledged != null && consumed != null) {
+      final wanted = _consumedPreviewPeakIds(batch).toSet();
+      final firstPathStep =
+          snapshot.preview.steps - (snapshot.preview.path.length - 1);
+      return [
+        for (
+          var index = 0;
+          index < snapshot.preview.acceptedPeakTimesMs.length;
+          index++
+        )
+          if (wanted.contains(firstPathStep + index))
+            ?snapshot.preview.acceptedPeakTimesMs[index],
+      ];
+    }
+    final spanEndMs = batch.spanEndMs;
     if (spanEndMs == null) return const [];
     final from = _lastLoggedBatchSpanEndMs;
     return [
       for (final time in snapshot.preview.acceptedPeakTimesMs)
         if (time != null && time <= spanEndMs && (from == null || time > from))
           time,
+    ];
+  }
+
+  List<int> _consumedPreviewPeakIds(PdrAppliedBatch batch) {
+    final acknowledged = batch.acknowledgedPreviewSteps;
+    final consumed = batch.consumedPreviewSteps;
+    if (acknowledged == null || consumed == null || consumed <= 0) {
+      return const [];
+    }
+    return [
+      for (var id = acknowledged - consumed + 1; id <= acknowledged; id++) id,
     ];
   }
 
@@ -741,6 +782,7 @@ class PdrDebugSessionRecorder {
         floorPathDistanceM: _pathLength(floorPath),
         mapMatchedDistanceM: _pathLength(matchedPath),
         corridorCorrection: corridorCorrection,
+        actualMarkerPosition: _latestActualMarkerPosition,
       ),
       'paths': {
         'confirmed_pdr_local_m': _pointsJson(rawPath),
@@ -913,6 +955,7 @@ class PdrDebugSessionRecorder {
     required double floorPathDistanceM,
     required double mapMatchedDistanceM,
     required CorridorTrackingResult? corridorCorrection,
+    required PdrLocalPoint? actualMarkerPosition,
   }) {
     if (snapshot == null) return const {'recorded': false};
     final features = snapshot.quality.features;
@@ -978,7 +1021,7 @@ class PdrDebugSessionRecorder {
                 corridorCorrection.previewPosition,
               ),
               'actual_marker_position': _pointJson(
-                corridorCorrection.previewPosition,
+                actualMarkerPosition ?? corridorCorrection.previewPosition,
               ),
               'preview_heading_deg': corridorCorrection.previewHeadingDeg,
               'map_matched_heading_deg': corridorCorrection.previewHeadingDeg,

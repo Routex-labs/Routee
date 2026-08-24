@@ -10,6 +10,7 @@ import 'package:navigation_client/features/indoor_navigation/application/escalat
 import 'package:navigation_client/features/indoor_navigation/contract/altitude_sample.dart';
 import 'package:navigation_client/models/building/building_graph.dart';
 import 'package:navigation_client/domain/guidance/route_movement.dart';
+import 'package:navigation_client/domain/guidance/route_progress.dart';
 import 'package:navigation_client/models/route/indoor_route.dart';
 import 'package:navigation_client/features/indoor_navigation/contract/pdr_anchor.dart';
 import 'package:navigation_client/models/building/floor_graph.dart';
@@ -163,6 +164,33 @@ PdrSnapshot _walkedEast(int steps) {
       steps: steps,
       distanceM: steps * 0.7,
       acceptedPeakTimesMs: List<int?>.filled(path.length, null),
+    ),
+    quality: _quality,
+  );
+}
+
+PdrSnapshot _previewWalk({
+  required List<PdrLocalPoint> path,
+  required double headingDeg,
+}) {
+  final previewSteps = path.length - 1;
+  return PdrSnapshot(
+    position: PdrLocalPoint.zero,
+    path: const [PdrLocalPoint.zero],
+    steps: 0,
+    distanceM: 0,
+    orientationHeadingDeg: headingDeg,
+    walkingHeadingDeg: headingDeg,
+    hasHeading: true,
+    preview: PdrPreview(
+      position: path.last,
+      path: path,
+      steps: previewSteps,
+      distanceM: previewSteps * 0.7,
+      acceptedPeakTimesMs: [
+        null,
+        for (var index = 1; index < path.length; index += 1) index * 500,
+      ],
     ),
     quality: _quality,
   );
@@ -679,6 +707,69 @@ void main() {
     IndoorGuidanceSession routedSession() =>
         attachedSession()..setRouteSegment(route);
 
+    test('진행률을 보류해도 실제 마커는 optimistic preview를 따른다', () {
+      final session = routedSession();
+      session.seedProgress(
+        const RouteProgress(
+          traveledM: 20,
+          remainingM: 30,
+          offsetM: 0,
+          onRouteEdge: true,
+          reacquired: false,
+          segmentIndex: 0,
+          projectedPoint: LocalPoint(20, 0),
+        ),
+        atSteps: 0,
+      );
+
+      final result = session.onSnapshot(_walkedEast(5), timestampMs: 1000)!;
+      final update = session.updateProgress(result, previewSteps: 5);
+
+      expect(update.holdReason, isNotNull);
+      expect(session.position!.localM, result.previewPosition);
+    });
+
+    test('경로 중간에서 역방향 두 걸음 뒤 유턴해도 매 프레임 주황 위치를 따른다', () {
+      final session = newSession()
+        ..attach(buildingId: 'b1')
+        ..setContext(floorId: '1F', graph: _corridorGraph)
+        ..setAnchor(_anchor(eastM: 20))
+        ..setRouteSegment(route);
+      final offsets = <double>[0, -0.7, -1.4, -0.7, 0, 0.7, 1.4];
+      final markerEastM = <double>[];
+
+      for (var index = 0; index < offsets.length; index += 1) {
+        final path = [
+          for (var pathIndex = 0; pathIndex <= index; pathIndex += 1)
+            PdrLocalPoint(offsets[pathIndex], 0),
+        ];
+        final snapshot = _previewWalk(
+          path: path,
+          headingDeg: index <= 2 ? 270 : 90,
+        );
+        final result = session.onSnapshot(snapshot, timestampMs: index * 500)!;
+        session.updateProgress(
+          result,
+          previewSteps: snapshot.preview.steps,
+          confirmedSteps: snapshot.steps,
+          orientationHeadingDeg: snapshot.orientationHeadingDeg,
+          walkingHeadingDeg: snapshot.walkingHeadingDeg,
+          nowMs: index * 500,
+        );
+
+        expect(
+          session.position!.localM,
+          result.previewPosition,
+          reason: '역방향/유턴 상태와 무관하게 index=$index 주황 위치를 표시해야 한다',
+        );
+        markerEastM.add(session.position!.localM.eastM);
+      }
+
+      expect(markerEastM[1], lessThan(markerEastM[0]));
+      expect(markerEastM[2], lessThan(markerEastM[1]));
+      expect(markerEastM.last, greaterThan(20));
+    });
+
     test('코너를 돈 뒤에도 마커가 코너 직전 표시 진행률에 붙들리지 않는다', () {
       final session = newSession()
         ..attach(buildingId: 'b1')
@@ -687,22 +778,14 @@ void main() {
         ..setRouteSegment(_turnRoute);
 
       session.onSnapshot(_walkedNorthTurn(0), timestampMs: 0);
-      session.updateProgress(
-        session.trackingResult,
-        previewSteps: 0,
-        nowMs: 0,
-      );
+      session.updateProgress(session.trackingResult, previewSteps: 0, nowMs: 0);
 
       for (var steps = 1; steps <= 14; steps += 1) {
         final result = session.onSnapshot(
           _walkedNorthTurn(steps),
           timestampMs: steps * 500,
         );
-        session.updateProgress(
-          result,
-          previewSteps: steps,
-          nowMs: steps * 500,
-        );
+        session.updateProgress(result, previewSteps: steps, nowMs: steps * 500);
       }
 
       final trackerPosition = session.trackingResult!.previewPosition;
@@ -743,10 +826,7 @@ void main() {
       expect(markerPosition.northM, greaterThan(0));
     });
 
-    test('길안내 중에는 후퇴 방지된 경로 투영점을 마커에 우선 표시한다', () {
-      // 센서 보정 위치는 복도 중심선(y=0)에 있지만, 안내 경로의 표시선은
-      // 같은 간선 위에서 y=2로 보정돼 있다고 가정한다. 예전 홈 통합처럼
-      // previewPosition을 그대로 그리면 마커가 파란 안내선에서 벗어난다.
+    test('경로 표시선이 달라도 실제 마커는 tracker 위치를 유지한다', () {
       const shiftedRoute = IndoorRoute(
         points: [],
         pointsLocalM: [LocalPoint(0, 2), LocalPoint(50, 2)],
@@ -763,7 +843,7 @@ void main() {
       final marker = session.position!;
       expect(preview.northM, closeTo(0, 1e-9));
       expect(session.displayProgress!.projectedPoint, isNotNull);
-      expect(marker.localM.northM, closeTo(2, 1e-9));
+      expect(marker.localM, preview);
     });
 
     test('걸을수록 남은거리가 줄어든다', () {

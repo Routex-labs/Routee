@@ -1,4 +1,6 @@
 import 'dart:async';
+
+import 'package:flutter/scheduler.dart' show Ticker;
 import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:math' show Point;
@@ -30,6 +32,7 @@ import '../../domain/geo/geo_transform.dart';
 import '../../domain/guidance/geo_route_progress.dart';
 import '../../domain/guidance/guidance_chrome.dart';
 import '../../domain/guidance/guidance_start_reach.dart';
+import '../../domain/guidance/location_marker_glide.dart';
 import '../../features/debug_mode/debug_mode.dart';
 import '../../domain/route/dijkstra.dart';
 import '../../domain/route/route_endpoint_fill.dart';
@@ -643,11 +646,23 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   /// 주인이 도는 동안의 유예([_holdFollowCamera])를 같은 값으로 센다.
   int _followCameraNextMoveAtMs = 0;
 
-  /// 마지막으로 명령한 팔로우 bearing과 목표점. 데드밴드와 "움직였나" 판정의
-  /// 기준이라, 실제로 명령을 보낸 뒤에만 갱신한다.
+  /// 팔로우 카메라가 **가려는** bearing. 방향 신호가 올 때마다(≈33Hz) 그대로
+  /// 갱신한다 — 거르는 몫은 그리는 쪽 데드존에 있다.
+  ///
+  /// 화면이 실제로 그리는 각은 따로다([_followCameraShownBearingDeg]).
   double? _followCameraBearingDeg;
 
-  ll.LatLng? _followCameraTarget;
+  /// 프레임마다 실제로 카메라에 놓은 bearing과 목표점.
+  ///
+  /// null이면 이번 구간의 첫 프레임을 아직 안 냈다는 뜻이라, 지금 카메라 각을
+  /// 읽어 거기서 이어 간다([followCameraResumeGapMs]).
+  double? _followCameraShownBearingDeg;
+
+  ll.LatLng? _followCameraShownPoint;
+
+  /// 마지막으로 카메라를 잡은 시각(ms). 이 값과 지금의 간격이
+  /// [followCameraResumeGapMs]를 넘으면 다른 주인이 카메라를 돌린 뒤로 본다.
+  int _followCameraDrivenAtMs = 0;
 
   /// 마지막으로 걸음 수가 늘어난 시각(ms)과 그때의 걸음 수. "지금 걷는 중인가"를
   /// 이 둘로 판정한다([followCameraWalkingStepWindowMs]).
@@ -720,6 +735,43 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   ({String floorId, ll.LatLng point})? _lastIndoorMarker;
 
   Future<void> _pdrMarkerWriteQueue = Future<void>.value();
+
+  /// 걸음 하나만큼씩 뛰어 오는 위치를 프레임 단위로 이어 그리는 보간기.
+  ///
+  /// **목표와 표시를 가르는 것이 이 객체의 전부다.** 판정·카메라·경로 진행률은
+  /// 여전히 보간 전 값(`_pdrCurrentWgs84()`)을 본다 — 그리는 자리 하나 때문에
+  /// "도착했나"까지 늦게 판정되면 안 된다.
+  final LocationMarkerGlide _markerGlide = LocationMarkerGlide();
+
+  /// 보간 틱. **vsync에 맞춰 매 프레임** 돌고, 표시값이 목표에 붙으면 스스로
+  /// 멈춘다([_syncMarkerGlideTicker]).
+  ///
+  /// 타이머(32ms)로 돌리던 것을 옮겨 왔다. 이 폰은 120Hz라 32ms 틱 하나가 네
+  /// 프레임 동안 그대로 서 있었고, 카메라 각이 **한 틱씩 계단으로** 도는 것이
+  /// 그대로 보였다(maplibre의 moveCamera는 우리가 보낸 순간에만 각을 바꾼다).
+  Ticker? _markerGlideTicker;
+
+  /// native motion 주기로 오는 마지막 방향. 카메라·삼각형만 본다
+  /// ([_onPdrHeading]).
+  PdrHeadingSample? _liveHeading;
+
+  /// 마커 소스에 마지막으로 **실제로 쓴** 그림. 같은 값이면 다시 쓰지 않는다.
+  ({ll.LatLng? point, double? headingDeg, bool offFloor})? _lastWrittenMarker;
+
+  /// 마커 소스를 마지막으로 쓴 시점(틱 누적 경과 기준).
+  Duration _markerSourceWriteAt = Duration.zero;
+
+  /// 직전 틱의 누적 경과. 프레임 간격은 기기·부하에 따라 달라지므로 실제로 흐른
+  /// 시간을 재서 [LocationMarkerGlide.advance]에 넘긴다.
+  Duration _markerGlideTickAt = Duration.zero;
+
+  /// 카메라 명령이 아직 네이티브에서 안 돌아왔다. 프레임마다 새로 쏘면 채널에
+  /// 밀려 오히려 늦게 도착한다 — 돌아올 때까지 그 프레임은 건너뛴다.
+  bool _followCameraInFlight = false;
+
+  /// 지금 그리는 마커가 **어떤 뜻**인지. 뜻이 바뀌는 순간(내 층 위치 ↔ 다른 층
+  /// 잔상 ↔ GPS 폴백)은 걸어서 간 이동이 아니므로 보간하지 않고 옮긴다.
+  _MarkerGlideKind _markerGlideKind = _MarkerGlideKind.none;
 
   /// 회색/파란 경로 source도 센서 틱·GPS 틱·재탐색 확정에서 동시에 갱신된다.
   /// native MapLibre 쓰기가 호출 순서와 다른 순서로 완료될 수 있으므로 한 줄의
@@ -820,6 +872,8 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   StreamSubscription<AltitudeSample>? _pdrAltitudeSub;
 
   StreamSubscription<RawMotionActivity>? _pdrRawMotionSub;
+
+  StreamSubscription<PdrHeadingSample>? _pdrHeadingSub;
 
   // --- 자동 층 전환 ---
   //
@@ -1074,9 +1128,10 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
       // 굴린 rebuild에서 [outdoorExitGate]가 다시 잰다.
       _updateTransitionDebugChip();
       _syncPdrCurrentLayer();
-      // 마커를 옮긴 **직후**가 카메라를 따라 보낼 자리다. 걸음마다 쏘지 않도록
-      // 거르는 몫은 [_moveFollowCamera] 안에 있다.
-      unawaited(_moveFollowCamera(snapshot));
+      // 마커를 옮긴 **직후**가 카메라 목표를 다시 잡을 자리다. 카메라를 실제로
+      // 돌리는 것은 프레임 루프이고, 흔들림을 거르는 몫은 [_moveFollowCamera]
+      // 안의 데드밴드에 있다.
+      _moveFollowCamera(snapshot);
       // 사용자 회색선은 실제 PDR 궤적이 아니라 현재 계획 경로의 완료 구간이다.
       // 진행률이 바뀐 같은 틱에 경로 source도 갱신해야 파란 잔여선과 회색 완료선이
       // 같은 투영점을 공유한다. GuidanceTrailSession은 별도 진단 궤적으로만 남긴다.
@@ -1097,7 +1152,7 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
           status.phase == CalibrationPhase.uncalibrated) {
         _setPlacingAnchor(false);
       }
-      _syncPdrCurrentLayer();
+      _syncPdrCurrentLayer(snap: true);
       unawaited(_syncRouteLayer());
       unawaited(_syncDebugPdrLayers());
     });
@@ -1109,6 +1164,9 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
     _pdrRawMotionSub = indoorNavigationDriver.rawMotion.listen(
       _guidance.onRawMotion,
     );
+    // 방향만 오는 스트림. 스냅샷과 달리 setState도, 경로·마커 소스 쓰기도 걸지
+    // 않는다 — 목표각만 갈아 끼우고 그리는 것은 프레임 루프가 한다.
+    _pdrHeadingSub = indoorNavigationDriver.headings.listen(_onPdrHeading);
     unawaited(_loadBuildingEntrance());
     _syncGpsSubscription();
   }
@@ -1182,7 +1240,9 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
     _pdrCalibrationSub?.cancel();
     _pdrAltitudeSub?.cancel();
     _pdrRawMotionSub?.cancel();
+    _pdrHeadingSub?.cancel();
     _escalatorGlideTimer?.cancel();
+    _markerGlideTicker?.dispose();
     _arrivalRouteClearTimer?.cancel();
     _floorSwapVeilTimer?.cancel();
     _debugRideCompletionTimer?.cancel();

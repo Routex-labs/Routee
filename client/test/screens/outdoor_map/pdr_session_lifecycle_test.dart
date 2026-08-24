@@ -217,6 +217,9 @@ class _FakeDriver implements IndoorNavigationController {
   Stream<RawMotionActivity> get rawMotion => const Stream.empty();
 
   @override
+  Stream<PdrHeadingSample> get headings => const Stream.empty();
+
+  @override
   bool get isHeadingConverged => true;
 
   @override

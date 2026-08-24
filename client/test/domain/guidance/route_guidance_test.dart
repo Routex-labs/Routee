@@ -6,6 +6,25 @@ import 'package:navigation_client/domain/guidance/route_progress.dart';
 import 'package:navigation_client/models/building/floor_graph.dart';
 
 void main() {
+  group('실내 안내 표시 근거', () {
+    test('첫 걸음 전이어도 출발 앵커가 있으면 바로 옆 환승 안내를 보인다', () {
+      expect(
+        canShowIndoorRouteGuidance(hasProgress: false, hasIndoorPosition: true),
+        isTrue,
+      );
+    });
+
+    test('진행률과 실내 위치가 모두 없으면 건물 밖 실내 안내를 숨긴다', () {
+      expect(
+        canShowIndoorRouteGuidance(
+          hasProgress: false,
+          hasIndoorPosition: false,
+        ),
+        isFalse,
+      );
+    });
+  });
+
   test('역주행이면 다음 회전보다 먼저 되돌아가라는 안내를 만든다', () {
     const progress = RouteProgress(
       traveledM: 5,

@@ -490,7 +490,7 @@ extension OutdoorMapGps on OutdoorMapBodyState {
         source: estimateSource,
       ),
     );
-    unawaited(_syncPdrCurrentLayer());
+    unawaited(_syncPdrCurrentLayer(snap: true));
 
     // GPS로 건물 안임을 이미 확인했으므로 권한 게이트를 다시 두지 않는다. 세션이
     // 다른 층에서 돌고 있으면 이 층으로 옮겨야 앵커가 이 층으로 기록된다.
@@ -537,7 +537,7 @@ extension OutdoorMapGps on OutdoorMapBodyState {
       if (!mounted) return;
     }
 
-    _syncPdrCurrentLayer();
+    _syncPdrCurrentLayer(snap: true);
     unawaited(_syncDebugPdrLayers());
     // 이제 실내 마커가 있다. 진입 순간에는 위치를 몰라 건너뛴 연출
     // ([_setIndoorEntered])을 여기서 한다 — 카메라는 아직 진입 직전의 야외

@@ -262,9 +262,9 @@ class PdrSession {
       fallbackStrideMeters: _stride.fallbackMeters,
       confirmedSteps: iosTrackedSteps,
       confirmedDistanceM: _stride.trackedDistanceM,
-      // 총 주황/초록 걸음 수의 차이가 아니라, 마지막 초록 배치 뒤 아직
-      // 확정되지 않은 주황 꼬리만 제한한다. 배치가 올 때마다 그 시간창 안의
-      // peak가 자연스럽게 소비돼 새 초록 끝점에서 preview 여유가 다시 열린다.
+      // 총 주황/초록 걸음 수의 차이가 아니라, 실제 배치 적용 수로 아직
+      // 대응되지 않은 주황 꼬리만 제한한다. 시간창은 lead 지연 판단과 미래
+      // peak 차단에만 쓰고, 소비 수 자체는 acknowledgeConfirmedBatch가 정한다.
       confirmedThroughMs: _lastAppliedBatch?.spanEndMs,
       pedometerCadenceHz: _stride.cadenceAvailable ? _stride.cadenceHz : null,
       headingAt: _headingHistory.at,
@@ -290,6 +290,10 @@ class PdrSession {
       if (roninObservationChanged) _emit();
       return;
     }
+    final previewStepTimes = _accelPreview.pendingAcceptedPeakTimes(
+      maxCount: application.appliedSteps,
+      throughMs: application.spanEndMs,
+    );
     final applied = _paths.applyPedometerBatch(
       count: application.appliedSteps,
       stepDistanceMeters: application.stepDistanceMeters,
@@ -299,15 +303,24 @@ class PdrSession {
       spanStartMs: application.spanStartMs,
       spanEndMs: application.spanEndMs,
       peakTimes: application.peakTimes,
+      exactStepTimesMs: previewStepTimes.length == application.appliedSteps
+          ? previewStepTimes
+          : null,
     );
     iosTrackedSteps += applied;
     _stride.addTrackedDistance(application.stepDistanceMeters * applied);
+    final previewAcknowledgement = _accelPreview.acknowledgeConfirmedBatch(
+      appliedSteps: applied,
+      spanEndMs: application.spanEndMs,
+    );
     _lastAppliedBatch = PdrAppliedBatch(
       batchId: application.batchId,
       spanStartMs: application.spanStartMs,
       spanEndMs: application.spanEndMs,
       appliedSteps: applied,
       appliedDistanceM: application.stepDistanceMeters * applied,
+      consumedPreviewSteps: previewAcknowledgement.accepted,
+      acknowledgedPreviewSteps: _accelPreview.acknowledgedSteps,
     );
     _roninTrack.apply(
       application,

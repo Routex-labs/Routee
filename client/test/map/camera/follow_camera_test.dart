@@ -4,7 +4,7 @@ import 'package:navigation_client/map/camera/follow_camera.dart';
 /// 팔로우 카메라 각도 산수의 검증 기준.
 ///
 /// 화면 코드에 묻으면 확인할 방법이 없어 따로 뺀 계산이다. 여기서 지키는 것은
-/// 넷 — 0/360을 넘는 최단 경로, 나침반↔걷는 방향 혼합, 최소 간격, 데드밴드.
+/// 넷 — 0/360을 넘는 최단 경로, 나침반↔걷는 방향 혼합, 프레임 보간, 데드존.
 void main() {
   group('lerpBearingDeg', () {
     test('359°에서 1°로 갈 때 한 바퀴 돌지 않는다', () {
@@ -60,55 +60,99 @@ void main() {
     });
   });
 
-  group('nextFollowCameraBearingDeg', () {
-    double? next({
-      required int nowMs,
-      int notBeforeMs = 0,
-      double? lastBearingDeg,
-      bool targetMoved = true,
-      required double desired,
-      double deadbandDeg = 8,
-    }) => nextFollowCameraBearingDeg(
-      nowMs: nowMs,
-      notBeforeMs: notBeforeMs,
-      lastBearingDeg: lastBearingDeg,
-      targetMoved: targetMoved,
-      desiredBearingDeg: desired,
-      deadbandDeg: deadbandDeg,
+  group('glidedFollowBearingDeg', () {
+    const tau = Duration(milliseconds: 120);
+    const maxRate = 360.0;
+    const deadZone = 5.0;
+    const frame = Duration(milliseconds: 16);
+
+    double glide(
+      double shown,
+      double target, {
+      Duration elapsed = frame,
+      double rate = maxRate,
+      double deadZoneDeg = 0,
+    }) => glidedFollowBearingDeg(
+      shown: shown,
+      target: target,
+      elapsed: elapsed,
+      timeConstant: tau,
+      maxRateDegPerSec: rate,
+      deadZoneDeg: deadZoneDeg,
     );
 
-    test('유예 시각 전에는 아무것도 명령하지 않는다', () {
-      expect(next(nowMs: 1000, notBeforeMs: 1400, desired: 90), isNull);
-      expect(next(nowMs: 1400, notBeforeMs: 1400, desired: 90), 90);
+    test('한 프레임에 다 돌지 않는다', () {
+      final next = glide(0, 90);
+      expect(next, greaterThan(0));
+      expect(next, lessThan(90));
     });
 
-    test('첫 명령에는 데드밴드를 적용하지 않는다', () {
-      expect(next(nowMs: 0, lastBearingDeg: null, desired: 3), 3);
-    });
-
-    test('데드밴드 안의 흔들림으로는 각을 바꾸지 않는다', () {
-      // 위치는 따라가되 각은 이전 값 그대로 — 서 있는 지도가 진동하지 않는다.
-      expect(next(nowMs: 0, lastBearingDeg: 90, desired: 95), 90);
-      expect(next(nowMs: 0, lastBearingDeg: 90, desired: 99), 99);
-    });
-
-    test('데드밴드도 0/360을 넘어 잰다', () {
-      // 358°와 2°는 4° 차이다. 360을 그냥 빼면 356°로 읽혀 화면이 돈다.
-      expect(next(nowMs: 0, lastBearingDeg: 358, desired: 2), 358);
-    });
-
-    test('각도 흔들림도 데드밴드에 먹히고 위치도 그대로면 건너뛴다', () {
+    test('프레임이 길수록 더 많이 돈다', () {
       expect(
-        next(nowMs: 0, lastBearingDeg: 90, desired: 93, targetMoved: false),
-        isNull,
+        glide(0, 90, elapsed: frame * 2),
+        greaterThan(glide(0, 90)),
       );
     });
 
-    test('각이 데드밴드를 넘으면 제자리에 서 있어도 돌린다', () {
-      expect(
-        next(nowMs: 0, lastBearingDeg: 90, desired: 130, targetMoved: false),
-        130,
-      );
+    test('경계를 넘어도 짧은 쪽으로 돈다', () {
+      // 350°에서 10°로 갈 때 거꾸로 돌면 340°를 지나며 화면이 한 바퀴 돈다.
+      final next = glide(350, 10);
+      expect(next, greaterThan(350));
+      expect(next, lessThan(360));
+    });
+
+    test('목표에 서 있으면 그대로 있는다', () {
+      expect(glide(90, 90), closeTo(90, 1e-9));
+    });
+
+    test('데드존 안의 흔들림에는 화면이 꿈쩍도 안 한다', () {
+      // 서 있어도 나침반은 몇 도씩 흔들린다. 그걸 따라가면 지도가 잘게 진동한다.
+      expect(glide(90, 93, deadZoneDeg: deadZone), 90);
+      expect(glide(90, 87, deadZoneDeg: deadZone), 90);
+    });
+
+    test('데드존을 벗어나면 이어서 따라간다 — 목표는 계단이 아니다', () {
+      // 데드존을 목표각에 걸면 목표가 5°씩 뛰고 그 계단이 회전에 그대로 보인다.
+      // 여기서는 목표가 연속이고, 화면이 따라갈지만 데드존이 가른다.
+      var shown = 90.0;
+      for (var target = 95.0; target < 120; target += 0.5) {
+        final next = glide(shown, target, deadZoneDeg: deadZone);
+        expect(next, greaterThanOrEqualTo(shown));
+        shown = next;
+      }
+      expect(shown, greaterThan(100));
+    });
+
+    test('목표가 멈추면 화면도 멎는다 — 관성이 남지 않는다', () {
+      // 상한으로 등속을 만들던 때는 몸이 멈춘 뒤에도 밀린 각만큼 계속 돌았다.
+      var shown = 0.0;
+      final steps = <double>[];
+      for (var i = 0; i < 40; i++) {
+        final next = glide(shown, 30);
+        steps.add(bearingGapDeg(next, shown));
+        shown = next;
+      }
+      // 프레임마다 회전량이 줄어든다 = 목표에 가까워질수록 느려진다.
+      expect(steps.last, lessThan(steps.first));
+      expect(steps.last, lessThan(0.05));
+      expect(shown, closeTo(30, 1));
+    });
+
+    test('각이 통째로 벌어져도 상한을 넘지는 않는다', () {
+      // 층 fit이나 하차 조준 뒤 팔로우가 돌아오는 경우의 안전판이다.
+      final perFrame = maxRate * frame.inMilliseconds / 1000;
+      expect(bearingGapDeg(glide(0, 180), 0), lessThanOrEqualTo(perFrame + 1e-9));
+    });
+  });
+
+  group('bearingGapDeg', () {
+    test('0/360을 넘어 잰다 — 데드밴드와 같은 산수다', () {
+      expect(bearingGapDeg(358, 2), closeTo(4, 1e-9));
+      expect(bearingGapDeg(2, 358), closeTo(4, 1e-9));
+    });
+
+    test('반대편은 180이 상한이다', () {
+      expect(bearingGapDeg(0, 190), closeTo(170, 1e-9));
     });
   });
 }

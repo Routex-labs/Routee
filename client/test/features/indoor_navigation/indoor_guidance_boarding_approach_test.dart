@@ -1,7 +1,10 @@
+import 'dart:math' as math;
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:indoor_pdr_core/indoor_pdr_core.dart';
 import 'package:navigation_client/features/indoor_navigation/application/escalator_transition_detector.dart';
 import 'package:navigation_client/features/indoor_navigation/application/indoor_guidance_session.dart';
+import 'package:navigation_client/features/indoor_navigation/contract/altitude_sample.dart';
 import 'package:navigation_client/features/indoor_navigation/contract/pdr_anchor.dart';
 import 'package:navigation_client/models/building/building_graph.dart';
 import 'package:navigation_client/models/building/floor_graph.dart';
@@ -119,8 +122,37 @@ PdrSnapshot _walkedToBoardingThenNorth(int steps) {
   );
 }
 
-/// 탑승점까지 30m가 남은 긴 복도. 차단 반경(16m)과 고정 반경(6m) **사이**를 걷는
-/// 구간이 여기서만 나온다 — 위 7m 복도는 들어서자마자 고정 반경 안이다.
+/// 탑승점 2.8m 앞에서 센서 보행 방향이 순간적으로 정반대로 해석되는 경로.
+/// 실제로는 발판을 향해 몸을 크게 돌릴 때도 이 모양이 나올 수 있다.
+PdrSnapshot _walkedNearBoardingThenReverse(int steps) {
+  final path = [
+    for (var index = 0; index <= steps; index += 1)
+      index <= 6
+          ? PdrLocalPoint(index * 0.7, 0)
+          : PdrLocalPoint(4.2 - (index - 6) * 0.7, 0),
+  ];
+  final heading = steps <= 6 ? 90.0 : 270.0;
+  return PdrSnapshot(
+    position: path.last,
+    path: path,
+    steps: steps,
+    distanceM: steps * 0.7,
+    orientationHeadingDeg: heading,
+    walkingHeadingDeg: heading,
+    hasHeading: true,
+    preview: PdrPreview(
+      position: path.last,
+      path: path,
+      steps: steps,
+      distanceM: steps * 0.7,
+      acceptedPeakTimesMs: List<int?>.filled(path.length, null),
+    ),
+    quality: _quality,
+  );
+}
+
+/// 탑승점까지 30m가 남은 긴 복도. 차단 반경(16m)과 가시 고정 반경(1.5m) **사이**를 걷는
+/// 구간이 여기서만 나온다 — 위 7m 복도는 들어서자마자 차단 반경 안이다.
 const _longGraph = FloorGraph(
   nodes: [
     GraphNode(id: 'a', type: 'corridor', xM: 0, yM: 0),
@@ -146,6 +178,108 @@ const _longRoute = IndoorRoute(
   distanceMeters: 30,
 );
 
+/// graph 경로는 세 변을 도는 U자지만 실제 보행 공간은 열려 있어 사용자는
+/// 시작점에서 눈앞의 에스컬레이터로 곧장 갈 수 있다. 특정 코너 판정이 아니라
+/// "graph 경로와 자유보행이 다르다"는 계약을 재현한다.
+const _shortcutGraph = FloorGraph(
+  nodes: [
+    GraphNode(id: 'a', type: 'corridor', xM: 0, yM: 0),
+    GraphNode(id: 'b', type: 'corridor', xM: 0, yM: 10),
+    GraphNode(id: 'c', type: 'corridor', xM: 10, yM: 10),
+    GraphNode(id: 'es', type: 'escalator', name: 'ES1-DN(TOB1)', xM: 10, yM: 0),
+  ],
+  edges: [
+    GraphEdge(
+      id: 'ab',
+      fromNodeId: 'a',
+      toNodeId: 'b',
+      lengthM: 10,
+      bidirectional: true,
+      geometryLocalM: [LocalPoint(0, 0), LocalPoint(0, 10)],
+    ),
+    GraphEdge(
+      id: 'bc',
+      fromNodeId: 'b',
+      toNodeId: 'c',
+      lengthM: 10,
+      bidirectional: true,
+      geometryLocalM: [LocalPoint(0, 10), LocalPoint(10, 10)],
+    ),
+    GraphEdge(
+      id: 'ce',
+      fromNodeId: 'c',
+      toNodeId: 'es',
+      lengthM: 10,
+      bidirectional: true,
+      geometryLocalM: [LocalPoint(10, 10), LocalPoint(10, 0)],
+    ),
+  ],
+);
+
+const _shortcutRoute = IndoorRoute(
+  points: [],
+  pointsLocalM: [
+    LocalPoint(0, 0),
+    LocalPoint(0, 10),
+    LocalPoint(10, 10),
+    LocalPoint(10, 0),
+  ],
+  nodeIds: ['a', 'b', 'c', 'es'],
+  edgeIds: ['ab', 'bc', 'ce'],
+  distanceMeters: 30,
+);
+
+/// 마지막 graph 노드에서 3.4m 서쪽의 에스컬레이터로 꺾어야 하지만, 부드럽게
+/// 돌면 matcher가 북쪽 연장 간선을 계속 타는 실측 모양.
+const _vestibuleGraph = FloorGraph(
+  nodes: [
+    GraphNode(id: 'a', type: 'corridor', xM: 0, yM: 0),
+    GraphNode(id: 'v', type: 'junction', xM: 0, yM: 7),
+    GraphNode(
+      id: 'es',
+      type: 'escalator',
+      name: 'ES1-DN(TOB1)',
+      xM: -3.4,
+      yM: 7,
+    ),
+    GraphNode(id: 'wrong', type: 'corridor', xM: 0, yM: 20),
+  ],
+  edges: [
+    GraphEdge(
+      id: 'av',
+      fromNodeId: 'a',
+      toNodeId: 'v',
+      lengthM: 7,
+      bidirectional: true,
+      geometryLocalM: [LocalPoint(0, 0), LocalPoint(0, 7)],
+    ),
+    GraphEdge(
+      id: 've',
+      fromNodeId: 'v',
+      toNodeId: 'es',
+      lengthM: 3.4,
+      bidirectional: true,
+      geometryLocalM: [LocalPoint(0, 7), LocalPoint(-3.4, 7)],
+    ),
+    GraphEdge(
+      id: 'vw-wrong',
+      fromNodeId: 'v',
+      toNodeId: 'wrong',
+      lengthM: 13,
+      bidirectional: true,
+      geometryLocalM: [LocalPoint(0, 7), LocalPoint(0, 20)],
+    ),
+  ],
+);
+
+const _vestibuleRoute = IndoorRoute(
+  points: [],
+  pointsLocalM: [LocalPoint(0, 0), LocalPoint(0, 7), LocalPoint(-3.4, 7)],
+  nodeIds: ['a', 'v', 'es'],
+  edgeIds: ['av', 've'],
+  distanceMeters: 10.4,
+);
+
 /// 동쪽으로 [steps]걸음(0.7m).
 PdrSnapshot _walkedEast(int steps) {
   final path = [for (var i = 0; i <= steps; i += 1) PdrLocalPoint(i * 0.7, 0)];
@@ -156,6 +290,27 @@ PdrSnapshot _walkedEast(int steps) {
     distanceM: steps * 0.7,
     orientationHeadingDeg: 90,
     walkingHeadingDeg: 90,
+    hasHeading: true,
+    preview: PdrPreview(
+      position: path.last,
+      path: path,
+      steps: steps,
+      distanceM: steps * 0.7,
+      acceptedPeakTimesMs: List<int?>.filled(path.length, null),
+    ),
+    quality: _quality,
+  );
+}
+
+PdrSnapshot _walkedNorth(int steps) {
+  final path = [for (var i = 0; i <= steps; i++) PdrLocalPoint(0, i * 0.7)];
+  return PdrSnapshot(
+    position: path.last,
+    path: path,
+    steps: steps,
+    distanceM: steps * 0.7,
+    orientationHeadingDeg: 0,
+    walkingHeadingDeg: 0,
     hasHeading: true,
     preview: PdrPreview(
       position: path.last,
@@ -189,33 +344,303 @@ void main() {
         ..setRoute(_routeVia(transferMode: transferMode))
         ..setRouteSegment(_route);
 
+  IndoorGuidanceSession longEscalatorSession() =>
+      IndoorGuidanceSession(now: () => now)
+        ..attach(buildingId: 'b1')
+        ..setContext(floorId: '1F', graph: _longGraph, floorLabels: ['1F'])
+        ..setAnchor(_anchor)
+        ..setRoute(
+          MultiFloorRoute(
+            segments: [
+              const IndoorRouteSegment(
+                floorId: '1F',
+                floorName: '1F',
+                route: _longRoute,
+                transferModeToNext: 'escalator',
+                transferFromNodeId: 'es',
+              ),
+            ],
+            totalDistanceMeters: 30,
+            totalCostMeters: 30,
+          ),
+        )
+        ..setRouteSegment(_longRoute);
+
+  IndoorGuidanceSession shortcutEscalatorSession() =>
+      IndoorGuidanceSession(now: () => now)
+        ..attach(buildingId: 'b1')
+        ..setContext(
+          floorId: '1F',
+          graph: _shortcutGraph,
+          floorLabels: ['1F', 'B1'],
+        )
+        ..setAnchor(_anchor)
+        ..setRoute(
+          MultiFloorRoute(
+            segments: [
+              const IndoorRouteSegment(
+                floorId: '1F',
+                floorName: '1F',
+                route: _shortcutRoute,
+                transferModeToNext: 'escalator',
+                transferFromNodeId: 'es',
+              ),
+            ],
+            totalDistanceMeters: 30,
+            totalCostMeters: 30,
+          ),
+        )
+        ..setRouteSegment(_shortcutRoute);
+
+  IndoorGuidanceSession vestibuleEscalatorSession({
+    String? transferMode = 'escalator',
+  }) => IndoorGuidanceSession(now: () => now)
+    ..attach(buildingId: 'b1')
+    ..setContext(
+      floorId: '1F',
+      graph: _vestibuleGraph,
+      floorLabels: ['1F', 'B1'],
+    )
+    ..setAnchor(_anchor)
+    ..setRoute(
+      MultiFloorRoute(
+        segments: [
+          IndoorRouteSegment(
+            floorId: '1F',
+            floorName: '1F',
+            route: _vestibuleRoute,
+            transferModeToNext: transferMode,
+            transferFromNodeId: 'es',
+          ),
+        ],
+        totalDistanceMeters: 10.4,
+        totalCostMeters: 10.4,
+      ),
+    )
+    ..setRouteSegment(_vestibuleRoute);
+
   /// [steps]걸음까지 걸어 넣는다. 기압은 **한 건도 넣지 않는다** — 탑승 직후
   /// Δ가 0인 구간이 이 파일이 덮는 구간이다.
   ///
   /// 단계 전이도 꺼내지 않는다. 화면은 기압 샘플이 올 때 꺼내므로, 기압이 없는
   /// 이 구간에서는 단계 고정(`_boardingHoldPointM`)이 애초에 안 걸린다.
-  void walkTo(IndoorGuidanceSession session, int steps, {int startMs = 1000}) {
-    for (var step = 0; step <= steps; step += 1) {
-      session.onSnapshot(
+  void walkRange(
+    IndoorGuidanceSession session, {
+    required int fromStep,
+    required int toStep,
+    int startMs = 1000,
+  }) {
+    for (var step = fromStep; step <= toStep; step += 1) {
+      final atMs = startMs + step * 500;
+      final result = session.onSnapshot(
         _walkedToBoardingThenNorth(step),
-        timestampMs: startMs + step * 500,
+        timestampMs: atMs,
       );
+      session.updateProgress(result, previewSteps: step, nowMs: atMs);
     }
   }
 
+  void walkTo(IndoorGuidanceSession session, int steps, {int startMs = 1000}) {
+    walkRange(session, fromStep: 0, toStep: steps, startMs: startMs);
+  }
+
   group('탑승점 접근 — 고도가 오기 전', () {
-    test('Δ가 0이고 판정기가 idle이어도 탑승점에 서면 마커를 붙든다', () {
-      // 실기기 증상: 타는 중인데 마커가 옆 복도에 있고 칩은 `Δ-0.0m · 무장O ·
-      // 후보X · idle`이었다. 보정 위치가 탑승점 3.5m 앞에 멈춰 배너 반경(3m)
-      // 밖이라 단계가 안 올라가는 상태 — 실측에서 위치가 12m까지 어긋났다.
+    test('6m 안에 들어와도 실제 마커가 탑승점에 붙기 전에는 후보로만 둔다', () {
       final session = sessionVia('escalator');
 
       walkTo(session, 5);
 
       expect(session.escalator.phase, EscalatorPhase.idle);
-      expect(session.isPositionHeld, isTrue);
-      expect(session.position!.localM.eastM, closeTo(7, 0.01));
+      expect(session.isNearRouteBoarding, isTrue);
+      expect(session.isPositionHeld, isFalse);
+      expect(session.position!.localM.eastM, closeTo(3.5, 0.01));
       expect(session.position!.localM.northM, closeTo(0, 0.01));
+    });
+
+    test('경로 탑승점 3m 안의 첫 신뢰 가능한 전진 peak에서 고정한다', () {
+      final onePeak = sessionVia('escalator');
+      walkTo(onePeak, 6);
+      expect(onePeak.boardingApproachDistanceM, closeTo(2.8, 0.01));
+      expect(onePeak.isPositionHeld, isTrue);
+      final held = onePeak.position!.localM;
+      final unchanged = onePeak.onSnapshot(
+        _walkedToBoardingThenNorth(6),
+        timestampMs: 6000,
+      );
+      onePeak.updateProgress(unchanged, previewSteps: 6, nowMs: 6000);
+      expect(onePeak.position!.localM, held, reason: '같은 peak 반복은 위치를 바꾸지 않는다');
+    });
+
+    test('탑승점 근처에서 몸을 크게 돌려도 종점이나 반대 간선으로 튀지 않는다', () {
+      final session = sessionVia('escalator');
+      for (var step = 0; step <= 12; step++) {
+        final atMs = 1000 + step * 500;
+        final result = session.onSnapshot(
+          _walkedNearBoardingThenReverse(step),
+          timestampMs: atMs,
+        );
+        session.updateProgress(result, previewSteps: step, nowMs: atMs);
+      }
+
+      expect(session.isPositionHeld, isTrue);
+      expect(session.position!.localM.eastM, closeTo(4.2, 0.01));
+      expect(session.trackingResult!.optimisticEdgeId, 'ab');
+      expect(
+        session.trackingResult!.previewPosition,
+        const PdrLocalPoint(7, 0),
+      );
+    });
+
+    test('3m 안의 연속 접근은 현재 보이는 자리에서 고정하고 1.5m 밖에서는 스냅하지 않는다', () {
+      final session = longEscalatorSession();
+      for (var step = 0; step <= 40; step += 1) {
+        final atMs = 1000 + step * 500;
+        final snapshot = _walkedEast(step);
+        session.updateProgress(
+          session.onSnapshot(snapshot, timestampMs: atMs),
+          previewSteps: step,
+          nowMs: atMs,
+        );
+      }
+
+      expect(session.isPositionHeld, isTrue);
+      expect(session.position!.localM.eastM, closeTo(27.3, 0.01));
+      expect(session.position!.localM.eastM, isNot(closeTo(30, 0.01)));
+    });
+
+    test('느린 접근은 최초 16m 진입 후 40초가 지나도 탑승 후보를 유지한다', () {
+      final session = longEscalatorSession();
+      for (var step = 0; step <= 42; step += 1) {
+        final atMs = step <= 20
+            ? 1000 + step * 500
+            : 11000 + (step - 20) * 2500;
+        final snapshot = _walkedEast(step);
+        session.updateProgress(
+          session.onSnapshot(snapshot, timestampMs: atMs),
+          previewSteps: step,
+          nowMs: atMs,
+        );
+      }
+
+      expect(session.isNearRouteBoarding, isTrue);
+      expect(session.isPositionHeld, isTrue);
+    });
+
+    test('열린 공간에서 graph 경로를 잘라 가도 자유보행 그림자로 탑승점을 잡는다', () {
+      final session = shortcutEscalatorSession();
+      for (var step = 0; step <= 14; step += 1) {
+        final atMs = 1000 + step * 500;
+        final snapshot = _walkedEast(step);
+        session.updateProgress(
+          session.onSnapshot(snapshot, timestampMs: atMs),
+          previewSteps: step,
+          nowMs: atMs,
+        );
+      }
+
+      final result = session.trackingResult!;
+      const boarding = PdrLocalPoint(10, 0);
+      expect(
+        (boarding - result.previewPosition).distance,
+        greaterThan(3),
+        reason: '표시 마커는 여전히 graph의 U자 경로를 따른다',
+      );
+      expect(
+        (boarding - result.rawPreviewPosition).distance,
+        lessThan(1),
+        reason: '원시 절대좌표를 표시하지는 않지만 실제 자유보행은 탑승점에 닿았다',
+      );
+      expect(session.boardingApproachDistanceM, lessThan(1));
+      expect(session.isPositionHeld, isTrue);
+      expect(
+        (session.position!.localM - result.rawPreviewPosition).distance,
+        greaterThan(3),
+        reason: '탑승 근거만 그림자를 쓰고 마커를 원시 좌표로 순간이동시키지 않는다',
+      );
+      expect(session.position!.localM.northM, closeTo(10, 0.01));
+    });
+
+    test('짧은 마지막 연결 간선 전실에 도달하면 부드러운 회전이 빗나가도 붙든다', () {
+      final session = vestibuleEscalatorSession();
+      PdrLocalPoint? firstHeld;
+      for (var step = 0; step <= 16; step++) {
+        final atMs = 1000 + step * 500;
+        final result = session.onSnapshot(
+          _walkedNorth(step),
+          timestampMs: atMs,
+        );
+        session.updateProgress(result, previewSteps: step, nowMs: atMs);
+        if (session.isPositionHeld) firstHeld ??= session.position!.localM;
+      }
+
+      expect(firstHeld, isNotNull);
+      expect(firstHeld!.eastM, closeTo(0, 0.1));
+      expect(firstHeld.northM, closeTo(5.6, 0.1));
+      expect(session.position!.localM, firstHeld);
+      expect(
+        session.trackingResult!.optimisticEdgeId,
+        isNot('vw-wrong'),
+        reason: '탑승 접근 중에는 걸음 거리를 버리지 않고 활성 경로 간선에 남는다',
+      );
+      expect(session.trackingResult!.previewPosition.northM, closeTo(7, 0.1));
+    });
+
+    test('같은 전실을 지나도 경로가 에스컬레이터 탑승을 지목하지 않으면 붙들지 않는다', () {
+      final session = vestibuleEscalatorSession(transferMode: null);
+      for (var step = 0; step <= 16; step++) {
+        final atMs = 1000 + step * 500;
+        final result = session.onSnapshot(
+          _walkedNorth(step),
+          timestampMs: atMs,
+        );
+        session.updateProgress(result, previewSteps: step, nowMs: atMs);
+      }
+
+      expect(session.isNearRouteBoarding, isFalse);
+      expect(session.isPositionHeld, isFalse);
+      expect(session.position!.localM.northM, greaterThan(9));
+    });
+
+    test('경로 후보에서 1차 수직 이동이 잡히면 강한 문턱 전에도 현재 위치를 붙든다', () {
+      final session = sessionVia('escalator');
+      walkTo(session, 5);
+      expect(session.isPositionHeld, isFalse);
+      final beforeRise = session.position!.localM;
+
+      double pressureAt(double altitudeM) =>
+          1013.25 * math.pow(1.0 - altitudeM / 44330.0, 1 / 0.190295);
+      var atMs = 5000;
+      final phases = <EscalatorPhase>[];
+      void altitude(double altitudeM) {
+        atMs += 1069;
+        session.onAltitude(
+          AltitudeSample(
+            timestampMs: atMs,
+            pressureHpa: pressureAt(altitudeM),
+            source: 'test',
+          ),
+        );
+        phases.addAll(session.takePhaseChanges().map((item) => item.phase));
+      }
+
+      for (var index = 0; index < 5; index++) {
+        altitude(0);
+      }
+      for (var index = 1; index <= 3; index++) {
+        altitude(-0.45 * index / 3);
+      }
+
+      expect(session.escalator.isVerticalMotionObserved, isTrue);
+      expect(phases, isNot(contains(EscalatorPhase.verticalMotionDetected)));
+      expect(session.isPositionHeld, isTrue);
+
+      final moved = session.onSnapshot(
+        _walkedToBoardingThenNorth(6),
+        timestampMs: atMs + 500,
+      );
+      session.updateProgress(moved, previewSteps: 6, nowMs: atMs + 500);
+      expect(session.position!.localM.eastM, closeTo(beforeRise.eastM, 0.01));
+      expect(session.position!.localM.northM, closeTo(beforeRise.northM, 0.01));
     });
 
     test('발판 진동이 걸음으로 세어져도 마커는 그 자리다', () {
@@ -224,8 +649,8 @@ void main() {
       walkTo(session, 10);
       final held = session.position!.localM;
 
-      // 탑승 뒤 진동 6걸음(4.2m). 고정 반경 6m 안이라 아직 안 풀린다.
-      walkTo(session, 16);
+      // 탑승 뒤 진동 6걸음(4.2m). 풀기 반경 안이라 아직 안 풀린다.
+      walkRange(session, fromStep: 11, toStep: 16);
 
       expect(session.position!.localM.eastM, held.eastM);
       expect(session.position!.localM.northM, held.northM);
@@ -280,16 +705,25 @@ void main() {
   });
 
   group('탑승점 접근 — 탈출구', () {
-    test('탑승점에서 멀어지면 고정이 먼저 풀린다', () {
-      // 탑승점 앞에 섰다가 그냥 지나쳐 걸어가는 사람. 고정(8m)이 차단(16m)보다
+    test('탑승 직후에는 8m 밖 가짜 걸음도 잠시 붙들고 이후 실제 통과는 푼다', () {
+      // 탑승점 앞에 섰다가 그냥 지나쳐 걸어가는 사람. 고정 해제(8m)가 차단(16m)보다
       // 먼저 풀려야 걸어가는 마커가 따라간다.
       final session = sessionVia('escalator');
 
       walkTo(session, 10);
       expect(session.isPositionHeld, isTrue);
 
-      // 북쪽으로 13걸음(9.1m) — 푸는 반경 8m 밖.
-      walkTo(session, 23);
+      // 북쪽으로 13걸음(9.1m) — 푸는 반경 밖이어도 기압이 이어받을 유예 안이다.
+      walkRange(session, fromStep: 11, toStep: 22);
+
+      expect(session.isPositionHeld, isTrue);
+
+      // 수직 근거 없이 계속 걸으면 실제 통과다. 유예 뒤에는 기존 탈출구가 산다.
+      final afterGrace = session.onSnapshot(
+        _walkedToBoardingThenNorth(22),
+        timestampMs: 20000,
+      );
+      session.updateProgress(afterGrace, previewSteps: 22, nowMs: 20000);
 
       expect(session.isPositionHeld, isFalse);
       expect(session.isNearRouteBoarding, isTrue, reason: '차단은 아직 살아 있다');
@@ -302,24 +736,34 @@ void main() {
 
       // 북쪽으로 25걸음(17.5m) — 허가 반경 16m 밖.
       walkTo(session, 35);
+      final afterGrace = session.onSnapshot(
+        _walkedToBoardingThenNorth(35),
+        timestampMs: 20000,
+      );
+      session.updateProgress(afterGrace, previewSteps: 35, nowMs: 20000);
 
       expect(session.isNearRouteBoarding, isFalse);
       expect(session.isPositionHeld, isFalse);
     });
 
-    test('탑승점 앞에 계속 서 있어도 40초가 지나면 둘 다 접는다', () {
+    test('탑승점 앞에 계속 서 있어도 40초간 움직임이 없으면 둘 다 접는다', () {
       // 거리로는 영영 안 풀리는 경우의 상한. 줄을 서서 기다리는 동안이라
       // 게이트가 먼저 풀려도 잃는 것이 없다.
       final session = sessionVia('escalator');
       walkTo(session, 10);
       expect(session.isPositionHeld, isTrue);
 
-      // 걸음이 안 늘어난 채 41초가 흐른다.
+      // 15초 탑승 보호 뒤 걸음이 안 늘어난 채 40초 이상 흐른다.
       final heldUntilMs = 1000 + 10 * 500;
-      for (var second = 1; second <= 41; second += 1) {
-        session.onSnapshot(
+      for (var second = 1; second <= 70; second += 1) {
+        final result = session.onSnapshot(
           _walkedToBoardingThenNorth(10),
           timestampMs: heldUntilMs + second * 1000,
+        );
+        session.updateProgress(
+          result,
+          previewSteps: 10,
+          nowMs: heldUntilMs + second * 1000,
         );
       }
 
@@ -330,7 +774,7 @@ void main() {
 
   group('탑승점 접근 — 남은거리는 계속 간다', () {
     test('차단 반경 안이어도 고정 전까지는 진행률이 갱신된다', () {
-      // 차단(16m)과 고정(6m)을 같은 조건으로 묶으면 ETA가 탑승점 16m 전부터
+      // 차단(16m)과 위치 고정을 같은 조건으로 묶으면 ETA가 탑승점 16m 전부터
       // 멈춘다. 차단은 재탐색만 막고 진행률은 그대로 흘러야 한다.
       final session = IndoorGuidanceSession(now: () => now)
         ..attach(buildingId: 'b1')
@@ -371,7 +815,7 @@ void main() {
       expect(session.isPositionHeld, isFalse);
       final atGateOpen = session.displayProgress!.remainingM;
 
-      // 고정 반경(6m) 밖까지만 더 걷는다: 30걸음 = 21m, 남은 9m.
+      // 가시 고정 반경(1.5m) 밖까지만 더 걷는다: 30걸음 = 21m, 남은 9m.
       for (var steps = 21; steps <= 30; steps += 1) {
         remainingAt(steps);
       }

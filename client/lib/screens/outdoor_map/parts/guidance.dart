@@ -294,7 +294,6 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
     // 뒀던 것이 남으면, 새로 "안내 시작"을 눌러도 화면이 따라오지 않는다.
     _followCameraReleasedByUser = false;
     _followCameraBearingDeg = null;
-    _followCameraTarget = null;
     // 이 목록이 비었다는 것이 곧 "실내 구간만 살아 있다"이다([_guidanceStartRoutePoints]).
     final points = _guidanceStartRoutePoints;
     // **실내→야외 여정([showIndoorToOutdoorRouteTo])도 실내 갈래를 탄다.** 그
@@ -511,9 +510,15 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
     // 몇 미터 앞을 말한다. 실내 오버레이만으로 가르면 안 되는 이유는, 그 오버레이가
     // 건물로 확대하기만 해도 켜지기 때문이다(indoor_entry_zoom.dart).
     //
-    // 기준은 "우리가 이 사람이 실내 어디에 있는지 아는가"다. 그게 곧 진행률의
-    // 출처이고, 진입을 실제로 감지해 앵커를 잡았을 때만 참이 된다.
-    if (_guidance.displayProgress == null) return null;
+    // 기준은 "우리가 이 사람이 실내 어디에 있는지 아는가"다. 보통은 진행률이
+    // 그 근거지만, 안내 시작 직후 첫 걸음 전에는 출발 앵커만 먼저 존재한다.
+    // 바로 옆 에스컬레이터에서는 그 짧은 틈에도 탑승 안내가 보여야 한다.
+    if (!canShowIndoorRouteGuidance(
+      hasProgress: _guidance.displayProgress != null,
+      hasIndoorPosition: _guidance.position != null,
+    )) {
+      return null;
+    }
     final multi = _indoorMultiFloorRoute;
     final segment = multi?.segmentForFloor(_activeFloor ?? '');
     final allowArrival =

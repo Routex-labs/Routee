@@ -2,11 +2,14 @@
 ///
 /// `zoom_math.dart`와 같은 성격이다 — 언제 따라갈지·어떤 값으로 따라갈지 같은
 /// 판단은 여기 없고(`screens/outdoor_map/`), "이 각과 저 각을 섞으면 몇 도인가",
-/// "이번엔 돌려도 되는가"만 있다. 조정 값의 자리는 `outdoor_map_tuning.dart`.
+/// "이번엔 돌려도 되는가"만 있다. 조정 값의 자리는 `outdoor_map_tuning.dart`이고,
+/// 왜 프레임마다 보간하는지는 `docs/client/location-marker-glide.md`.
 library;
 
 import 'package:indoor_pdr_core/indoor_pdr_core.dart'
     show normalizeDegrees, shortestDeltaDegrees;
+
+import '../../domain/guidance/location_marker_glide.dart' show glideFollowFactor;
 
 /// [from]에서 [to]로 **0/360을 넘어 최단 경로로** 보간한 각(도).
 ///
@@ -44,32 +47,39 @@ double blendedFollowBearingDeg({
   );
 }
 
-/// 이번 스냅샷에 카메라를 명령할 bearing. **null이면 이번엔 움직이지 않는다.**
+/// 화면이 지금 그리고 있는 각([shown])을 목표([target]) 쪽으로 [elapsed]만큼
+/// 당긴 값. **명령을 띄엄띄엄 보내는 대신 매 프레임 이 값으로 카메라를 놓는다.**
 ///
-/// 거르는 이유는 둘이다. [notBeforeMs]는 걸음마다 애니메이션을 쏘아 지도가 떠는
-/// 것을 막고(최소 간격), 동시에 다른 카메라 주인이 도는 동안의 유예로도 쓴다 —
-/// 둘 다 "이 시각 전에는 손대지 않는다"라 값 하나면 된다. 데드밴드([deadbandDeg])
-/// 는 몇 도짜리 나침반 흔들림으로 화면이 돌지 않게 한다. 데드밴드에 걸리면 각을
-/// **이전 값 그대로** 두고 위치만 따라가므로 [targetMoved]가 필요하다.
+/// 규칙 셋이 겹친다.
 ///
-/// [lastBearingDeg]가 null이면 아직 한 번도 안 돌린 것이라 데드밴드를 건너뛴다.
-double? nextFollowCameraBearingDeg({
-  required int nowMs,
-  required int notBeforeMs,
-  required double? lastBearingDeg,
-  required bool targetMoved,
-  required double desiredBearingDeg,
-  required double deadbandDeg,
+/// 1. **데드존**([deadZoneDeg]) — 남은 각이 이보다 작으면 아예 안 돈다. 실내
+///    나침반은 서 있어도 몇 도씩 흔들리는데, 그걸 따라가면 지도가 계속 잘게
+///    진동해 읽을 수가 없다. 목표를 계단으로 만들지 않고 **화면이 안 따라가는**
+///    쪽으로 거르는 것이 요점이다 — 목표를 계단으로 만들면 그 계단이 그대로
+///    회전에 보인다.
+/// 2. **지수 평활**([timeConstant]) — 남은 각에 비례해 다가간다. 몸이 멈추면
+///    남은 각이 줄면서 화면도 같이 멎는다. 관성이 없다.
+/// 3. **각속도 상한**([maxRateDegPerSec]) — 안전판이다. 층 fit이나 하차 조준
+///    뒤 팔로우가 돌아올 때처럼 각이 통째로 벌어진 경우에만 걸린다.
+///
+/// 근거와 버린 대안은 `docs/client/location-marker-glide.md`.
+double glidedFollowBearingDeg({
+  required double shown,
+  required double target,
+  required Duration elapsed,
+  required Duration timeConstant,
+  required double maxRateDegPerSec,
+  required double deadZoneDeg,
 }) {
-  if (nowMs < notBeforeMs) return null;
-  final desired = normalizeDegrees(desiredBearingDeg);
-  if (lastBearingDeg == null) return desired;
-  final held =
-      shortestDeltaDegrees(desired - lastBearingDeg).abs() < deadbandDeg
-      ? normalizeDegrees(lastBearingDeg)
-      : desired;
-  // 각도 흔들림도 데드밴드에 먹히고 위치도 그대로면 명령할 것이 없다. 서 있는
-  // 동안 초당 몇 번씩 같은 자리로 animateCamera를 쏘지 않기 위한 갈래다.
-  if (!targetMoved && held == normalizeDegrees(lastBearingDeg)) return null;
-  return held;
+  final delta = shortestDeltaDegrees(target - shown);
+  if (delta.abs() < deadZoneDeg) return normalizeDegrees(shown);
+  final eased = delta * glideFollowFactor(elapsed, timeConstant);
+  final cap = maxRateDegPerSec * elapsed.inMicroseconds / 1000000;
+  final step = eased.abs() <= cap ? eased : (eased.isNegative ? -cap : cap);
+  return normalizeDegrees(shown + step);
 }
+
+/// 두 각의 최단 차(도, 절댓값). 데드밴드와 수렴 판정이 **같은 산수**를 보게
+/// 한다 — 한쪽만 360을 못 넘으면 경계에서 서로 다른 답을 낸다.
+double bearingGapDeg(double a, double b) =>
+    shortestDeltaDegrees(a - b).abs();
