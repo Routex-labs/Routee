@@ -30,10 +30,6 @@ const locationMarkerGlideHeadingTimeConstant = Duration(milliseconds: 160);
 /// 본다. 걸음 한 번(0.7m)이나 맵매칭 보정(1~3m)은 이 아래라 그대로 흐른다.
 const locationMarkerGlideSnapM = 4.0;
 
-/// 보간 틱 간격. 32ms(≈31fps)는 천천히 움직이는 점이 이어져 보이는 하한이고,
-/// 매 틱 네이티브 소스를 다시 쓰므로 60fps까지 올릴 이유는 없다.
-const locationMarkerGlideFrame = Duration(milliseconds: 32);
-
 /// 남은 거리가 이보다 작으면 목표에 붙었다고 보고 정확히 목표를 그린다(m).
 /// 지수 평활은 영원히 도착하지 않으므로 끝을 정해 줘야 타이머가 멈춘다.
 const _settleM = 0.05;

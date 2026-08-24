@@ -10,12 +10,16 @@ const _origin = LatLng(37.5, 127.0);
 /// 반올림 없는 거리. `Distance()` 기본값은 정수 미터라 0.6m와 0m을 못 가른다.
 const _distance = Distance(roundResult: false);
 
+/// 60Hz 화면의 프레임 하나. 실제 보간은 vsync 틱이 준 **실제 경과 시간**으로
+/// 하므로(`Ticker`), 여기서는 흔한 프레임 길이 하나를 표본으로 쓴다.
+const _frame = Duration(milliseconds: 16);
+
 /// 한 걸음(0.7m)만큼 앞선 목표를 주고 [ticks]번 틱을 흘린다.
 LocationMarkerGlide _walkedOneStep({required int ticks}) {
   final glide = LocationMarkerGlide()..aimAt(_origin, headingDeg: 0);
   glide.aimAt(_eastOf(_origin, 0.7), headingDeg: 0);
   for (var i = 0; i < ticks; i++) {
-    glide.advance(locationMarkerGlideFrame);
+    glide.advance(_frame);
   }
   return glide;
 }
@@ -52,7 +56,7 @@ void main() {
       glide.aimAt(target, headingDeg: 0);
       var previous = _origin.longitude;
       for (var i = 0; i < 10; i++) {
-        glide.advance(locationMarkerGlideFrame);
+        glide.advance(_frame);
         expect(glide.point!.longitude, greaterThan(previous));
         expect(glide.point!.longitude, lessThanOrEqualTo(target.longitude));
         previous = glide.point!.longitude;
@@ -71,8 +75,8 @@ void main() {
         walkedM += 0.7;
         final target = _eastOf(_origin, walkedM);
         glide.aimAt(target, headingDeg: 0);
-        for (var tick = 0; tick < (500 / 32).floor(); tick++) {
-          glide.advance(locationMarkerGlideFrame);
+        for (var tick = 0; tick < (500 / _frame.inMilliseconds).floor(); tick++) {
+          glide.advance(_frame);
         }
         lastLagM = _distance(glide.point!, target);
         // 걸음 하나(0.7m)보다 뒤처지면 사용자가 지나온 자리를 그리게 된다.
@@ -83,7 +87,7 @@ void main() {
     });
 
     test('멈춰 서면 목표에 붙고 타이머가 스스로 멈춘다', () {
-      final glide = _walkedOneStep(ticks: (1000 / 32).ceil());
+      final glide = _walkedOneStep(ticks: (1000 / _frame.inMilliseconds).ceil());
       expect(glide.point, _eastOf(_origin, 0.7));
       expect(glide.isSettled, isTrue);
     });
@@ -91,7 +95,7 @@ void main() {
     test('틱이 밀려 늦게 와도 그만큼 더 당긴다', () {
       final slow = LocationMarkerGlide()..aimAt(_origin, headingDeg: 0);
       slow.aimAt(_eastOf(_origin, 0.7), headingDeg: 0);
-      slow.advance(const Duration(milliseconds: 320));
+      slow.advance(_frame * 10);
 
       final steady = _walkedOneStep(ticks: 10);
       expect(
@@ -124,7 +128,7 @@ void main() {
     test('359°에서 1°로 갈 때 짧은 쪽으로 돈다', () {
       final glide = LocationMarkerGlide()..aimAt(_origin, headingDeg: 359);
       glide.aimAt(_origin, headingDeg: 1);
-      glide.advance(locationMarkerGlideFrame);
+      glide.advance(_frame);
       final shown = glide.headingDeg!;
       // 되감으면 358°를 지나간다 — 제자리에서 한 바퀴 도는 그림이다.
       expect(shown > 359 || shown < 1.0001, isTrue, reason: '실제: $shown');
@@ -133,7 +137,7 @@ void main() {
     test('방향을 모르는 목표는 삼각형을 즉시 지운다', () {
       final glide = LocationMarkerGlide()..aimAt(_origin, headingDeg: 30);
       glide.aimAt(_origin);
-      expect(glide.advance(locationMarkerGlideFrame), isTrue);
+      expect(glide.advance(_frame), isTrue);
       expect(glide.headingDeg, isNull);
       expect(glide.isSettled, isTrue);
     });
@@ -145,12 +149,12 @@ void main() {
 
       var ticks = 0;
       while (!glide.isSettled && ticks < 100) {
-        glide.advance(locationMarkerGlideFrame);
+        glide.advance(_frame);
         ticks++;
       }
       expect(glide.headingDeg, 40);
       // 40°를 도는 데 1초를 넘기면 몸을 튼 뒤에도 삼각형이 한참 뒤를 가리킨다.
-      expect(ticks * locationMarkerGlideFrame.inMilliseconds, lessThan(1000));
+      expect(ticks * _frame.inMilliseconds, lessThan(1000));
     });
   });
 }

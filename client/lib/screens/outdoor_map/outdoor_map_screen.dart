@@ -1,4 +1,6 @@
 import 'dart:async';
+
+import 'package:flutter/scheduler.dart' show Ticker;
 import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:math' show Point;
@@ -434,7 +436,8 @@ const _storeFocusMaxZoom = 20.4;
 
 LatLng _toMapLatLng(ll.LatLng point) => LatLng(point.latitude, point.longitude);
 
-class OutdoorMapBodyState extends State<OutdoorMapBody> {
+class OutdoorMapBodyState extends State<OutdoorMapBody>
+    with SingleTickerProviderStateMixin {
   final Completer<void> _startupMinimumElapsed = Completer<void>();
   Timer? _startupMinimumTimer;
 
@@ -679,12 +682,21 @@ class OutdoorMapBodyState extends State<OutdoorMapBody> {
   /// "도착했나"까지 늦게 판정되면 안 된다.
   final LocationMarkerGlide _markerGlide = LocationMarkerGlide();
 
-  /// 보간 틱. 표시값이 목표에 붙으면 스스로 멈춘다([_syncMarkerGlideTicker]).
-  Timer? _markerGlideTimer;
+  /// 보간 틱. **vsync에 맞춰 매 프레임** 돌고, 표시값이 목표에 붙으면 스스로
+  /// 멈춘다([_syncMarkerGlideTicker]).
+  ///
+  /// 타이머(32ms)로 돌리던 것을 옮겨 왔다. 이 폰은 120Hz라 32ms 틱 하나가 네
+  /// 프레임 동안 그대로 서 있었고, 카메라 각이 **한 틱씩 계단으로** 도는 것이
+  /// 그대로 보였다(maplibre의 moveCamera는 우리가 보낸 순간에만 각을 바꾼다).
+  Ticker? _markerGlideTicker;
 
-  /// 직전 틱 시각(ms). Timer.periodic은 틱을 정확히 지키지 않으므로 실제로 흐른
+  /// 직전 틱의 누적 경과. 프레임 간격은 기기·부하에 따라 달라지므로 실제로 흐른
   /// 시간을 재서 [LocationMarkerGlide.advance]에 넘긴다.
-  int _markerGlideTickAtMs = 0;
+  Duration _markerGlideTickAt = Duration.zero;
+
+  /// 카메라 명령이 아직 네이티브에서 안 돌아왔다. 프레임마다 새로 쏘면 채널에
+  /// 밀려 오히려 늦게 도착한다 — 돌아올 때까지 그 프레임은 건너뛴다.
+  bool _followCameraInFlight = false;
 
   /// 지금 그리는 마커가 **어떤 뜻**인지. 뜻이 바뀌는 순간(내 층 위치 ↔ 다른 층
   /// 잔상 ↔ GPS 폴백)은 걸어서 간 이동이 아니므로 보간하지 않고 옮긴다.
@@ -1131,7 +1143,7 @@ class OutdoorMapBodyState extends State<OutdoorMapBody> {
     _pdrAltitudeSub?.cancel();
     _pdrRawMotionSub?.cancel();
     _escalatorGlideTimer?.cancel();
-    _markerGlideTimer?.cancel();
+    _markerGlideTicker?.dispose();
     _arrivalRouteClearTimer?.cancel();
     _floorSwapVeilTimer?.cancel();
     _debugRideCompletionTimer?.cancel();

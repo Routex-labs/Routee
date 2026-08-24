@@ -264,32 +264,36 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
       _stopMarkerGlideTicker();
       return;
     }
-    if (_markerGlideTimer != null) return;
-    _markerGlideTickAtMs = DateTime.now().millisecondsSinceEpoch;
-    _markerGlideTimer = Timer.periodic(locationMarkerGlideFrame, (timer) {
-      final controller = _mapController;
-      if (!mounted || controller == null || !_styleReady) {
-        _stopMarkerGlideTicker();
-        return;
-      }
-      final nowMs = DateTime.now().millisecondsSinceEpoch;
-      final elapsed = Duration(milliseconds: nowMs - _markerGlideTickAtMs);
-      _markerGlideTickAtMs = nowMs;
-      if (_markerGlide.advance(elapsed)) {
-        unawaited(_writePdrMarkerSource(controller));
-      }
-      // 마커를 옮긴 **뒤에** 카메라를 잡는다. 카메라 목표점이 방금 옮긴 자리라,
-      // 순서를 뒤집으면 화면이 한 프레임 지난 자리를 가운데 둔다.
-      _driveFollowCamera(controller, elapsed);
-      if (_markerGlide.isSettled && !_followCameraNeedsFrame) {
-        _stopMarkerGlideTicker();
-      }
-    });
+    if (_markerGlideTicker != null) return;
+    _markerGlideTickAt = Duration.zero;
+    _markerGlideTicker = createTicker(_onMarkerGlideFrame)..start();
+  }
+
+  /// 프레임 하나. [total]은 틱이 시작된 뒤의 **누적** 경과라 직전 값과 뺀다.
+  void _onMarkerGlideFrame(Duration total) {
+    final controller = _mapController;
+    if (!mounted || controller == null || !_styleReady) {
+      _stopMarkerGlideTicker();
+      return;
+    }
+    final elapsed = total - _markerGlideTickAt;
+    _markerGlideTickAt = total;
+    if (elapsed <= Duration.zero) return;
+
+    if (_markerGlide.advance(elapsed)) {
+      unawaited(_writePdrMarkerSource(controller));
+    }
+    // 마커를 옮긴 **뒤에** 카메라를 잡는다. 카메라 목표점이 방금 옮긴 자리라,
+    // 순서를 뒤집으면 화면이 한 프레임 지난 자리를 가운데 둔다.
+    _driveFollowCamera(controller, elapsed);
+    if (_markerGlide.isSettled && !_followCameraNeedsFrame) {
+      _stopMarkerGlideTicker();
+    }
   }
 
   void _stopMarkerGlideTicker() {
-    _markerGlideTimer?.cancel();
-    _markerGlideTimer = null;
+    _markerGlideTicker?.dispose();
+    _markerGlideTicker = null;
   }
 
   /// **다른 층에 서 있을 때** 흐리게 그릴 자리. 그릴 근거가 없으면 null.
@@ -600,22 +604,30 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
 
     _followCameraShownBearingDeg = next;
     _followCameraShownPoint = here;
+    // 앞 명령이 아직 안 돌아왔으면 이번 프레임은 계산만 하고 건너뛴다. 보간은
+    // 시간으로 하므로 건너뛴 프레임은 다음 명령이 그만큼 더 간 값으로 메운다.
+    if (_followCameraInFlight) return false;
+    _followCameraInFlight = true;
     _followCameraDrivenAtMs = nowMs;
     // **애니메이션 없이 놓는다.** 보간은 이미 우리가 하고 있어서, 여기에
-    // animateCamera를 걸면 프레임마다 새 애니메이션이 앞엣것을 잘라 되레 떤다.
+    // animateCamera를 걸면 프레임마다 새 애니메이션이 앞엣것을 잘라 되레 떤다
+    // (iOS에서 animateCamera는 곡선으로 나는 flyTo다).
     unawaited(
-      controller.moveCamera(
-        CameraUpdate.newCameraPosition(
-          CameraPosition(
-            target: _toGl(_followCameraTargetFor(here, next)),
-            zoom: indoorFollowZoom,
-            bearing: next,
-            // **기울이지 않는다.** 도면 판독이 쉽고 매장 라벨이 안 가려지는 쪽을
-            // 골랐다. 3D로 눕히면 앞쪽이 더 보이는 대신 도면이 사다리꼴로 찌그러진다.
-            tilt: 0,
-          ),
-        ),
-      ),
+      controller
+          .moveCamera(
+            CameraUpdate.newCameraPosition(
+              CameraPosition(
+                target: _toGl(_followCameraTargetFor(here, next)),
+                zoom: indoorFollowZoom,
+                bearing: next,
+                // **기울이지 않는다.** 도면 판독이 쉽고 매장 라벨이 안 가려지는
+                // 쪽을 골랐다. 3D로 눕히면 앞쪽이 더 보이는 대신 도면이
+                // 사다리꼴로 찌그러진다.
+                tilt: 0,
+              ),
+            ),
+          )
+          .whenComplete(() => _followCameraInFlight = false),
     );
     return true;
   }
