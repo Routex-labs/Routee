@@ -120,13 +120,44 @@ void main() {
     positions.add(atEntrance());
     await tester.pump(const Duration(milliseconds: 50));
     await drain(tester);
+    await tester.pump();
     return positions;
   }
+
+  /// 시작 덮개는 **최소 1.2초**를 채운다. 그 전에 층 질문이 올라오면 로고가
+  /// 한 프레임 번쩍이고 사라진다.
+  testWidgets('시작 후 1.2초 전에는 층 질문이 로고를 덮지 않는다', (tester) async {
+    final positions = StreamController<Position>.broadcast();
+    addTearDown(positions.close);
+    watchPosition = () => positions.stream;
+    await tester.pumpWidget(
+      MaterialApp(theme: AppTheme.light, home: const MapShellScreen()),
+    );
+    await drain(tester);
+
+    positions.add(atEntrance());
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pump(const Duration(milliseconds: 200));
+
+    expect(find.byKey(const Key('startup-loading-overlay')), findsOneWidget);
+    expect(find.text('몇 층에 계신가요?'), findsNothing);
+
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pump();
+    expect(find.text('몇 층에 계신가요?'), findsOneWidget);
+    expect(
+      find.byKey(const Key('entry-floor-transition-background')),
+      findsOneWidget,
+    );
+  });
 
   testWidgets('앱을 건물 안에서 켜면 몇 층인지 묻는다', (tester) async {
     await launchInside(tester);
 
     expect(find.text('몇 층에 계신가요?'), findsOneWidget);
+    // 기본 지도는 아직 준비 과정이므로 질문 화면 뒤에서 시작 덮개가 계속 가린다.
+    expect(find.byKey(const Key('startup-loading-overlay')), findsOneWidget);
+    expect(find.text('건물 감지 중...'), findsNothing);
     // 층은 엘리베이터 버튼판 순서 그대로 전부 고를 수 있어야 한다.
     expect(find.byKey(const ValueKey('entry-floor-2F')), findsOneWidget);
     expect(find.byKey(const ValueKey('entry-floor-1F')), findsOneWidget);
@@ -148,6 +179,19 @@ void main() {
       tester.widget<FloorSelector>(find.byType(FloorSelector)).selectedFloor,
       '2F',
     );
+    expect(find.byKey(const Key('startup-loading-overlay')), findsNothing);
+  });
+
+  testWidgets('위치를 끝내 받지 못해도 시작 덮개에 갇히지 않는다', (tester) async {
+    watchPosition = () => const Stream<Position>.empty();
+    await tester.pumpWidget(
+      MaterialApp(theme: AppTheme.light, home: const MapShellScreen()),
+    );
+
+    expect(find.byKey(const Key('startup-loading-overlay')), findsOneWidget);
+    await tester.pump(const Duration(seconds: 10));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('startup-loading-overlay')), findsNothing);
   });
 
   testWidgets('건너뛰면 기본 층 그대로 두고 지도로 돌아간다', (tester) async {

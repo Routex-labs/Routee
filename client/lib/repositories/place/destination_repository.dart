@@ -22,7 +22,7 @@ abstract class DestinationRepository {
   /// 서버가 세션을 유지하지 않으므로 [selectedFacets]·[showAll]은 **매 요청에
   /// 다시 실어야** 한다. 화면 분기의 유일한 근거는 반환값의 `mode`다.
   ///
-  /// 설계는 `docs/backend/native/conversational-discovery.md` 8-2·8-3절.
+  /// 설계는 `docs/native/conversational-discovery.md` 8-2·8-3절.
   Future<DiscoveryResult> searchDestinationsAi(
     String buildingId,
     String query, {

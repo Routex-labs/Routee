@@ -10,59 +10,34 @@
 
 ## 백엔드 실행
 
-일상 개발과 기능 검증은 Docker 대신 `backend/`의 로컬 Python 가상환경을 사용한다.
-프로젝트 기준 버전은 Python 3.12다.
-아래 PowerShell 블록은 각각 저장소 루트에서 시작한다.
+**백엔드는 이 저장소에 없다.** 일상 개발에서는 아예 띄우지 않는다 — 배포된 Cloud Run
+(`https://navigation-api-...run.app`)에 붙는다. 그 주소를 `config.local.json`의
+`API_BASE_URL`에 넣으면 끝이고, 아래 [Flutter 실행](#flutter-실행)으로 바로 간다.
 
-최초 1회 또는 `requirements*.txt`가 바뀌었을 때:
-
-```powershell
-Set-Location backend
-py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-```
-
-macOS:
+서버를 고쳐야 할 때만 [Routex-labs/backend](https://github.com/Routex-labs/backend)를 받는다.
 
 ```bash
+git clone https://github.com/Routex-labs/backend.git
 cd backend
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
+./gradlew bootRun          # IntelliJ의 Run 버튼도 같은 것이다
 ```
 
-검증할 때마다 DB를 다시 적재하고 Uvicorn을 실행한다.
-
-```powershell
-Set-Location backend
-# 콘솔을 UTF-8로 고정하고, python도 UTF-8로 출력하게 한다. 둘을 맞춰야 한글 로그가 안 깨진다
-# (python은 파이프될 때 기본 CP949로 출력하므로 콘솔만 UTF-8로 바꾸면 오히려 깨진다).
-[Console]::OutputEncoding = [Text.Encoding]::UTF8
-$OutputEncoding = [Text.Encoding]::UTF8
-$env:PYTHONUTF8 = '1'
-.\.venv\Scripts\Activate.ps1
-python -m scripts.seed.reset_and_seed
-python -m uvicorn app.main:app --reload --reload-dir app --host 0.0.0.0 --port 8001 2>&1 | ForEach-Object { $_; $_ | Out-File ..\backend-local.log -Append -Encoding utf8 }
-```
-
-macOS에서도 저장소 루트에서 `backend/`로 이동하고 같은 순서로 실행한다.
+**별도 WAS는 필요 없다** — 톰캣이 jar 안에 들어 있다. PostgreSQL도 따로 안 띄워도 된다:
+Docker Desktop만 켜져 있으면 `spring-boot-docker-compose`가 컨테이너를 올리고 접속 정보를
+주입한다. 남의 DB(Supabase 등)에 붙으려면 그 저장소의 `.env.example`을 `.env`로 복사한다.
 
 ```bash
-cd backend
-source .venv/bin/activate
-python -m scripts.seed.reset_and_seed
-python -m uvicorn app.main:app --reload --reload-dir app --host 0.0.0.0 --port 8001 2>&1 | tee ../backend-local.log
+curl localhost:8080/health
+curl localhost:8080/buildings
 ```
 
-API는 `http://127.0.0.1:8001`에서 실행된다.
+> **포트가 8080이다.** 클라이언트 기본값은 아직 8001(`api_config.dart`)이라, 로컬 백엔드에
+> 붙일 때는 `API_BASE_URL`을 `http://localhost:8080`으로 명시하거나 스프링 쪽
+> `application.yml`에 `server.port: ${PORT:8001}`을 둔다. 컨테이너는 진입점이 `--server.port`를
+> 명령행으로 넘기므로 그 한 줄에 영향받지 않는다.
 
-```powershell
-Invoke-RestMethod http://127.0.0.1:8001/health
-```
-
-Docker Compose는 일상 개발 실행에 사용하지 않는다. 배포 이미지·컨테이너 환경 호환성을 확인할
-때만 사용하며, 실제 Cloud Run 배포는 [GCP 배포 문서](gcp-instance.md)를 따른다.
+원본 도면 데이터와 시드·변환 파이프라인이 필요하면(지름길 상수 재생성 등)
+[Routex-labs/fastapi](https://github.com/Routex-labs/fastapi)에 있다.
 
 ## Flutter 실행
 
@@ -95,25 +70,25 @@ flutter run -d <device-id> --dart-define-from-file=config.local.json
 
 ## 실행 대상별 API 주소
 
-기본값은 Android 에뮬레이터용 `http://10.0.2.2:8001`이다.
+**평소에는 배포된 Cloud Run 주소 하나만 쓴다.** `config.local.json`의 `API_BASE_URL`에 넣으면
+에뮬레이터·실기기·데스크톱이 전부 같은 값을 본다(주소는 [GCP 배포](gcp-instance.md)).
+
+아래 표는 **로컬 스프링에 붙일 때만** 필요하다. 스프링 기본 포트는 8080이다.
 
 | 실행 대상 | `API_BASE_URL` |
 |---|---|
-| Android 에뮬레이터 | 지정하지 않음 (`http://10.0.2.2:8001`) |
-| Android 실기기 | `http://<개발-PC-LAN-IP>:8001` |
-| iOS 시뮬레이터 / macOS 앱 | `http://127.0.0.1:8001` |
-| iPhone 실기기 | `http://<Mac-LAN-IP>:8001` |
-
-실기기는 개발 PC와 같은 Wi-Fi에 연결한 뒤 실행한다.
+| Android 에뮬레이터 | `http://10.0.2.2:8080` (호스트의 localhost를 10.0.2.2로 가리켜야 붙는다) |
+| Android 실기기 | `http://<개발-PC-LAN-IP>:8080` |
+| iOS 시뮬레이터 / macOS 앱 | `http://127.0.0.1:8080` |
+| iPhone 실기기 | `http://<Mac-LAN-IP>:8080` |
 
 ```powershell
-flutter run --dart-define=API_BASE_URL=http://192.168.0.10:8001
+flutter run --dart-define=API_BASE_URL=http://192.168.0.10:8080
 ```
 
-백엔드를 직접 수정하지 않는다면 로컬 서버를 띄우지 않고 **배포된 Cloud Run 백엔드**에 바로 붙어도 된다.
-`API_BASE_URL`에 배포 서비스 URL을 넣으면 되고, 주소는 [GCP 배포 문서](gcp-instance.md)를 참고한다.
-
-실기기 연결이 안 되면 PC 방화벽에서 Python/Uvicorn 또는 TCP 8001의 개인 네트워크 수신을 허용한다. 외부 공개 환경에서는 HTTP 대신 HTTPS 주소를 사용한다.
+`api_config.dart`의 폴백은 아직 8001이라(FastAPI 시절 값), 로컬 스프링에 붙을 때는 **비워 두지
+말고 명시한다.** 실기기는 개발 PC와 같은 Wi-Fi에 두고, 안 붙으면 PC 방화벽에서 TCP 8080의
+개인 네트워크 수신을 허용한다. 외부 공개 환경에서는 HTTP 대신 HTTPS를 쓴다.
 
 ## API 키 주입
 
@@ -133,7 +108,7 @@ flutter run --dart-define-from-file=config.local.json
 
 | 항목 | 발급처 | 쓰는 곳 | 비워 두면 |
 |---|---|---|---|
-| `API_BASE_URL` | 배포 서비스 URL([GCP 배포](gcp-instance.md)) | 백엔드 전체 | 플랫폼별 로컬 기본값(`localhost:8001`, 안드로이드 에뮬레이터는 `10.0.2.2:8001`) |
+| `API_BASE_URL` | 배포 서비스 URL([GCP 배포](gcp-instance.md)) | 백엔드 전체 | 플랫폼별 로컬 폴백(`localhost:8001`, 안드로이드 에뮬레이터는 `10.0.2.2:8001`) — FastAPI 시절 값이라 로컬 스프링(8080)에는 안 맞는다 |
 | `TMAP_APP_KEY` | [openapi.sk.com](https://openapi.sk.com) 앱 등록 | 보행자 경로, POI 통합검색 | 경로는 직선 목업, 건물 밖 장소 검색은 꺼짐 |
 | `KAKAO_REST_KEY` | [developers.kakao.com](https://developers.kakao.com) → [앱 키]의 **REST API 키** | 대중교통 경로 | 대중교통 버튼이 사라짐 |
 | `VWORLD_API_KEY` | [vworld.kr/dev](https://www.vworld.kr/dev) 도메인 등록 | 배경지도 타일 | OSM 타일로 대체 |

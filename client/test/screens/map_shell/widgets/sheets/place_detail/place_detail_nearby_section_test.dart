@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:navigation_client/map/icon/category_icon.dart';
 import 'package:navigation_client/theme/app_theme.dart';
 import 'package:navigation_client/domain/route/dijkstra.dart';
 import 'package:navigation_client/domain/store/nearby_stores.dart';
@@ -7,12 +8,18 @@ import 'package:navigation_client/models/place/store_index_entry.dart';
 import 'package:navigation_client/screens/map_shell/widgets/sheets/place_detail/place_detail_nearby_section.dart';
 
 void main() {
-  NearbyStore nearby(String name, double distanceM, {String floor = 'B2'}) => (
+  NearbyStore nearby(
+    String name,
+    double distanceM, {
+    String floor = 'B2',
+    String? category,
+  }) => (
     store: StoreIndexEntry(
       id: name,
       name: name,
       floorId: 'floor',
       floorName: floor,
+      category: category,
       subcategory: '카페·베이커리',
     ),
     reach: NodeReach(distanceM: distanceM, costM: distanceM),
@@ -39,6 +46,24 @@ void main() {
   });
 
   // "근처 매장 (없음)"은 정보가 아니라 고장으로 읽힌다.
+  testWidgets('아이콘은 그 매장의 대분류 색을 쓴다', (tester) async {
+    // 파랑 하나로 칠하던 자리다. 지도에서 그 매장 배지는 대분류 색인데 목록만
+    // 파랑이면 같은 매장이 두 색으로 보인다.
+    await tester.pumpWidget(
+      subject(
+        PlaceNearbySection(
+          stores: [nearby('나스', 24, category: '뷰티')],
+          onSelect: (_) {},
+        ),
+      ),
+    );
+
+    // subcategory가 `카페·베이커리`라 글리프는 커피잔이다(storeIconFor).
+    final icon = tester.widget<Icon>(find.byIcon(Icons.local_cafe_outlined));
+    expect(icon.color, categoryColorFor('뷰티'));
+    expect(icon.color, isNot(AppColors.primary));
+  });
+
   testWidgets('고를 것이 없으면 제목까지 그리지 않는다', (tester) async {
     await tester.pumpWidget(
       subject(const PlaceNearbySection(stores: [], onSelect: null)),

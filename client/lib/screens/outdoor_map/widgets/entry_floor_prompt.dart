@@ -10,9 +10,9 @@ import 'package:routex_design_system/routex_design_system.dart';
 
 /// 층을 고르게 하고 고른 층을 돌려준다. 건너뛰거나 뒤로 가면 null.
 ///
-/// **경로를 불투명하게 두지 않는다.** 불투명하면 아래 지도가 Overlay에서 내려가
-/// 그리기가 멈추고, 이 화면을 닫는 순간 도면이 다시 올라오는 것이 눈에 띈다.
-/// 배경은 이 화면이 직접 칠하므로 보이는 결과는 전면 화면과 같다.
+/// 경로는 투명하게 두어 아래 지도의 렌더링을 유지하되, 전환 중에도 흰 배경은
+/// 항상 불투명하게 칠한다. 화면 전체를 함께 fade하면 첫 프레임의 투명도 사이로
+/// MapLibre가 한 번 비쳐, 시작 화면과 층 질문 사이에 지도가 깜빡인다.
 Future<String?> showEntryFloorPrompt(
   BuildContext context, {
   required String buildingName,
@@ -26,8 +26,11 @@ Future<String?> showEntryFloorPrompt(
       reverseTransitionDuration: RoutexMotion.transition,
       pageBuilder: (_, _, _) =>
           EntryFloorPrompt(buildingName: buildingName, floors: floors),
-      transitionsBuilder: (_, animation, _, child) =>
-          FadeTransition(opacity: animation, child: child),
+      transitionsBuilder: (context, animation, _, child) => ColoredBox(
+        key: const Key('entry-floor-transition-background'),
+        color: context.routexColors.surfaceBase,
+        child: FadeTransition(opacity: animation, child: child),
+      ),
     ),
   );
 }

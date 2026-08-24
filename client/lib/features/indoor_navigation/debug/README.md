@@ -42,7 +42,8 @@ flowchart LR
 
 ## Session recorder
 
-- JSON `schemaVersion`은 현재 12이다.
+- JSON `schemaVersion`의 단일 출처는 `pdr_debug_session_recorder.dart`다. 판별 이력은
+  docs/pdr/pdr-dev-integration.md의 스키마 이력 표에 있다.
 - 품질 표본은 최대 900개로 제한해 장시간 세션에서도 파일 크기가 무한히 늘지 않게 한다.
 - PDR 원본/확정 경로, 보정 상태, runtime warning, 그래프 맵 매칭 결과를 함께 기록한다.
 - `FloorGraph`가 있으면 `FloorMapMatcher`를 사용해 기록 경로를 네트워크에 맞춘 결과도 포함한다.

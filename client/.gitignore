@@ -56,3 +56,7 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# 층 전환 미리보기 PNG. `--dart-define=preview=true`로만 만들어지는 확인용이고,
+# 렌더러가 기기마다 달라 저장소에 두면 CI에서 비교 대상으로 오해받는다.
+/test/preview/

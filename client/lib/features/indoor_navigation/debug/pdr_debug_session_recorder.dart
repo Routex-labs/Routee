@@ -25,15 +25,29 @@ class PdrDebugSessionRecorder {
 
   // 판을 올릴 때마다 `docs/pdr/pdr-dev-integration.md`의 「스키마 이력」에 "그전에는
   // 무엇을 못 가렸나"를 한 줄 적는다. 그게 이 숫자가 존재하는 이유다.
-  static const schemaVersion = 14;
-  static const _maxQualitySamples = 900;
-  static const _maxTrackerInputEvents = 4000;
-  static const _maxRouteProgressSamples = 900;
+  // v18이 늘린 것: 문 근거가 안 걸린 이유와 그때의 최단 거리
+  // `exit_door_closest_miss`, GPS 좌표별 `meters_outside`.
+  // v19가 늘린 것: 도약으로 **거른** GPS 좌표 `gps_rejected_fixes`.
+  // v20이 늘린 것: 진입 시각 ~ 첫 실내 위치 사이의 공백 `indoor_position_gaps`.
+  static const schemaVersion = 20;
 
-  /// 기압 원본 시계열 상한. Android 5Hz·iOS 1Hz라 3000개면 10분(Android) 이상이다.
-  /// 초과하면 오래된 쪽을 버린다 — tracker 입력과 달리 재생 순서 의존이 없다.
-  static const _maxAltimeterSamples = 3000;
-  static const _maxFloorTransitionEvents = 200;
+  // **표본 배열에 상한이 없다** — 품질·복도·tracker 입력·경로 진행·기압·층 전이·
+  // GPS 차이는 세션이 끝날 때까지 무한히 쌓인다.
+  //
+  // 예전에는 900~4000건에서 **오래된 것부터** 버렸다. 그러면 15분을 넘긴 주행에서
+  // 출발 구간이 통째로 사라지는데, 실내→실외→실내 한 세션에서 분석하려는 것이
+  // 바로 그 앞부분이다. 20분 주행 규모는 기압 ~1,200 · 품질 ~1,200 · 걸음 ~1,500 ·
+  // 경로진행 ~1,000으로 합쳐 6천 건 남짓, JSON 1 MB 안팎이라 감당된다.
+  //
+  // 다시 상한이 필요해지면 **주행 시간 × 표본 주기**로 잡는다: 품질·경로진행·
+  // GPS 차이는 1 Hz, 기압은 Android 5 Hz·iOS 1 Hz, tracker 입력은 걸음마다 +
+  // 250 ms heartbeat([_trackerInputHeartbeatMs]), 층 전이는 이벤트 단위다.
+
+  /// 실내 이탈 이벤트 상한. 한 세션에 이탈은 많아야 몇 번이라 넉넉하다 —
+  /// 여기에 걸릴 정도면 판정이 떨고 있다는 뜻이고, 그 사실 자체가 데이터다.
+  /// **위 배열들과 달리 상한을 남긴 유일한 자리다**(시간이 아니라 사건 수라
+  /// 주행 길이를 늘려도 안 자란다).
+  static const _maxIndoorExitEvents = 50;
 
   /// 걸음 변화가 없어도 이 간격마다 한 건은 남긴다. turnPending 타임아웃처럼
   /// 시간만으로 진행되는 전이를 재생하려면 무입력 구간의 시각도 필요하다.
@@ -53,7 +67,6 @@ class PdrDebugSessionRecorder {
   int? _lastTrackerInputAtMs;
   int? _lastTrackerInputSteps;
   int? _lastTrackerInputPreviewSteps;
-  int _droppedTrackerInputEvents = 0;
 
   PdrSnapshot? _latestSnapshot;
   CorridorTrackingResult? _latestCorridorCorrection;
@@ -61,6 +74,14 @@ class PdrDebugSessionRecorder {
   PdrRuntimeStatus _runtimeStatus = const PdrRuntimeStatus.idle();
   Map<String, Object?>? _pedometerFinalize;
   String _sessionBoundary = 'running';
+  final List<Map<String, Object?>> _sessionBoundaries = [];
+  final List<Map<String, Object?>> _indoorStateChanges = [];
+  final List<Map<String, Object?>> _indoorPositionGaps = [];
+
+  /// 진입은 했는데 실내 위치가 아직 없는 구간의 **시작 시각**. 위치가 잡히면
+  /// null로 되돌아간다([_closeIndoorPositionGap]).
+  DateTime? _awaitingIndoorPositionSince;
+  bool _spansBuildingExit = false;
   DateTime? _lastQualitySampleAt;
   int? _lastSampledSteps;
   Map<String, Object?>? _routeContext;
@@ -68,7 +89,28 @@ class PdrDebugSessionRecorder {
 
   final List<Map<String, Object?>> _altimeterSamples = [];
   final List<Map<String, Object?>> _floorTransitionEvents = [];
-  int _droppedAltimeterSamples = 0;
+  final List<Map<String, Object?>> _indoorExitEvents = [];
+
+  /// 문 근거가 **안 걸린** 이유 중 문에 가장 가까웠던 한 건(v18)과 그 호출 횟수.
+  ///
+  /// 걸음마다 갱신되므로 배열로 두면 다른 배열들을 다 합친 것보다 커진다. 알고
+  /// 싶은 것은 하나뿐이다 — **PDR이 문에 얼마나까지 다가갔었나.** 그 최솟값이
+  /// 문 도달 반경(`kExitDoorReachRadiusMeters`)보다 크면 문턱이 아니라 PDR이 문제이고, 작은데도
+  /// 안 걸렸다면 `reason`이 어느 게이트였는지 말해 준다.
+  Map<String, Object?>? _exitDoorClosestMiss;
+  int _exitDoorMissCount = 0;
+  final List<Map<String, Object?>> _gpsPositionDeltas = [];
+
+  /// 도약으로 걸러 낸 좌표(v19). **상한을 안 둔다** — 위 시계열 배열들과 같은
+  /// 이유이고, 여기 쌓이는 건수 자체가 규칙이 얼마나 자주 물었는지다.
+  final List<Map<String, Object?>> _gpsRejectedFixes = [];
+
+  /// 층별 마지막 궤적(v15). **키가 층이라 상한을 따로 안 둔다** — 건물 층 수가
+  /// 곧 상한이다. 같은 층을 다시 밟으면 그 층의 이전 궤적은 덮인다: 앵커가
+  /// 새로 찍히는 순간 PDR 경로도 그 앵커 기준으로 다시 시작하므로, 두 방문을
+  /// 이어 붙일 수 있는 좌표계가 애초에 없다.
+  final Map<String, ({PdrAnchor anchor, List<PdrLocalPoint> rawPath})>
+  _floorRawPaths = {};
   AltimeterStatus _altimeterStatus = const AltimeterStatus.unavailable();
   Map<String, Object?>? _latestAltimeterState;
 
@@ -76,6 +118,13 @@ class PdrDebugSessionRecorder {
 
   void recordSnapshot(PdrSnapshot snapshot, {DateTime? at}) {
     _latestSnapshot = snapshot;
+    // 1 Hz 솎아내기 **앞에서** 층별 궤적을 갱신한다. 층이 바뀌는 순간 이 값이
+    // 마지막으로 본 이전 층 경로라, 여기서 놓치면 [buildJson]이 그 층을 통째로
+    // 잃는다(앵커가 새 층으로 옮겨 가면 `paths`에서도 빠진다).
+    final anchor = _anchor;
+    if (anchor != null) {
+      _floorRawPaths[anchor.floorId] = (anchor: anchor, rawPath: snapshot.path);
+    }
     final now = (at ?? DateTime.now()).toUtc();
     final shouldSample =
         _lastQualitySampleAt == null ||
@@ -92,9 +141,6 @@ class PdrDebugSessionRecorder {
         altimeter: _latestAltimeterState,
       ),
     );
-    if (_qualitySamples.length > _maxQualitySamples) {
-      _qualitySamples.removeAt(0);
-    }
     _lastQualitySampleAt = now;
     _lastSampledSteps = snapshot.steps;
   }
@@ -137,10 +183,6 @@ class PdrDebugSessionRecorder {
       'armed': armed,
       'candidate': candidate,
     };
-    if (_altimeterSamples.length >= _maxAltimeterSamples) {
-      _altimeterSamples.removeAt(0);
-      _droppedAltimeterSamples += 1;
-    }
     _altimeterSamples.add({
       'at_utc': now.toIso8601String(),
       'timestamp_ms': sample.timestampMs,
@@ -156,14 +198,153 @@ class PdrDebugSessionRecorder {
   }) {
     final now = (at ?? DateTime.now()).toUtc();
     for (final event in events) {
-      if (_floorTransitionEvents.length >= _maxFloorTransitionEvents) {
-        _floorTransitionEvents.removeAt(0);
-      }
       _floorTransitionEvents.add({
         'at_utc': now.toIso8601String(),
         ...event.toJson(),
       });
     }
+  }
+
+  /// 실내 이탈이 걸린 순간(v15). [stage]는 `weak`(재무장·기본 층 리셋)와
+  /// `confirmed`(앵커 폐기·PDR 정지) 둘뿐이다.
+  ///
+  /// 이 두 시각을 남기는 이유는 **문을 지난 뒤 궤적이 어떻게 흘렀는지**를
+  /// 사후에 보기 위해서다. 약한 이탈 시점 이후로도 걸음이 쌓이면 실외 PDR이
+  /// 쓸 만하다는 뜻이고, 흩어지면 아니라는 뜻이다.
+  void recordIndoorExitEvent({
+    required String stage,
+    required String reason,
+    String? floorId,
+    double? doorDistanceM,
+    double? gpsAccuracyM,
+    double? metersOutside,
+    DateTime? at,
+  }) {
+    if (_indoorExitEvents.length >= _maxIndoorExitEvents) {
+      _indoorExitEvents.removeAt(0);
+    }
+    _indoorExitEvents.add({
+      'at_utc': (at ?? DateTime.now()).toUtc().toIso8601String(),
+      'stage': stage,
+      'reason': reason,
+      'floor_id': floorId,
+      'door_distance_m': doorDistanceM,
+      'gps_accuracy_m': gpsAccuracyM,
+      'meters_outside': metersOutside,
+      'steps': _latestSnapshot?.steps,
+    });
+  }
+
+  /// 문 근거가 안 걸린 한 건. **가장 가까웠던 것만** 남기고 나머지는 센다.
+  ///
+  /// 거리를 못 잰 건(`doorDistanceM == null`)은 잰 건에 언제나 밀린다 — 문턱을
+  /// 다시 잡을 때 읽는 값이 거리다. 이유 목록의 단일 출처는
+  /// `screens/outdoor_map/entry/indoor_exit_evidence.dart`의 `stepExitDoorEvidence`.
+  void recordExitDoorMiss({
+    required String reason,
+    double? doorDistanceM,
+    String? floorId,
+    DateTime? at,
+  }) {
+    _exitDoorMissCount++;
+    final previous = _exitDoorClosestMiss?['door_distance_m'] as double?;
+    final closer =
+        _exitDoorClosestMiss == null ||
+        (doorDistanceM != null &&
+            (previous == null || doorDistanceM < previous));
+    if (!closer) return;
+    _exitDoorClosestMiss = {
+      'at_utc': (at ?? DateTime.now()).toUtc().toIso8601String(),
+      'reason': reason,
+      'door_distance_m': doorDistanceM,
+      'floor_id': floorId,
+      'steps': _latestSnapshot?.steps,
+    };
+  }
+
+  /// GPS 좌표와 화면이 그리는 "내 위치"의 거리(v15).
+  ///
+  /// [distanceM]이 null이면 둘 중 하나가 없었다는 뜻이다 — **그 구간이 어디였는지도
+  /// 데이터라** 나머지 항목은 그대로 남긴다. [positionSource]는
+  /// `GuidancePositionSource`의 이름(tracked/anchorOnly/estimate)이고, 없으면 null이다.
+  void recordGpsPositionDelta({
+    required double? distanceM,
+    required double gpsAccuracyM,
+    required double metersOutsideM,
+    required String? positionSource,
+    required String verdict,
+    required String? floorId,
+    required bool indoorEntered,
+    DateTime? at,
+  }) {
+    final now = (at ?? DateTime.now()).toUtc();
+    // v20. `position_source`가 처음 값을 갖는 순간이 곧 "마커가 없던 구간"의
+    // 끝이다. 별도 호출을 두지 않는 이유는 그 값이 이미 여기로 오기 때문이다.
+    if (positionSource != null) _closeIndoorPositionGap(now, floorId);
+    _gpsPositionDeltas.add({
+      'at_utc': now.toIso8601String(),
+      'distance_m': distanceM,
+      'gps_accuracy_m': gpsAccuracyM,
+      // v18. `unclear`가 이어지는 구간에서 좌표가 실제로 얼마나 바깥이었는지 —
+      // 약한 이탈의 거리·지속 문턱을 이 시계열로 되짚는다.
+      'meters_outside_m': metersOutsideM,
+      'position_source': positionSource,
+      'building_verdict': verdict,
+      'floor_id': floorId,
+      'indoor_entered': indoorEntered,
+    });
+  }
+
+  /// 도약으로 거른 좌표 한 건(v19).
+  ///
+  /// 남기는 이유는 **다음 실측에서 이 규칙이 맞았는지 보기 위해서**다. 실측에서
+  /// 수신기는 오차 11~13 m를 보고하면서 50~77 m를 튀었다 — [gpsAccuracyM]과
+  /// [jumpM]을 나란히 남겨야 "오차 값을 못 믿는다"는 전제를 다음 로그로 다시
+  /// 확인하거나 뒤집을 수 있다. [allowanceM]은 그때 허용치라, 상한을 다시 잡을
+  /// 때 읽는 값이다.
+  ///
+  /// 규칙과 상수의 단일 출처는
+  /// `screens/outdoor_map/gps/gps_jump_filter.dart`의 `stepGpsJumpFilter`.
+  void recordGpsRejectedFix({
+    required double jumpM,
+    required double allowanceM,
+    required double elapsedSeconds,
+    required double gpsAccuracyM,
+    required bool surrendered,
+    required bool indoorEntered,
+    DateTime? at,
+  }) {
+    _gpsRejectedFixes.add({
+      'at_utc': (at ?? DateTime.now()).toUtc().toIso8601String(),
+      'jump_m': jumpM,
+      'allowance_m': allowanceM,
+      'elapsed_s': elapsedSeconds,
+      'gps_accuracy_m': gpsAccuracyM,
+      'surrendered': surrendered,
+      'indoor_entered': indoorEntered,
+      'steps': _latestSnapshot?.steps,
+    });
+  }
+
+  /// 진입 직후 **위치 마커가 하나도 없던** 구간을 닫는다(v20).
+  ///
+  /// 진입 시각([recordIndoorStateChange])부터 `position_source`가 처음 값을 갖는
+  /// 시각까지다. 실측에서 25초였고, 그동안 야외 GPS 마커는 진입과 동시에 꺼지고
+  /// 실내 마커는 앵커가 없어 안 떠서 화면에 아무것도 없었다. **그 25초가 줄었는지
+  /// 다음 실측에서 숫자로 보려고 남긴다.**
+  ///
+  /// 두 시각의 출처가 다르다 — 진입은 앱 시계, 첫 위치는 GPS 좌표의 timestamp라
+  /// 1초 안팎이 섞인다. 25초 규모를 보는 값이라 그대로 둔다.
+  void _closeIndoorPositionGap(DateTime at, String? floorId) {
+    final since = _awaitingIndoorPositionSince;
+    if (since == null) return;
+    _awaitingIndoorPositionSince = null;
+    _indoorPositionGaps.add({
+      'entered_at_utc': since.toIso8601String(),
+      'first_position_at_utc': at.toIso8601String(),
+      'gap_ms': at.difference(since).inMilliseconds,
+      'floor_id': floorId,
+    });
   }
 
   void recordCorridorCorrection(CorridorTrackingResult result, {DateTime? at}) {
@@ -200,9 +381,6 @@ class PdrDebugSessionRecorder {
       return;
     }
     _corridorSamples.add(sample);
-    if (_corridorSamples.length > _maxQualitySamples) {
-      _corridorSamples.removeAt(0);
-    }
   }
 
   /// corridor tracker가 실제로 받은 입력 이벤트(v10).
@@ -234,13 +412,6 @@ class PdrDebugSessionRecorder {
         _lastTrackerInputAtMs == null ||
         atMs - _lastTrackerInputAtMs! >= _trackerInputHeartbeatMs;
     if (!wasReset && !isNewBatch && !stepsChanged && !staleEnough) return;
-
-    if (_trackerInputEvents.length >= _maxTrackerInputEvents) {
-      // 앞을 버리면 재생이 중간부터 시작돼 상태가 어긋난다. 세션 앞부분을
-      // 온전히 남기고 초과분만 세어 둔다.
-      _droppedTrackerInputEvents += 1;
-      return;
-    }
 
     _trackerInputEvents.add({
       'at_utc': now.toIso8601String(),
@@ -348,7 +519,56 @@ class PdrDebugSessionRecorder {
   void recordPedometerFinalize(Map<String, Object?>? info) =>
       _pedometerFinalize = info;
 
-  void recordSessionBoundary(String boundary) => _sessionBoundary = boundary;
+  /// 세션 경계 한 건. `_sessionBoundary`(마지막 값)와 시계열을 **함께** 남긴다 —
+  /// 마지막 값만으로는 실내→실외→실내 한 세션에서 어디가 실외 구간이었는지
+  /// 가릴 수 없다(경계가 덮어써지므로).
+  void recordSessionBoundary(String boundary, {DateTime? at}) {
+    _sessionBoundary = boundary;
+    _sessionBoundaries.add({
+      'at_utc': (at ?? DateTime.now()).toUtc().toIso8601String(),
+      'boundary': boundary,
+      'steps': _latestSnapshot?.steps,
+    });
+  }
+
+  /// 건물을 나갔지만 **기록은 이어 가는** 경계(디버그 모드 전용).
+  ///
+  /// 원칙은 "기록은 잇고 위치는 잇지 않는다" — 여기서 세운 [spansBuildingExit]는
+  /// 재진입 뒤 새 길안내가 시작돼도 이 레코더를 갈아 끼우지 말라는 표식일 뿐이고,
+  /// 실외 궤적을 다시 들어왔을 때 **위치의 근거로 쓰라는 뜻이 아니다.**
+  void recordBuildingExit({DateTime? at}) {
+    _spansBuildingExit = true;
+    recordSessionBoundary('leftBuilding', at: at);
+  }
+
+  /// 실외 구간을 품은 채 이어 가는 중인 세션인지. 참이면 새 길안내가 시작돼도
+  /// 이 레코더를 새것으로 갈아 끼우면 안 된다 — 나갈 때 걸은 구간이 사라진다.
+  bool get spansBuildingExit => _spansBuildingExit;
+
+  /// 실내 상태가 바뀐 순간과 **그 출처**(v16).
+  ///
+  /// [source]는 `cameraZoom`·`gps`·`sheetTap`·`outsideTap`·`other` 중 하나다.
+  /// `_indoorEntered`가 "도면을 보고 있다"와 "이 사람이 건물 안에 있다"를 겸하고
+  /// 있어서, 확대만으로 켜진 실내 상태와 GPS가 판정한 실내 상태를 파일에서
+  /// 가릴 수 없었다. 그 둘을 가르는 것이 이 배열의 유일한 목적이다.
+  void recordIndoorStateChange({
+    required bool entered,
+    required String source,
+    String? floorId,
+    DateTime? at,
+  }) {
+    final now = (at ?? DateTime.now()).toUtc();
+    // v20. 진입한 순간이 곧 "마커가 없는" 구간의 시작이다. 나가면 잴 대상이
+    // 없어지므로 되돌린다 — 안 지우면 다음 진입의 공백이 실외 구간까지 삼킨다.
+    _awaitingIndoorPositionSince = entered ? now : null;
+    _indoorStateChanges.add({
+      'at_utc': now.toIso8601String(),
+      'entered': entered,
+      'source': source,
+      'floor_id': floorId,
+      'steps': _latestSnapshot?.steps,
+    });
+  }
 
   /// 이번 세션에서 사용자가 따라간 경로가 무엇인지(v11).
   ///
@@ -414,18 +634,12 @@ class PdrDebugSessionRecorder {
       'segment_index': progress.segmentIndex,
       'route_heading_deg': progress.routeHeadingDeg,
     });
-    if (_routeProgressSamples.length > _maxRouteProgressSamples) {
-      _routeProgressSamples.removeAt(0);
-    }
   }
 
   void recordRouteStepAdvance(
     RouteStepAdvance step, {
     TravelDirectionTransition? transition,
   }) {
-    if (_routeStepAdvances.length >= _maxTrackerInputEvents) {
-      _routeStepAdvances.removeAt(0);
-    }
     _routeStepAdvances.add({
       'peak_id': step.peakId,
       'occurred_at_ms': step.occurredAtMs,
@@ -444,9 +658,6 @@ class PdrDebugSessionRecorder {
       'heading_error_deg': step.headingErrorDeg,
     });
     if (transition == null) return;
-    if (_travelDirectionTransitions.length >= _maxTrackerInputEvents) {
-      _travelDirectionTransitions.removeAt(0);
-    }
     _travelDirectionTransitions.add({
       'from': transition.from.name,
       'to': transition.to.name,
@@ -458,9 +669,6 @@ class PdrDebugSessionRecorder {
   }
 
   void recordCheckpointEvent(RouteCheckpointEvent event) {
-    if (_checkpointEvents.length >= _maxTrackerInputEvents) {
-      _checkpointEvents.removeAt(0);
-    }
     _checkpointEvents.add({
       'route_generation': event.routeGeneration,
       'waypoint_node_id': event.waypoint.nodeId,
@@ -547,6 +755,22 @@ class PdrDebugSessionRecorder {
           corridorCorrection?.previewPath ?? const [],
         ),
       },
+      // 층별 궤적(v15). `paths`는 **지금 보고 있는 층**만 그리므로, 층이 바뀌면
+      // 이전 층 궤적이 통째로 빠진다. 이벤트 배열들은 세션 전체를 담는데 궤적만
+      // 마지막 층이라, 층을 오간 세션은 그림을 맞출 수 없었다.
+      // `paths`는 그대로 두고 여기에 층별로 한 번 더 담는다.
+      'paths_by_floor': [
+        for (final entry in _floorRawPaths.entries)
+          {
+            'floor_id': entry.key,
+            'anchor': _anchorJson(entry.value.anchor),
+            'floor_local_m_before_matching': _pointsJson(
+              entry.value.rawPath
+                  .map(FloorCoordinateTransform(entry.value.anchor).toFloor)
+                  .toList(growable: false),
+            ),
+          },
+      ],
       'quality_samples_1hz': [
         for (final sample in _qualitySamples) sample.toJson(),
       ],
@@ -554,7 +778,9 @@ class PdrDebugSessionRecorder {
       // corridor tracker 정확 재생용 입력 이벤트(v10). `kind: 'reset'`에서
       // 상태를 다시 세우고, 이후 `update`를 순서대로 먹이면 재현된다.
       'tracker_input_events': _trackerInputEvents,
-      'tracker_input_dropped': _droppedTrackerInputEvents,
+      // 상한을 없앤 뒤로 두 `*_dropped*` 키는 항상 0이다. **키는 남긴다** —
+      // 이 파일을 읽는 분석 도구가 없는 키에서 깨지는 것보다 0이 낫다.
+      'tracker_input_dropped': 0,
       // 경로 기준 계측(v11). route_context가 null이면 이번 세션은 길찾기 없이
       // 자유보행만 한 것이다.
       'route_context': _routeContext,
@@ -570,16 +796,32 @@ class PdrDebugSessionRecorder {
         'source': _altimeterStatus.source,
         'sensor_name': _altimeterStatus.sensorName,
         'sample_count': _altimeterSamples.length,
-        'dropped_samples': _droppedAltimeterSamples,
+        'dropped_samples': 0,
       },
       'altimeter_samples': _altimeterSamples,
       'floor_transition_events': _floorTransitionEvents,
+      // 실외 이탈 계측(v15). weak는 되돌리기 쉬운 일만, confirmed는 앵커 폐기다.
+      'indoor_exit_events': _indoorExitEvents,
+      'exit_door_closest_miss': _exitDoorClosestMiss == null
+          ? null
+          : {..._exitDoorClosestMiss!, 'sample_count': _exitDoorMissCount},
+      'gps_position_deltas': _gpsPositionDeltas,
+      // 도약으로 거른 좌표(v19). `surrendered`가 true인 건은 **거르다 항복해서
+      // 받아들인** 것이라, 이 값이 잦으면 상한이 너무 빡빡하다는 뜻이다.
+      'gps_rejected_fixes': _gpsRejectedFixes,
       'runtime': {
         'state': _runtimeStatus.state.name,
         'warnings': _runtimeStatus.warnings,
       },
       'pedometer_finalize': _pedometerFinalizeJson(),
       'session_boundary': _sessionBoundary,
+      // 세션 경계 시계열과 실내 상태 변경의 출처(v16). 실내→실외→실내 한 세션의
+      // 실외 구간은 `leftBuilding`~`reEntered` 사이다.
+      'session_boundaries': _sessionBoundaries,
+      'spans_building_exit': _spansBuildingExit,
+      'indoor_state_changes': _indoorStateChanges,
+      // 진입 직후 위치 마커가 하나도 없던 구간(v20). [_closeIndoorPositionGap].
+      'indoor_position_gaps': _indoorPositionGaps,
     };
   }
 
@@ -648,6 +890,10 @@ class PdrDebugSessionRecorder {
       'floor_id': anchor.floorId,
       'floor_local_m': _pointJson(anchor.anchorLocalM),
       'rotation_deg': anchor.rotationDeg,
+      // rotation_deg의 내역. 상수는 코드에서 바로 읽고, 현장에서 돌린 노브 값만
+      // anchor가 들고 온다 — 다음에 상수로 굳힐 근거가 세션 파일에 남아야 한다.
+      'magnetic_declination_deg': magneticDeclinationDeg,
+      'debug_heading_offset_deg': anchor.headingOffsetDeg,
       'pdr_to_floor_axes': {
         'east_to_x': anchor.axes.eastToX,
         'north_to_x': anchor.axes.northToX,

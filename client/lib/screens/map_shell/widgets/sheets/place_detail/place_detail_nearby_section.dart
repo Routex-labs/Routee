@@ -117,6 +117,10 @@ class _NearbyRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final store = nearby.store;
     final category = subcategoryLabelFor(store.subcategory) ?? store.category;
+    // 파랑 하나로 칠하던 자리다. 지도에서 그 매장 배지가 대분류 색인데 목록만
+    // 파랑이면 같은 매장이 두 색으로 보인다 — 카테고리 시트 헤더와 같은 규칙
+    // (색 12% 바탕 + 색 글리프)을 쓴다.
+    final ink = categoryColorFor(store.category ?? '');
 
     return Material(
       color: Colors.transparent,
@@ -131,7 +135,7 @@ class _NearbyRow extends StatelessWidget {
                 width: 38,
                 height: 38,
                 decoration: BoxDecoration(
-                  color: AppColors.blue50,
+                  color: ink.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 alignment: Alignment.center,
@@ -142,7 +146,7 @@ class _NearbyRow extends StatelessWidget {
                     category: store.category,
                   ),
                   size: 20,
-                  color: AppColors.primary,
+                  color: ink,
                 ),
               ),
               const SizedBox(width: 12),

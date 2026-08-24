@@ -1,5 +1,5 @@
 /// 자동완성 인덱스 한 줄. 백엔드 `GET /buildings/{id}/store-index`의 응답 1건과
-/// 1:1 대응한다(`backend/app/dto/building.py`의 `StoreIndexResponse`).
+/// 1:1 대응한다(`app/dto/building.py`의 `StoreIndexResponse`).
 ///
 /// **좌표가 없는 것이 이 모델의 요점이다** — 후보 목록은 이름과 층만 그리는데,
 /// 1640건 전부에 좌표를 붙이면 응답이 333KB에서 최대 1.6배가 된다(K절).

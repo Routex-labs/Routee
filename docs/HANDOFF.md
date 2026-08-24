@@ -257,7 +257,7 @@ adb logcat -v time flutter:V FlutterError:V AndroidRuntime:E '*:S'   # 로그는
 
 **~~에스컬레이터·층 전환 코드는 손대지 않는다.~~ 2026-08-14에 풀렸다.** 사용자가 클라이언트
 쪽 층 전이 코드도 건드려도 된다고 정했다. 다만 **백엔드**의 수직 전이 생성
-(`backend/scripts/transform/vertical_transfers.py`)은 여전히 재작성 예정이라 그대로 둔다 —
+(`scripts/transform/vertical_transfers.py`)은 여전히 재작성 예정이라 그대로 둔다 —
 원래 이 금지는 그쪽 얘기였다.
 
 **실내 도면은 책상에서도 눈으로 확인할 수 있다 — `starbucks`를 친다.** `adb shell input

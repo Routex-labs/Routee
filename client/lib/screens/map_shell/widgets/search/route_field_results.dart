@@ -24,6 +24,7 @@ class RouteFieldResults extends StatelessWidget {
     this.suggestions = const [],
     this.onSuggestionPicked,
     this.reachByNodeId,
+    this.currentFloorId,
   });
 
   final RoutePlanField field;
@@ -34,6 +35,11 @@ class RouteFieldResults extends StatelessWidget {
   final List<StoreSuggestion> suggestions;
   final ValueChanged<StoreSuggestion>? onSuggestionPicked;
   final Map<String, NodeReach>? reachByNodeId;
+
+  /// 지금 보고 있는 층. 거리를 모를 때(위치 미지정) 묶인 시설의 대표를 이 층에서
+  /// 고른다 — 안 넘기면 색인 첫 줄(B6)이 대표가 되어, B2에 서 있어도 `화장실`이
+  /// B6로 나온다([nearestByWalkingDistance]).
+  final String? currentFloorId;
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -143,6 +149,7 @@ class RouteFieldResults extends StatelessWidget {
     final nearest = nearestByWalkingDistance(
       stores: suggestion.stores,
       reachByNodeId: reachByNodeId,
+      currentFloorId: currentFloorId,
     );
     final store = nearest.store;
     final count = suggestion.stores.length;

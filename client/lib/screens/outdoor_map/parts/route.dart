@@ -38,35 +38,55 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
     _showSnack('층 전환을 완료하지 못했습니다. 현재 층과 위치를 다시 확인해주세요.');
   }
 
-  /// 디버그 전용 — 실제 탑승 없이 층 전환 시퀀스를 태운다.
+  /// 디버그 전용 — 실제 탑승 없이 [up] 방향 층 전환 시퀀스를 태운다.
   ///
   /// **판정기를 흉내 내는 것이지 우회하는 것이 아니다.** 확정 시 타는 경로에 합성
   /// transition을 넣을 뿐이라, 이 버튼으로 본 연출이 곧 실기기의 연출이다.
   ///
   /// 판정기([EscalatorTransitionDetector])는 건드리지 않는다 — 재작성이 예정돼 있어
   /// 디버그 주입구를 뚫으면 갈아엎을 표면만 는다.
-  void _debugForceFloorTransition() {
-    final transfer = _debugForceableTransfer;
+  ///
+  /// **길안내 없이도 된다.** 책상에서는 GPS가 실내 상태를 지워 안내를 끝까지
+  /// 못 태우는데, 층 전환 연출은 그와 무관하게 봐야 한다. 안내 중이고 경로가
+  /// 마침 같은 층으로 가는 환승을 지목하고 있으면 그 노드를 쓰고, 아니면 도면의
+  /// 탑승 노드를 직접 고른다 — 도착 노드는 어느 쪽이든 이름 규칙으로 찾는다
+  /// ([findEscalatorArrivalNode]).
+  void _debugForceFloorTransition({required bool up}) {
     final floor = _activeFloor;
-    if (transfer == null || floor == null) return;
-    final (:segment, :nextFloorLabel) = transfer;
-    // 자동 전환 판정기와 같은 층 라벨 순위 규칙을 쓴다.
-    final goingUp = floorLabelRank(nextFloorLabel) > floorLabelRank(floor);
+    if (floor == null) return;
+    // 앞선 강제 전환이 아직 하차를 기다리는 중이면 지금 끝낸다. 안 그러면
+    // 이번 전환이 그 뒤에 줄을 서서, 누른 층으로 바로 가지 않는다.
+    _flushDebugRideCompletion();
+    final boarding = _debugEscalatorBoarding(up: up);
+    if (boarding == null) {
+      _showSnack('이 층 도면에 ${up ? '올라가는' : '내려가는'} 에스컬레이터 탑승 노드가 없습니다.');
+      return;
+    }
+    final (node: boardingNode, name: boardingName) = boarding;
+    final toFloor = boardingName.otherFloorLabel;
+    final transfer = _debugForceableTransfer;
+    final routed = transfer != null && transfer.nextFloorLabel == toFloor
+        ? transfer.segment
+        : null;
+    final goingUp = up;
+    // 몇 층을 건너뛰는지가 곧 기압 변화다. 활강 진행률이 이 값으로 정규화되므로
+    // 두 층 점프를 1층치 높이로 적으면 점이 절반에서 상한에 붙는다.
+    final crossedFloors =
+        (floorLabelRank(toFloor) - floorLabelRank(floor)).abs().clamp(1, 6);
     final transition = EscalatorTransition(
-      // 도착 노드를 경로 지목으로 찾으므로 그룹 매칭까지 갈 일이 없지만,
-      // 진단 JSON에 남는 값이라 강제 전환임을 알아볼 수 있게 적는다.
-      group: 'DEBUG',
+      group: boardingName.group,
       direction: goingUp ? EscalatorDirection.up : EscalatorDirection.down,
       fromFloorLabel: floor,
-      toFloorLabel: nextFloorLabel,
-      deltaM: goingUp ? 5.0 : -5.0,
+      toFloorLabel: toFloor,
+      deltaM:
+          (goingUp ? 1 : -1) * escalatorDefaultFloorHeightM * crossedFloors,
       durationMs: 0,
       stepsDuring: 0,
-      boardingNodeId: segment.transferFromNodeId!,
-      boardingNodeName: null,
+      boardingNodeId: routed?.transferFromNodeId ?? boardingNode.id,
+      boardingNodeName: boardingNode.name,
       boardingDistanceM: 0,
       boardingEvidence: 'debug-forced',
-      expectedArrivalNodeId: segment.transferToNodeId,
+      expectedArrivalNodeId: routed?.transferToNodeId,
     );
     _enqueueFloorTransition(() => _beginEscalatorTransition(transition));
     // 시작과 확정 사이를 벌린다. 실제 에스컬레이터는 탑승부터 하차 감지까지
@@ -74,10 +94,30 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
     // 짧아 보였다 — 이 버튼으로 본 리듬이 곧 실기기 리듬이어야 하므로 실제
     // 탑승 시간에 가깝게 둔다. (실기기에서는 이 대기가 없다 — 판정기가 실제
     // 하차를 기다리므로 몸이 시간을 정한다.)
-    _enqueueFloorTransition(
-      () => Future<void>.delayed(const Duration(seconds: 5)),
+    //
+    // **덮개가 스스로 걷히는 데까지만 기다린다.** 그보다 짧으면 하차 확정이
+    // 덮개를 걷어 연출의 끝을 못 보고, 더 길면 다음 층으로 가려는 사람이
+    // 이유 없이 기다린다.
+    _debugRideCompletion = transition;
+    _debugRideCompletionTimer = Timer(
+      floorTransitionScrimHold(floorConceptPhotos(toFloor).length) +
+          floorTransitionScrimFadeOut +
+          const Duration(milliseconds: 400),
+      _flushDebugRideCompletion,
     );
-    _enqueueFloorTransition(() => _completeEscalatorTransition(transition));
+  }
+
+  /// 기다리던 강제 전환의 하차를 **지금** 확정한다. 없으면 아무 일도 안 한다.
+  ///
+  /// 타이머가 다 돌았을 때와, 다 돌기 전에 사용자가 다음 층을 눌렀을 때가 같은
+  /// 출구를 쓴다 — 두 경로가 갈리면 한쪽에서 탑승 상태가 남는다.
+  void _flushDebugRideCompletion() {
+    final pending = _debugRideCompletion;
+    _debugRideCompletionTimer?.cancel();
+    _debugRideCompletionTimer = null;
+    _debugRideCompletion = null;
+    if (pending == null) return;
+    _enqueueFloorTransition(() => _completeEscalatorTransition(pending));
   }
 
   /// 이 층 [nodeId]에서 목적지까지 경로를 다시 뽑는다. 같은 노드면 아무것도 하지
@@ -132,11 +172,8 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
   }
 
   /// 지금 화면이 그려야 하는 층 전환 배너 상태.
-  FloorTransitionUiState? get _floorTransitionUiState => floorTransitionUiState(
-    arrival: _escalatorArrival,
-    ride: _escalatorRide,
-    stage: _escalatorStage,
-  );
+  FloorTransitionUiState? get _floorTransitionUiState =>
+      floorTransitionUiState(ride: _escalatorRide, stage: _escalatorStage);
 
   /// 배너·스크림 상태가 바뀌면 셸에 알린다. 같은 값이면 알리지 않는다.
   ///
@@ -171,6 +208,8 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
       building = await buildingRepository.getBuilding(demoBuildingId);
     } catch (_) {
       if (!mounted) return;
+      _startupBuildingResolved = true;
+      _maybeNotifyOutdoorStartupReady();
       if (!_buildingLoadFailed) setState(() => _buildingLoadFailed = true);
       _scheduleBuildingRetry();
       return;
@@ -188,6 +227,7 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
       _buildingFootprint = building?.footprintWgs84;
       _activeFloor = building?.initialFloor;
     });
+    _startupBuildingResolved = true;
     if (building != null && !_buildingReadySignal.isCompleted) {
       _buildingReadySignal.complete();
     }
@@ -198,13 +238,21 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
     // 위해 실내 MVT 소스도 여기서 한 번 더 등록 시도.
     _ensureIndoorTilesRegistered();
     final floor = _activeFloor;
+    Future<void>? initialFloorLoad;
     if (building != null && floor != null) {
       // 지상 출입구는 층 그래프와 **독립적으로** 필요하다. 사용자가 층 chip으로
       // 다른 층을 훑는 순간 [_floorPlan]은 그 층 것으로 갈리는데, 문 목록은
       // 그동안에도 남아 있어야 야외 안내가 끊기지 않는다.
       unawaited(_loadGroundEntrances(building.id, floor));
-      await _loadFloorGraph(building.id, floor);
+      initialFloorLoad = _loadFloorGraph(building.id, floor);
     }
+    // 첫 GPS가 건물 정보보다 먼저 왔어도 그 좌표를 다시 본다. 외곽선이 없는
+    // 동안의 판정은 전부 unclear라, 다시 안 보면 실내에서 앱을 켠 사용자가
+    // 시작 화면을 걷은 뒤에도 야외 지도에 남는다.
+    final position = _position;
+    if (position != null) _applyPositionToIndoorGates(position);
+    _maybeNotifyOutdoorStartupReady();
+    await initialFloorLoad;
   }
 
   /// 지상 출입구 목록을 받아 [_groundEntrances]를 채운다.
@@ -564,7 +612,11 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
     final endNodeId = destination.nodeId;
     final leg = (graph == null || endNodeId == null)
         ? null
-        : computeMultiFloorRoute(graph, entrance.nodeId, endNodeId);
+        : computeMultiFloorRoute(
+            graph,
+            entranceRouteNodeId(graph.nodes, entrance),
+            endNodeId,
+          );
     setState(() {
       _journeyEntrance = entrance;
       _userDestination = entrance.point;
@@ -1028,7 +1080,10 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
     await _animateCameraToFitBox(
       box,
       topChromePx: guidanceFitTopChromePx,
-      bottomChromePx: guidanceFitBottomChromePx,
+      // 상수는 **카드 높이**다. 그 카드가 탭 줄 위로 올라가 있으면 비울 자리도
+      // 그만큼 늘어난다([OutdoorMapBody.bottomCardLiftPx]) — 안 더하면 경로
+      // 아랫부분이 탭 줄 뒤로 들어간다.
+      bottomChromePx: guidanceFitBottomChromePx + widget.bottomCardLiftPx,
       duration: duration,
       maxZoom: routeFitMaxZoom,
     );
@@ -1086,12 +1141,12 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
     );
   }
 
-  /// 후보 상세에서 확정한 경로로 **안내를 시작한다.** 셸(길찾기 화면)이
-  /// [showTransitRoute] 뒤에 부른다.
+  /// 확정한 경로로 **안내를 시작한다.** [_startCurrentGuidance]가 private이라
+  /// 못 부르는 이 셸 밖(테스트 등)을 위한 공개 통로다.
   ///
-  /// 계획 카드의 `안내 시작`과 **같은 함수**를 태운다 — 여기에만 있는 판단이
-  /// 생기면 두 버튼이 서로 다른 조건에서 시작한다. 경로에서 멀면 그쪽 가드가
-  /// 막고 안내 문구만 뜬다(그때 카드에 버튼이 남는 것이 맞다).
+  /// 계획 카드·대중교통 요약 카드의 `안내 시작`과 **같은 함수**를 태운다 —
+  /// 여기에만 있는 판단이 생기면 버튼마다 서로 다른 조건에서 시작한다. 경로에서
+  /// 멀면 그쪽 가드가 막고 안내 문구만 뜬다(그때 카드에 버튼이 남는 것이 맞다).
   Future<void> startGuidanceForPickedRoute() => _startCurrentGuidance();
 
   /// 대중교통 안내를 끈다. 경로선·요약 카드가 함께 사라진다.

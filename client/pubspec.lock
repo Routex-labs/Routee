@@ -678,8 +678,8 @@ packages:
     dependency: "direct main"
     description:
       path: "packages/routex_design_system"
-      ref: "104f0fce777d9e2596b281e6a8ed8c98b3e13b77"
-      resolved-ref: "104f0fce777d9e2596b281e6a8ed8c98b3e13b77"
+      ref: "302675e0240816ff778ce0c7b525fddb86e67847"
+      resolved-ref: "302675e0240816ff778ce0c7b525fddb86e67847"
       url: "https://github.com/Routex-labs/routex-design-system.git"
     source: git
     version: "0.2.23"

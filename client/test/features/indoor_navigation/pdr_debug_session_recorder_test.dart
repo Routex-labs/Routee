@@ -143,7 +143,7 @@ void main() {
     final matched = paths['map_matched_floor_local_m']! as List<Object?>;
     final finalMatched = matched.last! as Map<String, double>;
 
-    expect(json['schema_version'], 14);
+    expect(json['schema_version'], 20);
     expect(
       (json['map_context']! as Map<String, Object?>)['map_calibration_version'],
       'thehyundai-seoul-1f-svg-v1',
@@ -864,6 +864,50 @@ void main() {
       );
 
       expect(eventsOf(recorder), hasLength(2));
+    });
+  });
+
+  group('recordExitDoorMiss', () {
+    Map<String, Object?>? missOf(PdrDebugSessionRecorder recorder) =>
+        recorder.buildJson(
+              buildingId: 'b',
+              selectedFloor: '1F',
+              mapCalibrationVersion: 'v1',
+              graph: null,
+              device: const {},
+              exportedAt: DateTime.utc(2026, 8, 20),
+            )['exit_door_closest_miss']
+            as Map<String, Object?>?;
+
+    test('가장 가까웠던 한 건만 남고 나머지는 세어진다', () {
+      final recorder = PdrDebugSessionRecorder(
+        startedAt: DateTime.utc(2026, 8, 20),
+      );
+      expect(missOf(recorder), isNull);
+
+      recorder.recordExitDoorMiss(reason: 'outsideReachRadius', doorDistanceM: 40);
+      recorder.recordExitDoorMiss(reason: 'trackerUncertain', doorDistanceM: 18);
+      recorder.recordExitDoorMiss(reason: 'outsideReachRadius', doorDistanceM: 25);
+
+      final miss = missOf(recorder)!;
+      expect(miss['door_distance_m'], 18);
+      expect(miss['reason'], 'trackerUncertain');
+      expect(miss['sample_count'], 3);
+    });
+
+    // 거리를 못 잰 건이 잰 건을 밀어내면, 문턱을 다시 잡을 값이 사라진다.
+    test('거리를 못 잰 건은 잰 건을 못 밀어낸다', () {
+      final recorder = PdrDebugSessionRecorder(
+        startedAt: DateTime.utc(2026, 8, 20),
+      );
+      recorder.recordExitDoorMiss(reason: 'noDoorDistance');
+      expect(missOf(recorder)!['reason'], 'noDoorDistance');
+
+      recorder.recordExitDoorMiss(reason: 'outsideReachRadius', doorDistanceM: 30);
+      expect(missOf(recorder)!['door_distance_m'], 30);
+
+      recorder.recordExitDoorMiss(reason: 'noDoorDistance');
+      expect(missOf(recorder)!['door_distance_m'], 30);
     });
   });
 }

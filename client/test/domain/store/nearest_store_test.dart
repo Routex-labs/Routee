@@ -125,6 +125,19 @@ void main() {
       expect(result.reach, isNull);
     });
 
+    test('화면이 넘기는 층 라벨(B2)로도 그 층을 고른다', () {
+      // 실기기에서 잡힌 회귀다: B2 스타벅스 앞에서 `화장실`을 치면 늘 B6가 떴다.
+      // 화면은 층을 라벨로 넘기는데(`_activeIndoorFloor`) 여기서는 내부 id만
+      // 대조해서, 한 번도 안 맞고 색인 첫 줄로 떨어지고 있었다.
+      final result = nearestByWalkingDistance(
+        stores: [_store('B6', nodeId: 'N6'), _store('B2', nodeId: 'NB2')],
+        reachByNodeId: null,
+        currentFloorId: 'B2',
+      );
+
+      expect(result.store.floorName, 'B2');
+    });
+
     test('현재 층에 없으면 예전처럼 첫 번째다', () {
       final result = nearestByWalkingDistance(
         stores: [_store('6F', nodeId: 'N6'), _store('B2', nodeId: 'NB2')],

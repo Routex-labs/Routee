@@ -12,12 +12,17 @@ import 'package:maplibre_gl/maplibre_gl.dart';
 import 'package:routex_design_system/routex_design_system.dart';
 
 import '../../core/api_config.dart';
+import '../../core/startup_loading_timing.dart';
 import '../../map/camera/floor_switch_progress.dart';
+import '../../map/camera/follow_camera.dart';
 import '../../map/geojson.dart';
 import '../../map/picked_point.dart';
 import '../../service_locator.dart';
 import '../../core/tile_url.dart';
 import '../../domain/route/building_entrances.dart';
+import '../../domain/route/entrance_door_nodes.dart';
+import '../../domain/route/corridor_shortcuts.dart';
+import '../../domain/route/corridor_shortcuts_data.dart';
 import '../../domain/route/directions_route_alternatives.dart';
 import '../../domain/guidance/completed_route_history.dart';
 import '../../domain/geo/floor_label.dart';
@@ -31,6 +36,7 @@ import '../../domain/route/route_endpoint_fill.dart';
 import '../../domain/guidance/route_guidance.dart';
 import '../../features/indoor_navigation/application/corridor_position_tracker.dart';
 import '../../domain/guidance/escalator_ride.dart';
+import '../../domain/floor/floor_concept_photo.dart';
 import '../../features/indoor_navigation/application/escalator_arrival.dart';
 import '../../features/indoor_navigation/application/escalator_node_naming.dart';
 import '../../features/indoor_navigation/application/escalator_transition_detector.dart';
@@ -52,7 +58,6 @@ import '../../models/building/building_graph.dart';
 import '../../models/route/directions_route.dart';
 import '../../widgets/directions_route_options_panel.dart';
 import '../../widgets/transit_style.dart' show formatTransitFare;
-import 'widgets/directions_route_detail_sheet.dart';
 import '../../models/building/floor_graph.dart';
 import '../../models/building/floor_plan.dart';
 import '../../models/route/indoor_route.dart';
@@ -69,6 +74,7 @@ import 'widgets/transit_summary_card.dart';
 import '../../models/place/store_index_entry.dart';
 import '../../map/camera/floor_camera_bounds.dart';
 import '../../map/style/category_map_filter.dart';
+import '../../map/style/facility_highlight.dart';
 import '../../map/icon/category_map_icon.dart';
 import '../../map/style/floor_facility_style.dart';
 import '../../domain/store/nearest_around_me.dart';
@@ -88,9 +94,11 @@ import '../../map/icon/place_pin.dart';
 import 'widgets/map_overlay_tap_guard.dart';
 import 'entry/anchor_corridor_axis.dart';
 import 'entry/floor_outline.dart';
+import 'gps/gps_jump_filter.dart';
 import 'entry/heading_debug.dart';
 import 'entry/heading_log.dart';
 import 'gps/gps_session.dart';
+import 'entry/gps_entry_floor.dart';
 import 'entry/indoor_entry_gps.dart';
 import 'entry/initial_camera.dart';
 import 'camera/building_orientation.dart';
@@ -101,7 +109,6 @@ import 'outdoor_map_tuning.dart';
 import 'widgets/placing_anchor_hint.dart';
 import 'route_recompute_policy.dart';
 import 'layers/indoor_overlay_layers.dart';
-import 'camera/guidance_follow.dart';
 import 'camera/route_overview_camera.dart';
 import 'camera/map_camera_commands.dart';
 import 'layers/marker_map_layers.dart';
@@ -240,9 +247,16 @@ class OutdoorMapBody extends StatefulWidget {
     this.pickingOnMap = false,
     this.onLocationAnchored,
     this.onNeedLocationPlacement,
+    this.onFacilitiesTap,
+    this.facilitiesActive = false,
+    this.bottomOverlayLiftPx = 0,
+    this.bottomCardLiftPx = 0,
+    this.topChromeBottomPx,
     this.categorySelection,
     this.onFloorChanged,
     this.onFloorTransitionChanged,
+    this.onStartupReady,
+    this.startupLoading = false,
     this.outerOverlayKeys = const [],
     this.transitRoutesSheetOpen = false,
   });
@@ -282,6 +296,13 @@ class OutdoorMapBody extends StatefulWidget {
   /// 이 화면이 직접 그리지 않는 이유: 검색창·카테고리 줄·하단 바가 셸 Stack의
   /// 형제라, 지도 안에서 그린 배너는 그 뒤에 깔린다.
   final FloorTransitionUiChanged? onFloorTransitionChanged;
+
+  /// 첫 위치의 건물 안팎 판정과 그 결과에 맞는 카메라 준비가 끝났을 때 한 번 호출.
+  final VoidCallback? onStartupReady;
+
+  /// 상위 셸의 시작 덮개가 아직 보이는지. 자동 실내 판정은 계속하되, 이 동안에는
+  /// 덮개 위로 진행 스낵바를 올리지 않는다.
+  final bool startupLoading;
 
   /// PDR 앵커 배치 대기 상태가 바뀔 때 호출된다. 상위(MapShellScreen)가 이
   /// 값으로 하단 바의 "위치 지정" 버튼을 눌린(활성) 톤으로 표시한다.
@@ -327,6 +348,38 @@ class OutdoorMapBody extends StatefulWidget {
   /// 그 버튼을 가리면서 뜬다. 상위가 그 버튼을 깜빡여 대신 말한다.
   final VoidCallback? onNeedLocationPlacement;
 
+  /// 층 선택기 위 편의시설 버튼을 눌렀다. **목록은 셸이 연다** — 시설을 고르면
+  /// 거기로 경로를 그려야 하는데, 도달 거리·출발지·경로는 전부 셸이 들고 있다
+  /// ([onStoreTap]과 같은 규칙: 지도는 눌렸다고 알리고 시트는 셸이 연다).
+  ///
+  /// null이면 버튼을 그리지 않는다 — 눌러도 아무 일이 없는 버튼을 두지 않는다.
+  final VoidCallback? onFacilitiesTap;
+
+  /// 그 시설 목록이 지금 떠 있는지. 버튼을 켜진 상태로 그린다 — 시트가 지도
+  /// 아래쪽만 덮으므로, 켜진 표시가 없으면 무엇이 이 시트를 띄웠는지 화면에서
+  /// 사라진다.
+  final bool facilitiesActive;
+
+  /// 셸이 지도 아래쪽에 얹은 표면(시설 시트)의 높이. 층 선택기를 그만큼 밀어
+  /// 올린다 — 안 올리면 시트가 선택기를 덮어, 시트를 열어 둔 채로는 층을 못 바꾼다.
+  ///
+  /// 지도가 시트를 아는 대신 **높이만 값으로 받는다.** 시트가 늘거나 바뀌어도
+  /// 이 화면은 그대로다.
+  final double bottomOverlayLiftPx;
+
+  /// 바닥에 도킹하는 카드(도착·ETA·대중교통 요약)를 **탭 줄 위로** 올리는 높이.
+  ///
+  /// [bottomOverlayLiftPx]와 **다른 값이다.** 그쪽은 안전영역을 빼고 주지만
+  /// (받는 층 선택기가 제 [SafeArea]로 이미 올라와 있다), 카드는 화면 바닥까지
+  /// 닿는 표면이라 탭 줄이 먹는 높이를 안전영역까지 통째로 비켜야 한다. 셸의
+  /// `_tabBarLiftPx`가 그 값이고, 안내가 시작되면 탭 줄이 접히므로 0이 된다.
+  final double bottomCardLiftPx;
+
+  /// 상단 바가 끝나는 y를 **재 주는 함수.** 없으면 상수로 대신한다
+  /// ([routeFitTopInsetPx]). 값이 아니라 함수인 이유와 무엇을 재야 하는지는
+  /// 셸의 `_topBarBottomPx`에 있다.
+  final double Function()? topChromeBottomPx;
+
   /// 지금 카테고리 필터에서 고른 값. 실내 진입 오버레이의 매장 강조에 쓴다.
   ///
   /// **실내 화면과 같은 값을 받아야 한다.** 야외 지도는 건물을 탭하거나 줌
@@ -359,13 +412,6 @@ class OutdoorMapBody extends StatefulWidget {
 /// 덮개 카드의 점은 이 값을 보간해 프레임 단위로 부드럽게 그린다.
 const _escalatorGlideFrame = escalatorGlideSampleInterval;
 
-/// 도면을 갈아 끼운 뒤 덮개를 그대로 두는 시간(페이드까지 더하면 약 4.7초).
-/// 짧으면 덮개가 크로스페이드·마커 활강보다 먼저 걷혀 교체 과정이 보인다.
-/// **하차까지 덮지는 않는다** — 내리기 전에 새 층 도면과 다음 경로를 봐야 한다.
-const _indoorFloorSwapVeilHold = Duration(milliseconds: 3500);
-
-/// 층 이동 확정 뒤 도착 배너를 띄워 두는 시간.
-const _indoorArrivalBannerHold = Duration(seconds: 6);
 
 /// 건물 로드 실패 시 다시 시도하는 간격 사다리(약 1분간 6번). 이 로드는 initState
 /// 한 번뿐이라 실패하면 영영 복구되지 않았다. **무한 재시도는 안 한다** — 백엔드
@@ -398,6 +444,28 @@ LatLng _toMapLatLng(ll.LatLng point) => LatLng(point.latitude, point.longitude);
 
 class OutdoorMapBodyState extends State<OutdoorMapBody>
     with SingleTickerProviderStateMixin {
+  final Completer<void> _startupMinimumElapsed = Completer<void>();
+  Timer? _startupMinimumTimer;
+
+  bool _startupBuildingResolved = false;
+  bool _startupCameraPrepared = false;
+  bool _startupReadyNotified = false;
+
+  void _notifyStartupReady() {
+    if (_startupReadyNotified || !mounted) return;
+    _startupReadyNotified = true;
+    widget.onStartupReady?.call();
+  }
+
+  void _maybeNotifyOutdoorStartupReady() {
+    if (!_startupBuildingResolved ||
+        !_startupCameraPrepared ||
+        _indoorEntered) {
+      return;
+    }
+    _notifyStartupReady();
+  }
+
   /// 진입·이탈 전환 연출의 진행률(0~1). 연출 중이 아니면 0이라 오버레이가 아무
   /// 것도 그리지 않는다. 굴리는 곳은 [_runIndoorTransition] 한 곳뿐이다.
   late final AnimationController _indoorTransition = AnimationController(
@@ -506,6 +574,9 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   /// 자동차는 실선, 걷기는 점선이다([geoJsonLineFeature]).
   bool _routeIsDriving = false;
 
+  /// 도약 거르기가 들고 있는 기준점. 규칙은 [stepGpsJumpFilter].
+  GpsJumpFilterState _gpsJumpFilter = const GpsJumpFilterState();
+
   /// 지금 그려진 대중교통 안내. null이면 대중교통 경로가 없다.
   TransitItinerary? _transitItinerary;
 
@@ -529,6 +600,29 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   /// 카메라만 움직인다. rebuild를 걸면 GPS 틱마다 지도 위 오버레이가 통째로
   /// 다시 그려진다.
   bool _followingUser = false;
+
+  /// 사용자가 지도를 손으로 움직여 **실내 팔로우를 물린** 상태인지.
+  ///
+  /// 안 물리면 다음 걸음이 곧바로 화면을 되돌려 놓아 지도를 볼 수가 없다
+  /// (`_stopFollowingUser`가 자동차 안내에서 배운 것과 같다). 다시 켜는 것은
+  /// "내 위치" 버튼 하나다([_recenterOnCurrentPosition]).
+  bool _followCameraReleasedByUser = false;
+
+  /// 팔로우 카메라를 다음에 명령해도 되는 시각(ms). 최소 간격과, 다른 카메라
+  /// 주인이 도는 동안의 유예([_holdFollowCamera])를 같은 값으로 센다.
+  int _followCameraNextMoveAtMs = 0;
+
+  /// 마지막으로 명령한 팔로우 bearing과 목표점. 데드밴드와 "움직였나" 판정의
+  /// 기준이라, 실제로 명령을 보낸 뒤에만 갱신한다.
+  double? _followCameraBearingDeg;
+
+  ll.LatLng? _followCameraTarget;
+
+  /// 마지막으로 걸음 수가 늘어난 시각(ms)과 그때의 걸음 수. "지금 걷는 중인가"를
+  /// 이 둘로 판정한다([followCameraWalkingStepWindowMs]).
+  int _followCameraLastStepAtMs = 0;
+
+  int? _followCameraLastSteps;
 
   /// 경로선이 보이는 것과 실제 안내가 시작된 것을 가른다.
   ///
@@ -586,6 +680,13 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   /// revision으로 대기 중인 낡은 쓰기를 건너뛰고, 이미 시작된 native 쓰기는
   /// 직렬 queue 뒤의 최신 쓰기가 반드시 덮어쓰게 한다.
   int _pdrMarkerRevision = 0;
+
+  /// 마지막으로 **실제로 그린** 실내 위치와 그때의 층.
+  ///
+  /// 다른 층 도면을 펴 놓은 동안 마커를 흐리게 이어 그리는 데만 쓴다
+  /// ([_syncPdrCurrentLayer]). 앵커가 다른 층에 있으면 그 층 그래프가 화면에
+  /// 없어 좌표를 다시 계산할 수 없다 — 마지막으로 알던 자리가 유일한 재료다.
+  ({String floorId, ll.LatLng point})? _lastIndoorMarker;
 
   Future<void> _pdrMarkerWriteQueue = Future<void>.value();
 
@@ -698,11 +799,6 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   /// 조기 전환으로 목적 층을 이미 열어 둔 이동. 하차 확정 전까지 유지된다.
   EscalatorTransition? _escalatorRide;
 
-  /// 확정 직후 잠깐 "도착" 배너를 띄우는 이동. 되돌리기를 여기에 붙인다.
-  EscalatorTransition? _escalatorArrival;
-
-  Timer? _escalatorArrivalTimer;
-
   /// 배너만 띄우는 접근·수직이동 단계. 층 지도는 아직 안 바꾼다.
   EscalatorPhaseChange? _escalatorStage;
 
@@ -733,6 +829,16 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
 
   /// 덮개를 내리기로 예약해 둔 타이머. 탑승이 먼저 끝나면 취소한다.
   Timer? _floorSwapVeilTimer;
+
+  /// 디버그 강제 전환에서 하차 확정을 기다리는 타이머와 그때 태울 transition.
+  ///
+  /// **큐에 대기를 쌓지 않는다.** `Future.delayed`를 층 전환 큐에 넣으면 버튼을
+  /// 누를 때마다 대기가 직렬로 붙어, 다음 층으로 가려면 앞의 대기가 다 끝나기를
+  /// 기다려야 한다 — 실기기에서 "뭐가 안 끝나서 바로 안 넘어간다"로 보였다
+  /// (2026-08-22). 타이머로 들고 있으면 새로 누를 때 앞엣것을 **지금 끝내고**
+  /// 이어 갈 수 있다.
+  Timer? _debugRideCompletionTimer;
+  EscalatorTransition? _debugRideCompletion;
 
   /// 탑승 중 마커가 흐르는 구간(탑승 노드 → 하차 노드, WGS84).
   ///
@@ -904,6 +1010,12 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   @override
   void initState() {
     super.initState();
+    _startupMinimumTimer = Timer(startupLoadingMinimum, () {
+      _startupMinimumTimer = null;
+      if (!_startupMinimumElapsed.isCompleted) {
+        _startupMinimumElapsed.complete();
+      }
+    });
     _pdrTrailState = DebugPdrTrailState.fromCurrent(
       snapshot: indoorNavigationDriver.currentSnapshot,
       calibration: indoorNavigationDriver.currentCalibration,
@@ -930,9 +1042,9 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
       // 굴린 rebuild에서 [outdoorExitGate]가 다시 잰다.
       _updateTransitionDebugChip();
       _syncPdrCurrentLayer();
-      // 마커를 그린 **직후**에 카메라를 본다. 걷는 안내 중 마커가 화면 가운데를
-      // 크게 벗어났을 때만 다시 부른다([_followIndoorMarkerDuringGuidance]).
-      _followIndoorMarkerDuringGuidance();
+      // 마커를 옮긴 **직후**가 카메라를 따라 보낼 자리다. 걸음마다 쏘지 않도록
+      // 거르는 몫은 [_moveFollowCamera] 안에 있다.
+      unawaited(_moveFollowCamera(snapshot));
       // 사용자 회색선은 실제 PDR 궤적이 아니라 현재 계획 경로의 완료 구간이다.
       // 진행률이 바뀐 같은 틱에 경로 source도 갱신해야 파란 잔여선과 회색 완료선이
       // 같은 투영점을 공유한다. GuidanceTrailSession은 별도 진단 궤적으로만 남긴다.
@@ -999,6 +1111,15 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
     // 다시 만들지 않는 이유는 kCategoryHighlightNoneFilter 주석 참고.
     if (oldWidget.categorySelection != widget.categorySelection) {
       unawaited(_applyCategoryFilter());
+      // 시설 선택은 타일 필터가 아니라 강조 소스가 그린다([_highlightedPolygons]).
+      unawaited(_syncHighlightLayer());
+      // 칠하는 것만으로는 부족하다 — 그 칸이 화면 안에 있어야 칠한 것이 보인다
+      // ([_fitCameraToFacilityHighlight]). 소분류가 바뀔 때만 움직인다: 대분류만
+      // 고른 상태는 칠할 것이 없어 옮길 이유도 없다.
+      if (widget.categorySelection?.subcategory !=
+          oldWidget.categorySelection?.subcategory) {
+        unawaited(_fitCameraToFacilityHighlight());
+      }
     }
   }
 
@@ -1013,6 +1134,10 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
 
   @override
   void dispose() {
+    _startupMinimumTimer?.cancel();
+    if (!_startupMinimumElapsed.isCompleted) {
+      _startupMinimumElapsed.complete();
+    }
     // 스타일·건물을 기다리던 자리를 풀어 준다. 안 풀면 그 await가 영영
     // 돌아오지 않아 뒤따르는 mounted 검사에 닿지 못한다.
     if (!_styleReadySignal.isCompleted) _styleReadySignal.complete();
@@ -1024,10 +1149,10 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
     _pdrCalibrationSub?.cancel();
     _pdrAltitudeSub?.cancel();
     _pdrRawMotionSub?.cancel();
-    _escalatorArrivalTimer?.cancel();
     _escalatorGlideTimer?.cancel();
     _arrivalRouteClearTimer?.cancel();
     _floorSwapVeilTimer?.cancel();
+    _debugRideCompletionTimer?.cancel();
     _escalatorGlideProgress.dispose();
     // 탑승 중 화면이 닫히면 걸음이 멈춘 채로 전역 PDR 세션이 남는다. 다음
     // 화면에서 아무리 걸어도 위치가 갱신되지 않는다.
@@ -1133,12 +1258,21 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
     onStreamError: _handlePositionError,
   );
 
+  /// 이 층에서 지금까지 지나온 구간. 재탐색·층 전환이 이력으로 넘길 값이다.
+  ///
+  /// 화면에 그린 것과 **같은 값**을 넘겨야 한다([_syncCompletedRouteLayer]).
+  /// 이번 틱의 진행률이 뒤로 튄 순간에 승격이 걸리면, 여기서 다시 계산한 짧은
+  /// 구간이 이력에 박혀 회색선이 영구히 짧아진다.
   ({String scopeId, List<ll.LatLng> points})?
   _currentIndoorCompletionSnapshot() {
     final route = _indoorRouteSegment;
     final floor = _activeFloor;
     if (route == null || floor == null) return null;
-    final completed = _indoorRouteVisuals(route).completed;
+    final completed = _completedRouteHistory.advance(
+      scopeId: floor,
+      generation: _routeGeneration,
+      completed: _indoorRouteVisuals(route).completed,
+    );
     if (completed.length < 2) return null;
     return (scopeId: floor, points: completed);
   }
@@ -1326,6 +1460,29 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
     // 트리거가 "실내로 들어가는 순간"인데 이미 들어와 있으면 그 순간이 오지 않는다.
     await returnToOutdoorView();
     if (!mounted) return;
+    // **배율이 층 도면을 켜므로, 활성 층은 실외에서도 사실이어야 한다.**
+    // 도면은 `_indoorEntered`가 아니라 zoom 16.5~17.5로 페이드인하는데
+    // ([indoorOverlayFadeInStartZoom]), 아래 [showRouteTo]가 문 경유 경로에
+    // 카메라를 맞추면 그 배율이 페이드 끝이다. 밖에서 지하 매장을 검색·탭한
+    // 사용자는 활성 층이 그 매장 층이라, 지상 출구에서 끝나는 야외선 밑에 지하
+    // 도면이 깔린다(실기기 화면과 근거: docs/client/indoor-entry-rules.md 6절).
+    //
+    // 층을 고르는 규칙은 GPS 자동 진입과 **같은 질문**이라 같은 함수를 쓴다 —
+    // 갈리면 문을 지난 순간 도면이 한 번 더 튄다. 근거가 없으면 보던 층이 그대로
+    // 돌아와 아래 전환이 no-op이 된다.
+    final journeyStartFloor = gpsEntryAnchorFloor(
+      groundEntranceFloor: _groundEntranceFloor,
+      defaultFloor: _building?.initialFloor,
+      viewedFloor: _activeFloor,
+    );
+    if (journeyStartFloor != null && journeyStartFloor != _activeFloor) {
+      // 카메라는 만지지 않는다 — 곧 [showRouteTo]가 경로 전체에 맞춘다.
+      await _switchOverlayFloorCrossfaded(
+        journeyStartFloor,
+        recenterIfNeeded: false,
+      );
+      if (!mounted) return;
+    }
 
     final building = _building;
     final endNodeId = destination.nodeId;
@@ -1373,9 +1530,16 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
         _journeyBuildingGraph ??
         await buildingRepository.getBuildingGraph(building.id);
     if (!mounted) return;
+    // 실내 구간은 문 **노드**가 아니라 문에서 시작한다 — 안쪽 노드에서 시작하면
+    // 야외 구간이 끝나는 문 앞까지 7~12 m가 선 없이 남는다. 꿰매지 못한 출구는
+    // [entranceRouteNodeId]가 예전 노드로 폴백한다.
     final leg = graph == null
         ? null
-        : computeMultiFloorRoute(graph, entrance.nodeId, endNodeId);
+        : computeMultiFloorRoute(
+            graph,
+            entranceRouteNodeId(graph.nodes, entrance),
+            endNodeId,
+          );
 
     setState(() {
       _journeyBuildingGraph = graph;
@@ -1440,6 +1604,16 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
       exit,
       _buildingCenter(_buildingFootprint ?? const []),
     );
+    // 도착 노드는 문 **바깥** 노드다. 그래야 실내 선이 문까지 닿아 아래에서
+    // 그리는 야외 구간과 같은 점에서 맞물린다. 그래프를 못 받았거나 그 출구를
+    // 꿰매지 못했으면 [entranceRouteNodeId]가 예전 안쪽 노드로 폴백한다 —
+    // 이 호출은 캐시를 공유하므로 대개 네트워크를 타지 않는다.
+    final exitBuilding = _building;
+    final exitGraph = exitBuilding == null
+        ? null
+        : await buildingRepository.getBuildingGraph(exitBuilding.id);
+    if (!mounted) return;
+
     // 실내 구간은 기존 실내 라우팅을 그대로 쓴다. 출구도 노드를 가진 지점이라
     // 매장과 다를 게 없다 — 따로 만들면 층 전환·재탐색·진행률이 전부 갈라진다.
     await showIndoorRouteTo(
@@ -1447,7 +1621,7 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
         name: exitLabel,
         floor: exitFloor,
         point: exit.point,
-        nodeId: exit.nodeId,
+        nodeId: entranceRouteNodeId(exitGraph?.nodes, exit),
       ),
       origin: origin,
     );
@@ -1910,12 +2084,20 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   ///
   /// [enterBuildingIfNeeded]면 건물 밖에서 골랐어도 들어가서 보여 준다(검색 결과
   /// 전용이다. 카테고리 목록은 지금 층 매장만 올려 주므로 이 값을 주지 않는다).
+  /// [focusRatio]는 **포커스를 얼마나 줄지**다. 1이면 예전 그대로 — 매장이 시트
+  /// 위 띠 한가운데에 오고 배율도 그 매장에 맞춘다. 0.5면 지금 배율과 그 목표의
+  /// 중간까지만 가고 밀어 올리는 양도 절반이다.
+  ///
+  /// **줌과 리프트를 한 값으로 묶는다.** 하나만 줄이면 "절반 포커스"가 아니라
+  /// 다른 동작이 된다 — 배율을 아예 고정해 봤더니(`keepZoom`) 도면 전체가
+  /// 보이는 상태에서는 리프트가 수십 px이라 화면이 그대로였다.
   Future<void> focusStore(
     PoiSearchResult store, {
     double bottomSheetFraction = 0,
     double topInsetPx = placingHintTopPx,
     bool keepZoom = false,
     bool enterBuildingIfNeeded = false,
+    double focusRatio = 1,
   }) async {
     // 밖에서 들어온 경우 배율을 유지하면 도시 축척 그대로 매장 위에 서게 된다.
     // 그때는 keepZoom 요청을 무시하고 매장이 보이는 배율까지 확대한다.
@@ -1991,20 +2173,29 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
         storeFocusZoom: fitted ?? _storeFocusZoom,
         // 폴리곤을 잰 값일 때만 물러선다 — 매장 전체가 화면에 들어와야 한다.
         storeFitsViewport: fitted != null,
+        ratio: focusRatio,
+        // **절반 포커스는 어디서 눌렀든 같은 그림이어야 한다.** 지금 배율에서
+        // 재면 카테고리로 한 매장을 크게 본 다음 칩을 풀고 다른 매장을 눌렀을
+        // 때 확대된 채로 조금만 움직인다. 도면 전체가 보이는 배율에서 재면
+        // 그만큼 물러선다.
+        fromZoom: focusRatio < 1 ? _entryZoomThreshold() : null,
       );
       // **한 번만 움직인다.** 예전에는 매장 중앙으로 옮긴 뒤 `scrollBy`로 띠 한가운데로
       // 다시 밀었는데, 첫 이동이 한 프레임 드러나 카메라가 두 번 튀었다. 최종 목표를
       // 먼저 계산해 한 애니메이션으로 간다.
-      final lift = math.max(
-        0.0,
-        (viewport.height * bottomSheetFraction - topInsetPx) / 2,
-      );
+      final lift =
+          math.max(
+            0.0,
+            (viewport.height * bottomSheetFraction - topInsetPx) / 2,
+          ) *
+          focusRatio;
       final target = cameraTargetForScreenLift(
         store.point,
         bearing: bearing,
         zoom: zoom,
         liftPx: lift,
       );
+      _holdFollowCamera(_storeFocusDuration);
       await controller.animateCamera(
         CameraUpdate.newCameraPosition(
           CameraPosition(
@@ -2016,6 +2207,10 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
         ),
         duration: _storeFocusDuration,
       );
+      if (mounted) {
+        _startupCameraPrepared = true;
+        _maybeNotifyOutdoorStartupReady();
+      }
     } finally {
       _initialCameraClaimed = false;
     }

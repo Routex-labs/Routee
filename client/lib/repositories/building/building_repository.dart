@@ -26,6 +26,14 @@ abstract class BuildingRepository {
   /// 빠져 있는 이유는 [StoreIndexEntry] 주석에 있다.
   Future<List<StoreIndexEntry>?> getStoreIndex(String buildingId);
 
+  /// 그 건물에서 열리는 행사 한 벌(쪽 + 행사). **모아 둔 것이 없으면 null**이다 —
+  /// 빈 목록으로 내려오면 "행사가 없는 건물"과 "아직 안 모은 건물"이 같은 화면이
+  /// 된다. 서버 계약은 `backend/docs/api/contract.md`의 "행사" 절.
+  ///
+  /// 날짜로 좁히지 않은 통짜를 받는다 — 오늘 열리는지는 서버가 아니라 화면이
+  /// 기기 로컬 날짜로 판정한다([BuildingEvents.openOn]).
+  Future<Map<String, dynamic>?> getBuildingEvents(String buildingId);
+
   /// 두 노드 사이 최단 경로. 경로가 없거나 층/노드를 찾을 수 없으면 null.
   Future<IndoorRoute?> getShortestRoute(
     String buildingId,

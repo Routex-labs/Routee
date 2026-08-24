@@ -138,7 +138,10 @@ void main() {
   ) async {
     watchPosition = () => positions.stream;
     await tester.pumpWidget(
-      MaterialApp(theme: AppTheme.light, home: Scaffold(body: OutdoorMapBody())),
+      MaterialApp(
+        theme: AppTheme.light,
+        home: Scaffold(body: OutdoorMapBody()),
+      ),
     );
     await drain(tester);
     // **밖 좌표를 먼저 흘린다.** 밖을 한 번도 안 본 채 안 좌표가 오면 "앱을
@@ -345,6 +348,68 @@ void main() {
       await drain(tester);
     });
   });
+
+  /// 확대해서 도면만 편 상태를 만든다. **GPS는 계속 건물 밖이다** — 책상에서
+  /// `starbucks`를 검색해 도면을 보는 것과 같은 상태다.
+  Future<void> openFloorPlanWithoutGps(
+    WidgetTester tester,
+    StreamController<Position> positions,
+  ) async {
+    watchPosition = () => positions.stream;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light,
+        home: Scaffold(body: OutdoorMapBody()),
+      ),
+    );
+    await drain(tester);
+    positions.add(fix(wellOutside, 8));
+    await tester.pump(const Duration(milliseconds: 50));
+    await drain(tester);
+    tester
+        .state<OutdoorMapBodyState>(find.byType(OutdoorMapBody))
+        // ignore: invalid_use_of_visible_for_testing_member
+        .enterIndoorForTest();
+    await drain(tester);
+    expect(
+      find.byType(FloorSelector),
+      findsOneWidget,
+      reason: '테스트 전제(확대로 도면을 폄)가 성립하지 않았다',
+    );
+  }
+
+  testWidgets('좌표가 안에서 밖으로 오가도 펴 둔 도면은 그대로다', (
+    WidgetTester tester,
+  ) async {
+    // **좌표는 화면을 접지 않는다.** 접는 것은 「밖으로 나가기」 버튼과 화면
+    // 조작(축소·건물 밖 탭)뿐이다(`indoor-entry-rules.md` 6절). 한동안은 "실내
+    // 위치가 찍혀 있으면 GPS가 내보낸다"였는데, 그래서 도면을 펴 놓고 손으로
+    // 위치를 지정하는 순간 다음 좌표 한 건이 도면을 접고 카메라를 GPS로 끌고
+    // 갔다(실기기 확인). 사람이 직접 찍은 것을 센서 판정이 뒤집으면 안 된다.
+    final positions = StreamController<Position>.broadcast();
+    await openFloorPlanWithoutGps(tester, positions);
+
+    positions.add(fix(wellOutside, 8));
+    await tester.pump(const Duration(milliseconds: 50));
+    await drain(tester);
+    expect(
+      find.byType(FloorSelector),
+      findsOneWidget,
+      reason: '밖 좌표 한 건이 도면을 접으면 손으로 찍은 위치가 사라진다',
+    );
+
+    // 안 좌표가 한 번 끼어든 뒤에도 마찬가지다 — "GPS가 들여보낸 실내"라는
+    // 계약 자체가 없어졌으므로, 그 뒤의 밖 좌표도 내보낼 근거가 되지 않는다.
+    positions.add(fix(entrance, 8));
+    await tester.pump(const Duration(milliseconds: 50));
+    await drain(tester);
+    positions.add(fix(wellOutside, 8));
+    await tester.pump(const Duration(milliseconds: 50));
+    await drain(tester);
+    expect(find.byType(FloorSelector), findsOneWidget);
+
+    await settleSensorWarmup(tester);
+  });
 }
 
 class _GraphBuildingRepository implements BuildingRepository {
@@ -356,6 +421,10 @@ class _GraphBuildingRepository implements BuildingRepository {
 
   // 자동완성 원본. 이 테스트들은 후보를 보지 않으므로 빈 목록으로 둔다 —
   // 패널은 목록이 비면 후보를 그리지 않고 서버 검색만 돈다.
+  @override
+  Future<Map<String, dynamic>?> getBuildingEvents(String buildingId) async =>
+      null;
+
   @override
   Future<List<StoreIndexEntry>?> getStoreIndex(String buildingId) async =>
       const [];

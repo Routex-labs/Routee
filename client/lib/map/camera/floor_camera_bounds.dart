@@ -172,11 +172,37 @@ bool shouldRecenterFollow({
 /// 당겨 놓고 앵커 매장을 누르면 한 귀퉁이만 보이던 것이 이 조건에서 났다.
 /// 폴리곤을 못 재 상수로 떨어진 값이면 물러서지 않는다. 매장 크기를 모르는
 /// 채 배율을 낮추면 훑던 화면만 잃는다.
+/// [ratio]는 **그 배율까지 얼마나 갈지**다. 1이면 목표 그대로, 0.5면 [fromZoom]과
+/// 목표의 중간이다. 지도에서 그냥 누른 매장은 화면이 통째로 끌려가지 않게 절반만
+/// 간다 — 시트 위로 밀어 올리는 양도 호출자가 같은 값으로 줄인다. 둘 중 하나만
+/// 줄이면 "절반 포커스"가 아니라 다른 동작이 된다.
+///
+/// [fromZoom]은 그 절반을 **어디서부터** 재는지다. 기본은 지금 배율이고, 도면
+/// 전체가 보이는 배율을 주면 **어디서 눌렀든 같은 그림**이 된다(당겨져 있었다면
+/// 그만큼 물러선다). 근거는 `docs/client/map-style-rules.md`.
 double focusZoomFor({
   required double currentZoom,
   required bool keepZoom,
   double storeFocusZoom = 19.0,
   bool storeFitsViewport = false,
+  double ratio = 1,
+  double? fromZoom,
+}) {
+  final target = _focusZoomTarget(
+    currentZoom: currentZoom,
+    keepZoom: keepZoom,
+    storeFocusZoom: storeFocusZoom,
+    storeFitsViewport: storeFitsViewport,
+  );
+  final start = fromZoom ?? currentZoom;
+  return start + (target - start) * ratio;
+}
+
+double _focusZoomTarget({
+  required double currentZoom,
+  required bool keepZoom,
+  required double storeFocusZoom,
+  required bool storeFitsViewport,
 }) {
   if (keepZoom) return currentZoom;
   if (storeFitsViewport) return storeFocusZoom;

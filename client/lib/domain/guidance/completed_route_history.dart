@@ -19,7 +19,39 @@ class CompletedRouteHistory {
   bool get isEmpty =>
       _segmentsByScope.values.every((segments) => segments.isEmpty);
 
-  void clear() => _segmentsByScope.clear();
+  void clear() {
+    _segmentsByScope.clear();
+    _watermarkByScope.clear();
+    _watermarkGeneration = null;
+  }
+
+  /// 지금 경로의 완료 구간에서 **실제로 그릴** 회색선을 고른다.
+  ///
+  /// [completed]가 직전보다 짧거나 비어 있으면 직전 값을 그대로 돌려준다. 이
+  /// 앞으로만 자라는 성질이 이 함수의 전부다 — 확정 위치가 뒤로 튀거나, 경로를
+  /// 벗어나 진행률이 잠깐 사라지는 순간마다 회색선이 통째로 사라졌다. 사용자
+  /// 눈에는 "지나온 길이 없어지고 마커만 떠 있는" 화면이다.
+  ///
+  /// [generation]이 바뀌면 수위를 버린다. 새 경로는 지나온 구간도 새로 세야
+  /// 하고, 옛 구간은 그때 [append]로 이력에 넘어간다. 세대를 인자로 받는 이유는
+  /// 호출부가 초기화를 잊을 자리를 만들지 않기 위해서다.
+  List<LatLng> advance({
+    required String scopeId,
+    required int generation,
+    required List<LatLng> completed,
+  }) {
+    if (_watermarkGeneration != generation) {
+      _watermarkGeneration = generation;
+      _watermarkByScope.clear();
+    }
+    final previous = _watermarkByScope[scopeId];
+    if (completed.length >= 2 &&
+        (previous == null || _lengthM(completed) >= _lengthM(previous))) {
+      _watermarkByScope[scopeId] = List<LatLng>.unmodifiable(completed);
+      return completed;
+    }
+    return previous ?? completed;
+  }
 
   /// [points]를 기존 이력에 추가한다.
   ///
@@ -62,8 +94,20 @@ class CompletedRouteHistory {
       List<LatLng>.unmodifiable(segment),
   ];
 
+  /// 세대별 최고 수위. 세대가 바뀌면 통째로 버린다([advance]).
+  final Map<String, List<LatLng>> _watermarkByScope = {};
+  int? _watermarkGeneration;
+
   static const _duplicateToleranceM = 0.5;
   static const _joinToleranceM = 2.0;
+
+  static double _lengthM(List<LatLng> points) {
+    var total = 0.0;
+    for (var i = 1; i < points.length; i++) {
+      total += _distanceM(points[i - 1], points[i]);
+    }
+    return total;
+  }
 
   static List<LatLng> _removeConsecutiveDuplicates(List<LatLng> points) {
     if (points.isEmpty) return const [];

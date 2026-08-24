@@ -19,6 +19,24 @@ extension OutdoorMapGps on OutdoorMapBodyState {
   /// 겸하면 실내 도면 위에 건물 밖 GPS 점이 찍힌다.
   bool get _outdoorGpsVisible => widget.active && !_indoorEntered;
 
+  /// 진입 직후 실내 위치가 아직 없을 때 **자리만 지키는** GPS 좌표. 없으면 null.
+  ///
+  /// 실내로 들어간 순간 GPS 마커는 꺼지는데([_outdoorGpsVisible]), 실내 마커는
+  /// 앵커를 찍고 보정이 수렴해야 나온다([_startIndoorTracking]). 실측에서 그
+  /// 공백이 25초였고 그동안 화면에 위치가 하나도 없었다 — 진입 판정은 맞았는데
+  /// "내 위치를 알려주는 게 안 뜬다"로 올라온 화면이 이것이다. 그 구간을 이
+  /// 좌표가 흐린 점 하나로 메운다([indoorMarkerAt]의 3순위).
+  ///
+  /// **표시 전용이다.** 건물 밖에서 찍힌 좌표라 도면 위 엉뚱한 자리일 수 있어,
+  /// 앵커·길안내 출발지·"내 위치로"([_canRecenterOnCurrentPosition])는 이 값을
+  /// 보지 않는다 — 그쪽은 전부 [_pdrCurrentWgs84]만 본다.
+  ll.LatLng? get _indoorGapGpsPoint {
+    if (!_indoorLocationVisible) return null;
+    final position = _position;
+    if (position == null) return null;
+    return ll.LatLng(position.latitude, position.longitude);
+  }
+
   void _syncGpsSubscription() {
     if (_gpsTrackingWanted) {
       _gps.start();
@@ -31,12 +49,18 @@ extension OutdoorMapGps on OutdoorMapBodyState {
     _pendingCenterOnPosition = false;
     if (!mounted) return;
     setState(() => _position = null);
+    // 구독이 끊긴 동안 사용자는 어디로든 갈 수 있다. 옛 기준점을 들고 있으면
+    // 돌아왔을 때 옳은 좌표를 거른다.
+    _gpsJumpFilter = const GpsJumpFilterState();
     _syncCurrentLayer();
   }
 
   void _handlePositionError() {
     if (!mounted) return;
     setState(() => _position = null);
+    // 구독이 끊긴 동안 사용자는 어디로든 갈 수 있다. 옛 기준점을 들고 있으면
+    // 돌아왔을 때 옳은 좌표를 거른다.
+    _gpsJumpFilter = const GpsJumpFilterState();
     _syncCurrentLayer();
   }
 
@@ -49,10 +73,42 @@ extension OutdoorMapGps on OutdoorMapBodyState {
         ? null
         : position.timestamp.difference(_lastFixAt!);
     _lastFixAt = position.timestamp;
+    // 오차 값이 아니라 **물리**로 거른다. 상한·유예·항복의 근거는
+    // [stepGpsJumpFilter]. 거른 좌표는 표시에서도 판정에서도 뺀다.
+    final jump = stepGpsJumpFilter(
+      state: _gpsJumpFilter,
+      point: ll.LatLng(position.latitude, position.longitude),
+      at: position.timestamp,
+      walking: !_routeIsDriving,
+    );
+    _gpsJumpFilter = jump.state;
+    if (!jump.accepted || jump.surrendered) {
+      // 거른 건과 **항복해서 받아들인** 건을 같은 배열에 남긴다. 항복이 잦으면
+      // 상한이 너무 빡빡하다는 뜻이라, 다음 실측에서 그것부터 본다.
+      _pdrDebugRecorder?.recordGpsRejectedFix(
+        jumpM: jump.jumpM!,
+        allowanceM: jump.allowanceM!,
+        elapsedSeconds: jump.elapsedSeconds,
+        gpsAccuracyM: position.accuracy,
+        surrendered: jump.surrendered,
+        indoorEntered: _indoorEntered,
+        at: position.timestamp,
+      );
+      if (!jump.accepted) {
+        // **표시에서만 뺀다.** 진단 칩은 그대로 갱신해, 화면이 멈춘 이유가
+        // "좌표가 안 온다"인지 "와서 버렸다"인지 현장에서 가릴 수 있게 한다.
+        _updateTransitionDebugChip(sinceLastFix: sinceLastFix);
+        return;
+      }
+    }
     // 실내에서도 좌표는 **들고 있는다.** 진입/이탈 판정의 유일한 입력이고,
     // 화면에 그릴지는 [_outdoorGpsVisible]이 따로 가른다([_syncCurrentLayer]).
     setState(() => _position = position);
     _syncCurrentLayer();
+    // 실내 공백 구간에는 이 좌표가 마커의 자리를 지킨다([_indoorGapGpsPoint]).
+    // 좌표가 갱신되면 실내 마커 소스도 다시 써야 그 점이 따라 움직인다 — 안
+    // 쓰면 진입 순간의 좌표에 점이 못 박힌 채로 25초를 버틴다.
+    if (_indoorEntered) unawaited(_syncPdrCurrentLayer());
     // 안내 중이면 카메라가 사용자를 따라간다. 판정보다 먼저 두는 이유는, 이번
     // 위치로 실내에 들어가면 따라가기가 꺼지기 때문이다 — 그때는 카메라의
     // 주인이 실내 위치(PDR)로 바뀐다.
@@ -76,31 +132,27 @@ extension OutdoorMapGps on OutdoorMapBodyState {
       // 카메라가 어디로 왜 갔는지는 화면만 봐서는 못 가린다. 공유 링크가 맞춰
       // 둔 매장 화면을 이 줄이 가져가고 있었는데, 조용해서 한참 못 찾았다.
       debugPrint('[first fix] 첫 좌표로 카메라를 옮긴다');
-      unawaited(_moveCameraToUser(position));
     }
     // 문 선택은 진입 판정보다 **먼저** 갱신한다. 진입 직후 실내 위치를 잡을 때
     // 폴백으로 쓰는 문이 이 선택의 결과라, 순서를 뒤집으면 사용자가 이미 다른
     // 문으로 들어왔는데 폴백은 한 박자 전 문을 가리킨다.
     if (!_indoorEntered) _syncSelectedEntrance();
-    // 좌표 한 건이 하는 일은 셋뿐이다. **진입·이탈 전환은 여기 없다** — 그것은
-    // 안내 카드의 버튼이 한다(`docs/client/indoor-entry-rules.md` 6절).
-    final judgement = judgeBuildingFromGps(
-      fix: GpsFix(
-        point: ll.LatLng(position.latitude, position.longitude),
-        accuracyMeters: position.accuracy,
-      ),
-      footprint: _buildingFootprint,
-    );
-    // 1) 빗장. 밖을 한 번이라도 봤으면 이 사람은 걸어 들어온 것이다.
-    if (saysOutsideBuilding(judgement)) _sawOutsideSinceLaunch = true;
-    // 2) 앱을 건물 안에서 켠 사용자를 실내로 데려간다. 앱을 켠 뒤 딱 한 번이다.
-    _maybeEnterIndoorOnColdStart(judgement, position);
-    // 3) 진입·이탈 버튼의 게이트와 디버그 진단 칩.
-    _updateTransitionDebugChip(sinceLastFix: sinceLastFix);
-    // 게이트가 열리고 닫히는 것이 하단 카드의 버튼 색으로 보여야 한다. 안내 중이
-    // 아니면 그 버튼 자체가 없으므로 rebuild를 걸지 않는다 — GPS 틱마다 지도 위
-    // 오버레이를 통째로 다시 그리게 된다.
-    if (_guidanceStarted) setState(() {});
+    _applyPositionToIndoorGates(position, sinceLastFix: sinceLastFix);
+    // 건물 안이면 아래 이동을 생략한다. 실내 도면 카메라와 첫 GPS 카메라가
+    // 경합해 선택기 뒤에서 지도가 한 번 더 튀는 것을 막는다.
+    if (!_indoorEntered &&
+        !_startupCameraPrepared &&
+        !_initialCameraClaimed &&
+        _styleReady &&
+        _mapController != null) {
+      unawaited(
+        _moveCameraToUser(position).whenComplete(() {
+          if (!mounted || _indoorEntered) return;
+          _startupCameraPrepared = true;
+          _maybeNotifyOutdoorStartupReady();
+        }),
+      );
+    }
     // 여기서부터는 야외 전용이다. 건물 안에서 GPS로 걷기 경로를 다시 그리면,
     // 실내 도면 위에 건물을 관통하는 선이 얹힌다.
     if (_indoorEntered) return;
@@ -117,32 +169,64 @@ extension OutdoorMapGps on OutdoorMapBodyState {
   /// GPS는 건물 안이라는 것까지만 말한다. 그대로 두면 [_activeFloor]가 건물의
   /// `default_floor`(1F)로 굳어, B2에 서 있는 사람의 위치와 경로가 1층에 찍힌다.
   ///
-  /// **묻는 것은 앱을 켠 뒤 한 번뿐이다**([_entryFloorAsked]). 건너뛰면(null)
-  /// 기본 층으로 간다 — 층은 선택기로 언제든 바꿀 수 있고, 여기서 막으면 판정이
-  /// 틀렸을 때의 출구가 사라진다.
+  /// **묻는 것은 진입 한 번에 한 번뿐이다**([_entryFloorAsked]). 벽 근처에서
+  /// 판정이 오가면 이 화면이 되풀이해 뜨는데, 그러면 지도에 닿을 수가 없다.
+  ///
+  /// **아무도 답하지 않았으면**(안 물었다·건너뛰었다) 지금 보고 있는 층이 아니라
+  /// **진입 근거가 정한다**([_entryEvidenceFloor]). 보고 있는 층은 목적지를
+  /// 고르는 것만으로 갈리고, 그 층에 앵커를 찍으면 실제로는 1F에 서 있는 사람이
+  /// B2 그래프에 못 박힌다 — 층이 1F로 돌아오는 순간 위치 마커가 사라진다.
+  /// 판정이 틀렸을 때의 출구는 그대로다: 안내 중이 아니면 층 선택기가 떠 있다.
   Future<void> _askEntryFloorThenTrack(Position position) async {
-    // **경로를 그리는 중이면 아무것도 묻지 않는다.** 목적지를 정해 두고 앱을 켠
-    // 길이 있는데, 그때 층·매장을 묻는 시트가 뜨면 방금 보던 경로를 통째로
-    // 덮는다. **위치는 그대로 자동으로 잡는다** — 묻지 않는 것과 추적하지 않는
-    // 것은 다르다.
-    if (_guidancePlanned) {
-      await _startIndoorTracking(position: position);
-      return;
-    }
-    final floor = await _askEntryFloor();
+    // **경로를 그리는 중이면 아무것도 묻지 않는다.** "서울창업허브 → 더현대
+    // 서울"처럼 목적지를 정해 두고 걸어 들어오는 길이 있는데, 그때 도착해서
+    // 층·매장을 묻는 시트가 뜨면 방금 보던 경로를 통째로 덮는다. 어디로 가는
+    // 중인지는 이미 화면이 말하고 있고, 위치가 필요하면 하단 바의 두 버튼이
+    // 그 자리에 있다. **위치는 그대로 자동으로 잡는다** — 묻지 않는 것과
+    // 추적하지 않는 것은 다르다.
+    // **묻지 않는 것과 층을 안 고르는 것은 다르다.** 예전에는 안내 중이면 여기서
+    // 곧장 빠져나가 보고 있던 층(= 목적지 층)에 앵커를 찍었다. 지금은 묻지만
+    // 않고 아래 진입 근거로 층을 고른다.
+    final answer = _guidancePlanned ? null : await _askEntryFloor();
     if (!mounted || !_indoorEntered) return;
-    // 층 전환은 chip을 누른 것과 **같은 경로**를 탄다 — 도면 교체와 그 층
-    // 외곽선에 맞춘 카메라 정렬이 거기 붙어 있다([_onFloorChipSelected]).
-    if (floor != null && floor != _activeFloor) {
-      await _onFloorChipSelected(floor);
-      if (!mounted || !_indoorEntered) return;
+    if (answer != null) {
+      // 사람이 고른 층이 가장 강한 근거다. 층 전환은 chip을 누른 것과 **같은
+      // 경로**를 탄다 — 도면 교체와 그 층 외곽선에 맞춘 카메라 정렬이 거기
+      // 붙어 있다([_onFloorChipSelected]).
+      if (answer != _activeFloor) await _onFloorChipSelected(answer);
+    } else {
+      await _moveToEntryEvidenceFloor();
     }
+    if (!mounted || !_indoorEntered) return;
     await _startIndoorTracking(position: position);
     if (!mounted || !_indoorEntered) return;
+    // 시작 화면은 **모든 갈래에서** 걷힌다. 위치를 잡은 시점이 곧 가릴 이유가
+    // 없어진 시점이라, 아래 근처 매장 시트를 띄우는지와는 무관하다.
+    _notifyStartupReady();
+    if (_guidancePlanned) return;
     // 자동으로 띄우는 것은 **진입 한 번에 한 번뿐이다**. 버튼으로 다시 여는
     // 쪽은 이 제한을 받지 않는다.
     await _askNearbyStoreForAnchor(once: true);
   }
+
+  /// 진입 근거가 가리키는 층으로 도면을 옮긴다. 옮길 근거가 없거나 이미 그
+  /// 층이면 아무것도 하지 않는다.
+  ///
+  /// **[_onFloorChipSelected]를 쓰지 않는다** — 그쪽은 사용자가 chip을 눌렀을
+  /// 때의 경로라 카메라를 그 층 외곽선에 맞춘다. 여기는 아무도 누르지 않았고,
+  /// 안내 중이면 카메라의 주인은 사용자 위치다.
+  Future<void> _moveToEntryEvidenceFloor() async {
+    final floor = _entryEvidenceFloor;
+    if (floor == null || floor == _activeFloor) return;
+    await _switchOverlayFloorCrossfaded(floor);
+  }
+
+  /// 이 사람이 서 있다고 볼 층. 고르는 규칙과 그 근거는 [gpsEntryAnchorFloor].
+  String? get _entryEvidenceFloor => gpsEntryAnchorFloor(
+    groundEntranceFloor: _groundEntranceFloor,
+    defaultFloor: _building?.initialFloor,
+    viewedFloor: _activeFloor,
+  );
 
   /// GPS가 잡아 준 **어림 위치를 사람이 다듬게 한다.**
   ///
@@ -265,6 +349,12 @@ extension OutdoorMapGps on OutdoorMapBodyState {
     final building = _building;
     if (building == null || building.floors.length < 2) return null;
     _entryFloorAsked = true;
+    // 시작 덮개 자체의 타이머만 기다리게 하면 이 Navigator 화면이 그 위를 먼저
+    // 덮어, 로고가 2초보다 훨씬 짧게 보인다. 질문을 올리는 시점도 같은 최소
+    // 노출 시간 뒤로 맞춘다. 앱을 사용하다 다시 들어온 경우에는 이미 지난 값이라
+    // 지연이 생기지 않는다.
+    await _startupMinimumElapsed.future;
+    if (!mounted || !_indoorEntered) return null;
     return showEntryFloorPrompt(
       context,
       buildingName: building.name,
@@ -297,6 +387,10 @@ extension OutdoorMapGps on OutdoorMapBodyState {
     await _floorGraphLoad;
     if (!mounted || !_indoorEntered) return;
 
+    // 앵커 층은 **호출자가 이미 옮겨 둔** 층이다([_askEntryFloorThenTrack]) —
+    // 사람이 고른 층이거나 진입 근거가 고른 층이지 목적지 층이 아니다. 여기서
+    // 다시 고르지 않는 이유는 그 층의 그래프·도면이 이미 이 값에 맞춰져 있기
+    // 때문이다.
     final floor = _activeFloor;
     final graph = _floorGraph;
     final buildingId = _building?.id;
@@ -430,20 +524,26 @@ extension OutdoorMapGps on OutdoorMapBodyState {
     _replaceSnack('입구를 기준으로 실내 위치를 잡았습니다. 걸음 추적을 시작합니다.');
   }
 
-  /// 자동차 안내를 시작한다 — 카메라를 현재 위치로 확대하고, 이후 위치가 갱신될
+  /// 야외 안내를 시작한다 — 카메라를 현재 위치로 확대하고, 이후 위치가 갱신될
   /// 때마다 그 자리를 따라간다.
+  ///
+  /// [zoom]이 수단마다 다른 이유는 **보는 거리가 달라서**다. 자동차는 다음
+  /// 교차로가 화면에 들어와야 하고([carGuidanceZoom]), 걸을 때는 지금 서 있는
+  /// 통로가 보여야 한다([walkingViewZoom]).
   ///
   /// 위치를 아직 못 잡았어도 **켜 둔다.** 신호가 잡히는 순간 첫 위치가 카메라를
   /// 데려가므로, 여기서 포기하면 터널을 나오며 안내를 시작한 사용자가 영영
   /// 따라가지 못한다. 대신 지금 아무 일도 안 일어나는 이유는 알린다.
-  Future<void> startFollowingCurrentLocation() async {
+  Future<void> startFollowingCurrentLocation({
+    double zoom = carGuidanceZoom,
+  }) async {
     _followingUser = true;
     final position = _position;
     if (position == null) {
       _showSnack('현재 위치를 아직 못 잡았습니다. 신호가 잡히면 그 자리로 지도를 옮깁니다.');
       return;
     }
-    await _moveCameraToUser(position, zoom: carGuidanceZoom);
+    await _moveCameraToUser(position, zoom: zoom);
   }
 
   /// 따라가기를 멈춘다. 안내가 끝나거나(경로 삭제) 카메라의 주인이 바뀌는
@@ -451,25 +551,66 @@ extension OutdoorMapGps on OutdoorMapBodyState {
   /// 한 건이 곧바로 되돌려 놓아 지도를 조작할 수 없다.
   void _stopFollowingUser() => _followingUser = false;
 
-  /// 안내 중 "내 위치로" 버튼. **bearing과 tilt는 건드리지 않는다** — 정북으로
-  /// 돌아가면 화면 위쪽이 갈 방향과 어긋난다. 배율도 [walkingViewZoom]까지만 당긴다.
+  /// 안내 중 "내 위치로" 버튼. **실내는 bearing·tilt를 건드리지 않는다** — 정북
+  /// 으로 돌아가면 화면 위쪽이 갈 방향과 어긋난다. **야외는 정북·평면으로
+  /// 되돌린다** — 야외에는 세워 둘 방향이 없고, 남아 있는 bearing은 직전 실내
+  /// 나침반 추종이 새어 나온 값일 뿐이다. 배율도 [walkingViewZoom]까지만 당긴다.
+  ///
+  /// **팔로우를 다시 켜는 유일한 문이다.** 지도를 손으로 움직이면 두 팔로우가
+  /// 함께 물리는데([_releaseFollowCamera]), 그걸 푸는 자리가 없으면 안내가 끝날
+  /// 때까지 화면이 사용자를 따라가지 않는다.
+  ///
+  /// **실내·야외 어느 쪽이든 이 버튼 하나다.** 실내는 PDR 위치로, 야외는 마지막
+  /// 좌표로 돌아간다 — 사용자에게는 같은 "내 위치로"라, 어느 쪽인지 가려 두 개를
+  /// 만들 이유가 없다.
   Future<void> _recenterOnCurrentPosition() async {
     final controller = _mapController;
     if (controller == null || !_styleReady) return;
-    final here = _pdrCurrentWgs84();
+    final here = _pdrCurrentWgs84() ?? _positionPoint;
     // 위치를 아직 못 그리는 상태면 되돌릴 자리도 없다. 버튼 노출 조건이 같은
     // 값을 보므로([_canRecenterOnCurrentPosition]) 보통은 여기 안 걸린다.
     if (here == null) return;
+    _followCameraReleasedByUser = false;
+    // 야외 안내라면 따라가기도 다시 켠다. 버튼을 누른 사람이 원한 것은 "지금
+    // 내 자리"가 아니라 **"다시 나를 따라와라"**다 — 한 번 데려다 놓고 그대로
+    // 두면 다음 걸음부터 또 뒤에 남는다.
+    if (_guidanceActive && !_indoorLocationVisible) _followingUser = true;
+    // 이 애니메이션이 도는 동안은 팔로우를 재운다. 안 재우면 같은 프레임에 두
+    // 명령이 겹쳐, 눌러서 돌아가는 도중에 화면이 한 번 튄다.
+    _holdFollowCamera(recenterDuration);
     await recenterKeepingBearing(
       controller,
       here,
       minZoom: walkingViewZoom,
       duration: recenterDuration,
+      keepBearing: _indoorLocationVisible,
     );
   }
 
   /// "내 위치로" 버튼을 띄울지. 누를 자리가 없는 버튼을 띄우지 않기 위해
   /// [_recenterOnCurrentPosition]이 실제로 쓰는 값과 **같은 값**을 본다.
+  ///
+  /// 야외도 포함한다 — 한동안 실내에만 떠서, 걷는 안내 중 지도를 한 번 밀면
+  /// 화면을 되돌릴 손잡이가 아예 없었다.
   bool get _canRecenterOnCurrentPosition =>
-      _indoorLocationVisible && _pdrCurrentWgs84() != null;
+      (_indoorLocationVisible && _pdrCurrentWgs84() != null) ||
+      _positionPoint != null;
+
+  /// 내 위치가 찍힌 층으로 도면을 되돌리고 카메라를 그 자리에 놓는다.
+  ///
+  /// **층 전환에 카메라를 맡기지 않는다.** [_onFloorChipSelected]는 새 층
+  /// 외곽선에 맞추므로, 그걸 쓰면 층 전체가 잡힌 뒤 내 자리로 한 번 더 움직여
+  /// 전환이 두 박자로 쪼개진다. 여기서는 도면만 갈아 끼우고 카메라는 곧바로
+  /// 내 위치로 간다.
+  Future<void> _returnToMyFloor() async {
+    final anchorFloor = _pdrTrailState.anchor?.floorId;
+    if (anchorFloor == null) return;
+    if (anchorFloor != _activeFloor) {
+      await _switchOverlayFloorCrossfaded(anchorFloor, recenterIfNeeded: false);
+      // 연타로 이 호출이 추월당했으면 카메라를 만지지 않는다 — 사용자가 마지막에
+      // 고른 층 위에서 엉뚱한 자리로 끌려간다([_onFloorChipSelected]와 같은 규칙).
+      if (!mounted || _activeFloor != anchorFloor) return;
+    }
+    await _recenterOnCurrentPosition();
+  }
 }

@@ -53,10 +53,22 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
   ///
   /// 세션 정지는 기다리지 않는다 — 화면 상태는 지금 즉시 맞아야 한다. 그 Future는
   /// [PdrSessionLifecycle.awaitStop]이 들고 있다가 다음 시작이 기다리게 한다.
+  ///
+  /// **디버그 모드에서 진단 세션이 열려 있으면 센서만 살려 둔다** — 원칙은
+  /// "기록은 잇고 위치는 잇지 않는다". 위 셋(앵커·궤적·경로)은 그대로 버리므로
+  /// 재진입 때 위치는 지금처럼 새로 잡히고, 실외를 걸은 구간은 레코더에만 남는다.
+  /// 스냅샷·보정 리스너가 화면 갱신 **앞에서** 레코더에 먼저 넣기 때문에, 센서
+  /// 세션만 살아 있으면 실외 걸음이 실내 좌표계를 오염시키지 않고도 기록이 이어진다.
   void _dropIndoorPosition() {
     _pdrTrailState.beginNewSession();
     _syncCorridorTracking(null);
     _clearIndoorRoute();
+    final recorder = _pdrDebugRecorder;
+    if (_debugModeController.enabled && recorder != null) {
+      // 방금 [_clearIndoorRoute]가 'routeEnded'를 찍었으므로 **그 뒤에** 덮는다.
+      recorder.recordBuildingExit();
+      return;
+    }
     _pdrLifecycle.stopWithoutWaiting();
   }
 
@@ -89,8 +101,19 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
         return;
       }
       final graphJson = geojson?['navigation_graph'];
+      // 복도 지름길을 **여기에도** 얹는다. 라우팅 그래프(리포지토리)에만 얹으면
+      // 경로는 지름길로 가는데 복도 추적은 그 간선을 몰라 마커가 예전 ㄱ자에
+      // 스냅된다 — 경로와 마커가 다른 길을 가리키는, 지금보다 나쁜 상태다.
+      // 출구 문 노드를 화면 그래프에 **안** 넣은 것과 반대 판단인데, 문 노드는
+      // 건물 밖 가짜 복도를 만들지만 지름길은 실제로 걷는 자리이기 때문이다.
+      // 채택 근거와 대조군 숫자는 `docs/client/corridor-graph-detour.md`.
       final graph = graphJson is Map<String, dynamic>
-          ? FloorGraph.fromJson(graphJson)
+          ? floorGraphWithCorridorShortcuts(
+              FloorGraph.fromJson(graphJson),
+              kCorridorShortcuts,
+              buildingId: buildingId,
+              floorName: floor,
+            )
           : null;
       final plan = geojson != null ? FloorPlan.fromJson(geojson) : null;
       final labelPriorities = rankStoreLabels(plan?.stores ?? const []);
@@ -213,6 +236,34 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
   /// 없으면 축소해 나온 야외 지도에 실내 위치 아이콘이 공중에 떠 있고, 길찾기
   /// 출발지도 그 실내 앵커로 잡힌다.
   bool get _indoorLocationVisible => _indoorEntered;
+
+  /// 좌표 한 건이 실내 쪽에 하는 일 **전부**. 부르는 자리가 둘이다 — 좌표
+  /// 스트림([_handlePosition])과, 건물이 좌표보다 늦게 도착한 뒤의 재판정
+  /// ([_onBuildingLoaded]).
+  ///
+  /// **여기에 진입·이탈 전환은 없다.** 그것은 안내 카드의 버튼이 한다
+  /// (`docs/client/indoor-entry-rules.md` 6절). 좌표가 바꾸는 것은 버튼의 활성
+  /// 여부와 진단 기록뿐이고, 유일한 예외가 2)의 실내 콜드스타트다.
+  void _applyPositionToIndoorGates(Position position, {Duration? sinceLastFix}) {
+    final judgement = judgeBuildingFromGps(
+      fix: GpsFix(
+        point: ll.LatLng(position.latitude, position.longitude),
+        accuracyMeters: position.accuracy,
+      ),
+      footprint: _buildingFootprint,
+    );
+    // 1) 빗장. 밖을 한 번이라도 봤으면 이 사람은 걸어 들어온 것이다.
+    if (saysOutsideBuilding(judgement)) _sawOutsideSinceLaunch = true;
+    // 2) 앱을 건물 안에서 켠 사용자를 실내로 데려간다. 앱을 켠 뒤 딱 한 번이다.
+    _maybeEnterIndoorOnColdStart(judgement, position);
+    // 3) 진입·이탈 버튼의 게이트와 디버그 진단 칩. 화면과 파일에만 남는다.
+    _updateTransitionDebugChip(sinceLastFix: sinceLastFix);
+    _recordGpsPositionDelta(position, judgement);
+    // 게이트가 열리고 닫히는 것이 하단 카드의 버튼 색으로 보여야 한다. 안내 중이
+    // 아니면 그 버튼 자체가 없으므로 rebuild를 걸지 않는다 — GPS 틱마다 지도 위
+    // 오버레이를 통째로 다시 그리게 된다.
+    if (_guidanceStarted) setState(() {});
+  }
 
   /// 실내↔야외 **수동 전환**의 게이트 두 개와, 그 근거를 화면 진단 칩에 적는 일.
   ///
@@ -461,6 +512,38 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
   }
 
   /// 자북을 못 얻은 기기에서 쓸 "진행 방향"을 층 좌표 벡터와 그 근거로 만든다.
+  /// GPS 좌표와 화면이 그리는 "내 위치"의 거리를 레코더에 남긴다.
+  ///
+  /// 위치의 우선순위는 [IndoorGuidanceSession.position]이 정한 것을 그대로
+  /// 쓴다([_indoorPosition]) — 여기서 다시 고르면 화면과 다른 값을 재게 된다.
+  /// 둘 중 하나가 없으면 거리는 null이고, 있는 쪽 정보는 그대로 남는다.
+  void _recordGpsPositionDelta(
+    Position position,
+    GpsBuildingJudgement judgement,
+  ) {
+    final recorder = _pdrDebugRecorder;
+    if (recorder == null) return;
+    final indoor = _indoorPosition;
+    final here = indoor == null
+        ? null
+        : _floorPathToWgs84([indoor.localM]).firstOrNull;
+    recorder.recordGpsPositionDelta(
+      distanceM: here == null
+          ? null
+          : wgs84DistanceMeters(
+              ll.LatLng(position.latitude, position.longitude),
+              here,
+            ),
+      gpsAccuracyM: position.accuracy,
+      metersOutsideM: judgement.metersOutside,
+      positionSource: indoor?.source.name,
+      verdict: judgement.verdict.name,
+      floorId: _activeFloor,
+      indoorEntered: _indoorEntered,
+      at: position.timestamp,
+    );
+  }
+
   /// 층 좌표계는 데이터셋마다 축이 뒤집혀 있을 수 있어, 나침반 각도는 반드시
   /// [axes]를 거쳐 층 벡터로 바꾼다. 복도 축은 이미 층 좌표라 그대로 쓴다.
   ///
@@ -529,11 +612,19 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
           // 출발/도착 두 줄에 이동 수단 칩까지 붙은 화면에서는 모자란다 —
           // 그만큼 경로 위쪽(대개 목적지)이 카드 뒤로 들어가 안 보인다.
           // 못 재는 프레임에서만 상수로 떨어진다(상태 표시줄은 기기마다 다르다).
-          topInsetPx: topChrome > 0
-              ? topChrome + routeFitChromeGapPx
-              : MediaQuery.paddingOf(context).top + routeFitTopInsetPx,
+          // 끝점 핀은 좌표 위로 솟아 있어 그 높이를 따로 얹는다.
+          topInsetPx:
+              (topChrome > 0
+                  ? topChrome + routeFitChromeGapPx
+                  : MediaQuery.paddingOf(context).top + routeFitTopInsetPx) +
+              routeFitPinAllowancePx,
+          // 카드는 탭 줄 **위에** 앉는다([_bottomDockedCard]) — 아래가 가려지는
+          // 높이는 카드 높이 + 그 리프트다. 리프트를 빼먹었더니 경로가 카드 쪽으로
+          // 밀려 화면 가운데에 오지 않았다(실기기 확인).
           bottomInsetPx: math.max(
-            _bottomCardHeightPx(),
+            _bottomCardHeightPx() +
+                widget.bottomCardLiftPx +
+                routeFitPinAllowancePx,
             viewport.height * bottomSheetFraction,
           ),
         ),
@@ -868,7 +959,12 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     if (!ignoreZoomArming && !_autoIndoorEntryArmed) return;
     _autoIndoorEntryArmed = false;
     if (_indoorEntered) return;
-    _setIndoorEntered(true);
+    // 이 함수의 두 호출자가 곧 출처다 — 카메라 정지(확대)와 건물 정보 시트 탭.
+    // 확대만으로 켜진 실내 상태를 사후에 가리려면 그 둘을 섞으면 안 된다.
+    _setIndoorEntered(
+      true,
+      source: ignoreZoomArming ? 'sheetTap' : 'cameraZoom',
+    );
   }
 
   /// 실내 모드에서 건물 바깥을 탭했을 때의 이탈.
@@ -883,7 +979,7 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     // 앵커 배치 대기 중이었다면 함께 종료해 하단 바 버튼 톤도 되돌린다.
     // (배치 대기 중인 탭은 위에서 이미 소비되므로 방어적 처리다.)
     if (_placingPdrAnchor) _setPlacingAnchor(false);
-    _setIndoorEntered(false);
+    _setIndoorEntered(false, source: 'outsideTap');
   }
 
   /// [_indoorEntered] 상태 변경을 한 곳으로 모은 헬퍼. setState·상위 통지에 더해
@@ -892,13 +988,31 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
   /// [leftBuilding]은 **실제로 건물을 나갔다**는 뜻이다(GPS 판정). 도면만 접은 것
   /// ([returnToOutdoorView])과 구분해야 실내 위치를 버릴지, 야외 구간을 올릴지가
   /// 갈린다 — 접은 사용자는 다시 펼 수 있으니 앵커를 남기고 예약도 소비하지 않는다.
-  void _setIndoorEntered(bool value, {bool leftBuilding = false}) {
+  ///
+  /// [source]는 이 변경을 부른 것이 무엇인지다(`cameraZoom`·`gps`·`sheetTap`·
+  /// `outsideTap`·`other`). 화면 동작에는 쓰지 않고 진단 파일에만 남긴다 —
+  /// [_indoorEntered]가 "도면을 보고 있다"와 "건물 안에 있다"를 겸하고 있어서,
+  /// 확대로 켜진 실내 상태와 GPS가 판정한 실내 상태를 파일에서 가릴 수 없었다.
+  void _setIndoorEntered(
+    bool value, {
+    bool leftBuilding = false,
+    String source = 'other',
+  }) {
     if (_indoorEntered == value) return;
+    _pdrDebugRecorder?.recordIndoorStateChange(
+      entered: value,
+      source: source,
+      floorId: _activeFloor,
+    );
+    // 실외 구간을 품은 채 이어 온 세션이면 재진입 시각을 남긴다 — 'leftBuilding'
+    // 과 이 경계 사이가 곧 실외 구간이다([_dropIndoorPosition]).
+    final recorder = _pdrDebugRecorder;
+    if (value && (recorder?.spansBuildingExit ?? false)) {
+      recorder!.recordSessionBoundary('reEntered');
+    }
     // 실내 상태가 뒤집히는 순간 개요 붙들기는 뜻을 잃는다. 남겨 두면 다음 진입이
     // "이미 개요를 보는 중"으로 시작해, 사용자가 직접 축소해도 안 접힌다.
     _routeOverviewHoldsIndoor = false;
-    // 걸어 나감 무장은 **이 세션의 층 좌표**로 쌓은 근거다. 오갈 때마다 버려야
-    // 다음 진입이 지난번 문 앞에 서 있던 상태로 시작하지 않는다.
     // 상태를 내리기 **전에** 버린다. 아래 [_syncPdrCurrentLayer]가 이 값을 보고
     // 그릴지 말지를 정하므로, 뒤에 버리면 그 한 프레임 동안 옛 위치가 남는다.
     if (!value && leftBuilding) _dropIndoorPosition();
@@ -956,7 +1070,7 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     if (value) unawaited(_startPdrIfIdle());
     // 실내로 들어오면 화면의 주인은 실내 마커다. 위치를 이미 알고 있으면 그
     // 자리로 옮기고 바라보는 방향으로 돌린다. 아직 모르면 아무것도 하지 않고,
-    // 앵커가 잡히는 자리에서 같은 연출을 한다([_startTrackingFromGpsFix]).
+    // 앵커가 잡히는 자리에서 같은 연출을 한다([_startIndoorTracking]).
     if (value) unawaited(_centerOnIndoorMarker());
     // 문 경유 안내의 구간 승격은 여기 한 곳에만 둔다 — 진입도 이탈도 어느 경로로
     // 판정되든 이 함수를 지난다. 나가는 쪽만 [leftBuilding]으로 한 번 더 좁힌다.
@@ -964,7 +1078,29 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
       unawaited(_activatePendingIndoorRoute());
     } else if (leftBuilding) {
       unawaited(_activatePendingOutdoorRoute());
+      unawaited(_resetActiveFloorToDefault());
     }
+  }
+
+  /// 건물을 나간 순간 활성 층을 건물 기본 층(`default_floor`)으로 되돌린다.
+  ///
+  /// 안 되돌리면 **다시 들어올 때 지난 세션의 마지막 층에서 시작한다.** B2에서
+  /// 나갔다가 지상 1F 입구로 다시 들어와도 활성 층이 B3라, 기압 판정이 그 층을
+  /// 기준으로 다시 시작해 B3→B4 층 전환 배너까지 띄웠다(실기기 실측).
+  ///
+  /// **들어온 문의 층은 못 쓴다** — [BuildingEntrance]에 층이 없고, 그 목록
+  /// 자체가 기본 층 도면에서만 추려진다([_loadGroundEntrances]). 지하 주차장
+  /// 입구로 들어오는 경우를 가리려면 입구 데이터에 층이 먼저 실려야 한다.
+  ///
+  /// 도면만 접은 경우([returnToOutdoorView])에는 안 부른다 — 같은 자리에 그대로
+  /// 서 있는 사용자라 층이 유지돼야 한다.
+  Future<void> _resetActiveFloorToDefault() async {
+    final floor = _building?.initialFloor;
+    if (floor == null || floor == _activeFloor) return;
+    // 층 값만 바꾸면 도면·층 그래프·등록된 MVT 타일이 이전 층 것으로 남아,
+    // 다시 들어오면 1F라고 말하면서 B3 도면을 그린다. 크로스페이드는 빼다 —
+    // 야외 화면에는 가릴 이전 도면이 없고, 전환 모티프만 뜨게 된다.
+    await _switchOverlayFloor(floor, recenterIfNeeded: false);
   }
 
   /// [fadeFactor]는 등록되는 레이어에 곱할 층 전환 크로스페이드 계수다. 기본
@@ -1093,9 +1229,14 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
         _journeyBuildingGraph ??
         await buildingRepository.getBuildingGraph(building.id);
     if (!mounted) return;
+    // 진입 구간도 문에서 시작한다(outdoor_map_screen의 같은 자리와 한 규칙).
     final leg = graph == null
         ? null
-        : computeMultiFloorRoute(graph, entrance.nodeId, endNodeId);
+        : computeMultiFloorRoute(
+            graph,
+            entranceRouteNodeId(graph.nodes, entrance),
+            endNodeId,
+          );
     setState(() {
       _journeyBuildingGraph = graph;
       _journeyEntrance = entrance;
@@ -1265,17 +1406,75 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
   Future<void> _syncHighlightLayer() async {
     final controller = _mapController;
     if (controller == null || !_styleReady) return;
-    final storeId = _highlightedStoreId;
-    final plan = _floorPlan;
-    final store = (storeId == null || plan == null)
-        ? null
-        : plan.stores.where((s) => s.id == storeId).firstOrNull;
-    await syncPolygonSource(
+    final target = _highlightTarget();
+    await syncPolygonsSource(
       controller,
       kOutdoorHighlightSourceId,
-      store?.polygon,
+      target.polygons,
+      // 면·선 색을 이 값으로 고른다. 없으면 회색 잉크로 떨어진다.
+      properties: {'category': target.category},
     );
     await _syncIndoorOverlayFade(scope: IndoorOverlaySyncScope.labels);
+  }
+
+  /// 고른 시설이 **한 화면에 다 들어오도록 물러선다.**
+  ///
+  /// 시설을 고르는 사람이 알고 싶은 것은 "이 층 어디에 있나"인데, 그 직전 화면은
+  /// 매장 하나를 보던 배율이라 강조된 칸이 화면 밖이기 일쑤였다 — 종류를 바꿔
+  /// 눌러도 도면이 그대로라 **아무 일도 안 일어난 것처럼** 보인다(실기기 확인).
+  ///
+  /// **층 전체가 아니라 그 시설들만 담는다.** 화장실 둘이 한쪽에 몰려 있으면
+  /// 굳이 층 끝까지 물러설 이유가 없고, 흩어져 있으면 상자가 알아서 커진다.
+  /// 아래를 비우는 높이는 셸이 이미 내려 준다([OutdoorMapBody.bottomOverlayLiftPx])
+  /// — 시트가 떠 있으면 그 높이가 그 값에 들어 있다. **지도가 시트를 알지 않고
+  /// 높이만 값으로 받는다**는 그 필드의 계약을 여기서도 그대로 쓴다.
+  Future<void> _fitCameraToFacilityHighlight() async {
+    final plan = _floorPlan;
+    if (plan == null || !_indoorEntered) return;
+    final polygons = facilityHighlightPolygons(
+      stores: plan.stores,
+      selection: widget.categorySelection,
+    );
+    if (polygons.isEmpty) return;
+    final box = routeBoxFor([
+      for (final polygon in polygons) ...polygon,
+    ], minSideM: facilityFitMinSideM);
+    if (box == null) return;
+    await _animateCameraToFitBox(
+      box,
+      topChromePx: floorFitTopChromePx,
+      bottomChromePx: widget.bottomOverlayLiftPx,
+      duration: floorSwitchZoomDuration,
+      // 시설 하나만 고르면 상자가 작아 배율이 끝까지 올라간다. 그러면 도면이
+      // 한 칸으로 가득 차, 물러서라고 만든 동작이 되레 더 들어가 버린다.
+      maxZoom: facilityFitMaxZoom,
+    );
+  }
+
+  /// 지금 강조할 폴리곤들과 그 색을 고를 대분류. 매장을 탭했으면 그 하나,
+  /// 편의시설을 종류로 골랐으면 이 층의 그 종류 전부다
+  /// ([facilityHighlightPolygons]가 고른다).
+  ///
+  /// 둘이 겹치면 탭이 이긴다 — 방금 누른 것이 먼저다.
+  ({List<List<ll.LatLng>> polygons, String? category}) _highlightTarget() {
+    final plan = _floorPlan;
+    if (plan == null) return (polygons: const [], category: null);
+    final storeId = _highlightedStoreId;
+    if (storeId != null) {
+      final store = plan.stores.where((s) => s.id == storeId).firstOrNull;
+      return (
+        polygons: [if (store != null) store.polygon],
+        category: store?.category,
+      );
+    }
+    return (
+      polygons: facilityHighlightPolygons(
+        stores: plan.stores,
+        selection: widget.categorySelection,
+      ),
+      // 시설은 한 소분류를 통째로 고르는 자리라 색도 하나다.
+      category: widget.categorySelection?.category,
+    );
   }
 
   /// 현재 층의 지상 출입구에 방위 핀을 세운다.

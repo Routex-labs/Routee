@@ -28,6 +28,12 @@ class MockBuildingRepository implements BuildingRepository {
     return decoded;
   }
 
+  /// 목업에는 행사가 없다. 화면은 이 값으로 "아직 안 모은 건물"과 같은 길을
+  /// 탄다 — 판이 아예 안 뜨고 조용하다.
+  @override
+  Future<Map<String, dynamic>?> getBuildingEvents(String buildingId) async =>
+      null;
+
   @override
   Future<List<Building>> getAllBuildings() async {
     final data = await _load();

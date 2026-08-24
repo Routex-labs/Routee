@@ -11,6 +11,7 @@ import 'package:latlong2/latlong.dart' as ll;
 import 'package:maplibre_gl/maplibre_gl.dart';
 
 import '../../../map/geojson.dart';
+import '../../../map/style/category_map_fill.dart';
 import '../../../map/style/palette.dart';
 import '../entry/indoor_entry_zoom.dart';
 import 'indoor_overlay_layers.dart';
@@ -30,7 +31,7 @@ const kOutdoorFloorOutlineSourceId = 'outdoor-floor-outline';
 const kOutdoorFloorOutlineLayerId = 'outdoor-floor-outline-line';
 
 /// 실내 오버레이에서 고른 매장 하나만 칠하고 테두리를 두르는 전용 소스·레이어.
-/// 색은 [mapSelectionFill]·[mapSelectionLine] 하나씩만 쓴다.
+/// 색은 feature의 `category`로 고른다([storeSelectionColorExpression]).
 const kOutdoorHighlightSourceId = 'outdoor-highlight';
 const _highlightFillLayerId = 'outdoor-highlight-fill';
 const _highlightLineLayerId = 'outdoor-highlight-line';
@@ -138,7 +139,12 @@ Future<void> registerGateLayers(MapLibreMapController controller) async {
 /// `belowLayerId`로 이 아래에 삽입되므로, 칠이 도면 위에 확실히 덮인다.
 ///
 /// 라벨 아이콘의 선택 색과 **둘 다 쓴다.** 아이콘은 "이거 하나"를, 이 면은
-/// "여기까지"를 말한다 — 색을 나눈 이유는 [mapSelectionFill].
+/// "여기까지"를 말한다. 둘은 이제 **같은 잉크**다([kCategorySelectedShade]) —
+/// 색이 갈리면 같은 선택이 두 가지로 보인다.
+///
+/// 면과 선의 색은 소스 feature의 `category` 속성이 정하므로,
+/// [syncPolygonSource]에 그 속성을 반드시 함께 넘겨야 한다. 빠지면 표현식이
+/// default([mapSelectionFallback])로 떨어져 전부 회색이 된다.
 Future<void> registerHighlightLayers(MapLibreMapController controller) async {
   await controller.addSource(
     kOutdoorHighlightSourceId,
@@ -147,8 +153,8 @@ Future<void> registerHighlightLayers(MapLibreMapController controller) async {
   await controller.addFillLayer(
     kOutdoorHighlightSourceId,
     _highlightFillLayerId,
-    const FillLayerProperties(
-      fillColor: mapSelectionFill,
+    FillLayerProperties(
+      fillColor: storeSelectionColorExpression(),
       fillOpacity: mapSelectionFillOpacity,
     ),
     enableInteraction: false,
@@ -156,11 +162,11 @@ Future<void> registerHighlightLayers(MapLibreMapController controller) async {
   await controller.addLineLayer(
     kOutdoorHighlightSourceId,
     _highlightLineLayerId,
-    const LineLayerProperties(
-      lineColor: mapSelectionLine,
+    LineLayerProperties(
+      lineColor: storeSelectionColorExpression(),
       // 면을 옅게 둔 만큼 경계는 이 선이 만든다. 1.2px는 옅은 칠 위에서
       // 있는지 없는지 알 수 없던 굵기다.
-      lineWidth: 2,
+      lineWidth: mapSelectionLineWidth,
       lineJoin: 'round',
     ),
     enableInteraction: false,
@@ -223,21 +229,44 @@ Future<void> syncPointsSource(
 
 /// 링 하나짜리 폴리곤 소스를 갱신한다. [ring]이 null이거나 점이 3개 미만이면
 /// 비운다(폴리곤이 성립하지 않는다).
+///
+/// [properties]는 레이어 표현식이 읽을 feature 속성이다 — 선택 레이어가
+/// `category`로 색을 고른다.
 Future<void> syncPolygonSource(
   MapLibreMapController controller,
   String sourceId,
-  List<ll.LatLng>? ring,
-) async {
-  if (ring == null || ring.length < 3) {
+  List<ll.LatLng>? ring, {
+  Map<String, dynamic> properties = const {},
+}) => syncPolygonsSource(
+  controller,
+  sourceId,
+  [?ring],
+  properties: properties,
+);
+
+/// 폴리곤 여럿을 한 소스에 넣는다. 점이 3개 미만인 링은 버린다 — 폴리곤이
+/// 성립하지 않는다.
+///
+/// 강조는 **한 매장**에서 시작했지만(매장 탭) 종류로 고르는 조작이 생기면서
+/// 여럿이 됐다(편의시설 필터). 소스를 나누지 않고 이 함수 하나로 받는 이유는
+/// 색·테두리가 같은 강조이기 때문이다 — 레이어를 늘리면 같은 색을 두 곳에서
+/// 정하게 된다. [properties]는 그 여럿이 **같은 색**일 때만 성립한다(지금은
+/// 한 소분류를 통째로 고르는 자리라 늘 같다).
+Future<void> syncPolygonsSource(
+  MapLibreMapController controller,
+  String sourceId,
+  List<List<ll.LatLng>> rings, {
+  Map<String, dynamic> properties = const {},
+}) async {
+  final features = [
+    for (final ring in rings)
+      if (ring.length >= 3) _polygonFeature([closedRing(ring)], properties),
+  ];
+  if (features.isEmpty) {
     await controller.setGeoJsonSource(sourceId, emptyGeoJsonCollection());
     return;
   }
-  await controller.setGeoJsonSource(
-    sourceId,
-    geoJsonCollection([
-      _polygonFeature([closedRing(ring)]),
-    ]),
-  );
+  await controller.setGeoJsonSource(sourceId, geoJsonCollection(features));
 }
 
 /// 세계를 덮고 [hole] 만큼을 뚫은 스크림 폴리곤을 쓴다. [hole]이 없으면 비운다.
@@ -271,9 +300,12 @@ Future<void> syncDimScrimSource(
   );
 }
 
-Map<String, dynamic> _polygonFeature(List<List<List<double>>> rings) => {
+Map<String, dynamic> _polygonFeature(
+  List<List<List<double>>> rings, [
+  Map<String, dynamic> properties = const {},
+]) => {
   'type': 'Feature',
-  'properties': const <String, dynamic>{},
+  'properties': properties,
   'geometry': {'type': 'Polygon', 'coordinates': rings},
 };
 

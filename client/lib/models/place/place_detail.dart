@@ -139,6 +139,7 @@ sealed class PlaceDetailSection {
       'demoInfo' => DemoInfoSection.fromJson(json),
       'links' => LinksSection.fromJson(json),
       'hours' => HoursSection.fromJson(json),
+      'contact' => ContactSection.fromJson(json),
       _ => null,
     };
   }
@@ -469,6 +470,39 @@ class HoursSection extends PlaceDetailSection {
       confirmedAt: json['confirmed_at'] as String? ?? '',
     );
   }
+}
+
+/// 매장 전화번호.
+///
+/// 자유 문자열 `keyValue`가 아니라 따로 오는 이유는 서버 쪽 규칙이다 — 오버레이
+/// 스키마가 "전화번호" 라벨을 금지하고, 대신 출처와 확인일을 붙인 구조체만 받는다
+/// (백엔드 `store_details/_schema.json`의 `contact`).
+///
+/// 세 값이 다 있어야 서버가 섹션을 만들기 때문에 여기서 빈 값을 걱정하지 않는다.
+/// 그래도 기본값을 두는 것은 그 계약이 여기까지 오는 길에 끊겼을 때 파싱이
+/// 죽지 않게 하기 위해서다.
+class ContactSection extends PlaceDetailSection {
+  const ContactSection({
+    required this.tel,
+    required this.confirmedAt,
+    required this.source,
+  });
+
+  /// 출처 페이지에 적힌 표기 그대로(`02-3277-0132`·`1522-3232`). 걸기 좋은 형태로
+  /// 바꾸는 것은 화면 몫이라 서버가 다듬지 않는다.
+  final String tel;
+
+  /// 이 번호를 실제로 확인한 날(`YYYY-MM-DD`).
+  final String confirmedAt;
+
+  /// 번호가 적혀 있던 페이지. 다시 열어 확인할 수 있어야 [confirmedAt]이 뜻을 갖는다.
+  final String source;
+
+  factory ContactSection.fromJson(Map<String, dynamic> json) => ContactSection(
+    tel: json['tel'] as String? ?? '',
+    confirmedAt: json['confirmed_at'] as String? ?? '',
+    source: json['source'] as String? ?? '',
+  );
 }
 
 /// 하루 안의 영업 구간 하나. `"HH:MM"` 24시간 표기.

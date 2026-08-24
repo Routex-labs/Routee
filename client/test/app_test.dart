@@ -253,6 +253,10 @@ void main() {
       for (var i = 0; i < 5; i++) {
         await tester.pump(const Duration(milliseconds: 50));
       }
+      // 시작 덮개가 너무 짧게 번쩍이지 않도록 보장하는 최소 1.2초가 지난 뒤
+      // 층 질문이 나타난다. 이 테스트는 진입 뒤 동작을 보므로 그 시간을 넘긴다.
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump();
       // 실내 위치를 잡는 작업은 '건물 감지 중...'을 먼저 띄운 뒤 같은 자리에
       // 결과를 덮어쓴다. 이 fixture의 mock 층에는 navigation_graph가 없어 결과가
       // 즉시 나오므로, 여기서 보이는 것은 진행 문구가 아니라 수동 지정 안내다.
@@ -441,7 +445,18 @@ void main() {
 
   /// 새 검색 흐름: 상단 검색창에 그대로 친다. 아래에서 입력창이 하나 더 있는
   /// 시트가 올라오지 않고, 결과는 검색창 바로 밑 패널에 뜬다.
+  ///
+  /// **먼저 건물 안으로 들어간다.** 이 그룹이 보는 것은 우리 도면을 뒤지는
+  /// 경량 → 의미 2단 파이프라인인데, 그 파이프라인은 실내에서만 돈다
+  /// (`search-result-list-ux.md` Y절). 밖에서 치면 TMAP만 돌아 이 테스트들이
+  /// 조용히 무의미해진다 — 실제로 `aiQueries`가 비었다는 단언은 검색이 아예
+  /// 안 돌아도 통과한다.
   Future<void> searchFromTopBar(WidgetTester tester, String query) async {
+    tester
+        .state<OutdoorMapBodyState>(find.byType(OutdoorMapBody))
+        // ignore: invalid_use_of_visible_for_testing_member
+        .enterIndoorForTest();
+    await tester.pumpAndSettle();
     await tester.tap(find.byType(TextField));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), query);
@@ -548,6 +563,12 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    // 우리 도면을 뒤지는 2단 파이프라인은 실내에서만 돈다([searchFromTopBar]).
+    tester
+        .state<OutdoorMapBodyState>(find.byType(OutdoorMapBody))
+        // ignore: invalid_use_of_visible_for_testing_member
+        .enterIndoorForTest();
+    await tester.pumpAndSettle();
     await tester.tap(find.byType(TextField));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), '밥 먹을');

@@ -5,7 +5,7 @@ import 'poi_search_result.dart';
 /// 탐색(Discovery) 질의 응답의 mode. 백엔드 dto/query.py의
 /// DiscoveryResponse.mode(문자열)와 1:1 대응한다.
 ///
-/// 설계: docs/backend/native/conversational-discovery.md 8-3절.
+/// 설계: docs/native/conversational-discovery.md 8-3절.
 enum DiscoveryMode {
   /// 명확한 목적지 한 건 — matches 1건, 질문 없음.
   direct,

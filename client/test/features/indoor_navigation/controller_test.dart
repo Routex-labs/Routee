@@ -319,10 +319,19 @@ void main() {
       expect(driver.currentCalibration.requiresManualRotationCalibration, isTrue);
     });
 
-    test('오차가 작으면 예전처럼 회전 0으로 바로 확정한다', () async {
+    test('오차가 작으면 자편각만 얹고 바로 확정한다', () async {
       await pinWith(8);
       expect(driver.currentCalibration.phase, CalibrationPhase.calibrated);
-      expect(driver.currentCalibration.anchor!.rotationDeg, 0);
+      // 센서를 믿었다는 뜻이지 회전이 0이라는 뜻이 아니다 — floor 축은 진북
+      // 기준이라 자편각이 남는다(`heading_declination_test.dart`).
+      expect(
+        driver.currentCalibration.anchor!.rotationDeg,
+        closeTo(magneticDeclinationDeg, 1e-9),
+      );
+      expect(
+        driver.currentCalibration.anchor!.rotationBasis,
+        AnchorRotationBasis.trustedHeading,
+      );
     });
 
     test('기기가 오차를 안 주면(-1) 막지 않는다', () async {

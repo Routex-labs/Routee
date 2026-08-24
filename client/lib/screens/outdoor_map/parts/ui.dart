@@ -7,6 +7,30 @@
 part of '../outdoor_map_screen.dart';
 
 extension OutdoorMapUi on OutdoorMapBodyState {
+  /// 화면 바닥에 도킹하는 카드(도착·ETA·대중교통 요약)를 **탭 줄 위에 앉힌다.**
+  ///
+  /// 카드는 지도 Stack 안이고 탭 줄은 셸 Stack의 윗층이라, `bottom: 0`으로 두면
+  /// 탭 줄이 카드의 아랫부분을 덮는다 — 실기기에서 지표 줄("1.2km · 거리")이
+  /// 통째로 사라지고 `안내 시작` 버튼의 아래 모서리가 잘렸다. 겹치는 구간은
+  /// **카드가 뜬 뒤 시작을 누르기 전까지 전부**다: 탭 줄이 접히는 조건은
+  /// `_guidanceActive`(=시작을 누른 뒤)이므로 그 전에는 늘 둘 다 바닥에 있다.
+  ///
+  /// **띄운 만큼 카드의 아래 안전영역은 끈다.** 그 영역은 탭 줄이 이미 자기
+  /// [SafeArea]로 갖고 있어, 두면 두 번 세어 카드 밑에 흰 띠가 남는다.
+  Widget _bottomDockedCard(Widget card) {
+    final lift = widget.bottomCardLiftPx;
+    return Positioned(
+      left: 0,
+      right: 0,
+      bottom: lift,
+      child: MediaQuery.removePadding(
+        context: context,
+        removeBottom: lift > 0,
+        child: card,
+      ),
+    );
+  }
+
   void _showSnack(String message, {Duration? duration}) =>
       _showSnackGuarded(message, replace: false, duration: duration);
 
@@ -114,14 +138,30 @@ extension OutdoorMapUi on OutdoorMapBodyState {
     final pdrActive =
         indoorNavigationDriver.currentRuntimeStatus.state !=
         PdrRuntimeState.idle;
-    final guidance = _guidanceStarted && !_showingArrivalOnly
-        ? _indoorRouteGuidance
-        : null;
     // 안내 중 하단 카드가 셋 중 어느 것이든 같은 버튼을 받는다 — 실내→야외
     // 여정이 도보로도 대중교통으로도 시작될 수 있어서다.
     final transition = _guidanceStarted && !_showingArrivalOnly
         ? _guidanceTransitionAction()
         : null;
+    final arrived = _arrivedDestination;
+    // 지도 위 안내는 **한 자리**다. 무엇이 그 자리를 쓰는지는 [GuidanceBanner]가
+    // 정한다 — 여기서는 각 상태의 재료만 넘긴다.
+    //
+    // 도착 배너는 [_guidanceStarted]가 풀린 뒤에도 남는다. 도착 몇 초 뒤 경로가
+    // 스스로 지워지는데(_syncArrival), 그때 배너까지 사라지면 화면 위쪽이 안내
+    // 도중에 통째로 비어 버린다. 닫는 것은 도착 카드의 `안내 종료`뿐이다.
+    final topBanner = GuidanceBanner(
+      instruction: _guidanceStarted && !_showingArrivalOnly
+          ? _indoorRouteGuidance
+          : null,
+      floorTransition: _guidanceStarted ? _floorTransitionUiState : null,
+      arrivalAt: arrived == null
+          ? null
+          : [
+              arrived.name,
+              if (arrived.floor.isNotEmpty) arrived.floor,
+            ].join(' · '),
+    );
     final initialCenter = position == null
         ? fallbackLocation
         : ll.LatLng(position.latitude, position.longitude);
@@ -129,46 +169,54 @@ extension OutdoorMapUi on OutdoorMapBodyState {
     return Stack(
       children: [
         if (_isMapSupportedOnThisPlatform)
-          MapLibreMap(
-            styleString: _baseMapStyle(),
-            initialCameraPosition: CameraPosition(
-              target: _toGl(initialCenter),
-              zoom: 17,
+          // **손을 대면 팔로우가 물러난다.** MapLibre는 PlatformView라
+          // onCameraIdle만으로는 사용자가 민 것인지 우리가 민 것인지 가릴 수
+          // 없다. 지도 위 pointer-down은 어느 쪽이든 "지금은 내가 본다"는 뜻이라
+          // 그걸 신호로 쓴다. 지도 위 Flutter 버튼(내 위치 등)은 Stack에서
+          // 먼저 히트되므로 여기까지 내려오지 않는다.
+          Listener(
+            onPointerDown: (_) => _releaseFollowCamera(),
+            child: MapLibreMap(
+              styleString: _baseMapStyle(),
+              initialCameraPosition: CameraPosition(
+                target: _toGl(initialCenter),
+                zoom: 17,
+              ),
+              onMapCreated: (controller) => _mapController = controller,
+              onStyleLoadedCallback: _onStyleLoaded,
+              onMapClick: _handleMapClick,
+              onCameraIdle: _handleCameraIdle,
+              // _handleCameraIdle이 실내 진입/이탈을 판정하려면 현재 줌을 읽어야
+              // 하는데, 이 값은 trackCameraPosition이 true일 때만 사용자의
+              // pan/zoom을 따라 갱신된다(기본값 false면 초기 zoom 17에 고정 또는
+              // 실기기에서 null). 그 상태에선 사용자가 축소해도 exit 조건이
+              // 판정되지 않아 층 선택기·위치 지정 버튼이 계속 남는다.
+              trackCameraPosition: true,
+              // 웹의 maplibre_gl은 기본값(false)이면 상호작용 가능한 벡터 레이어
+              // (건물 fill처럼 enableInteraction이 켜진 레이어)를 탭한 순간 별도
+              // feature-tap만 발화하고 onMapClick은 삼켜버린다. 그러면 사용자가
+              // 실내 진입 오버레이 위에서 "위치 지정" → 건물 폴리곤을 탭했을
+              // 때 _handleMapClick이 아예 호출되지 않아 PDR 앵커 배치가 조용히
+              // 실패한다. 이 값을 켜서 feature-tap이 있어도 onMapClick도 함께
+              // 오게 만든다.
+              // 실내 오버레이 레이어는 전부 인터랙션을 꺼 두었다 — 이유는
+              // _ensureIndoorTilesRegistered의 레이어 등록 주석 참고.
+              featureTapsTriggersMapClick: true,
+              compassEnabled: false,
+              myLocationEnabled: false,
+              logoEnabled: false,
+              attributionButtonPosition: AttributionButtonPosition.bottomRight,
+              scrollGesturesEnabled: _interactive,
+              zoomGesturesEnabled: _interactive,
+              rotateGesturesEnabled: _interactive,
+              tiltGesturesEnabled: _interactive,
+              dragEnabled: _interactive,
             ),
-            onMapCreated: (controller) => _mapController = controller,
-            onStyleLoadedCallback: _onStyleLoaded,
-            onMapClick: _handleMapClick,
-            onCameraIdle: _handleCameraIdle,
-            // _handleCameraIdle이 실내 진입/이탈을 판정하려면 현재 줌을 읽어야
-            // 하는데, 이 값은 trackCameraPosition이 true일 때만 사용자의
-            // pan/zoom을 따라 갱신된다(기본값 false면 초기 zoom 17에 고정 또는
-            // 실기기에서 null). 그 상태에선 사용자가 축소해도 exit 조건이
-            // 판정되지 않아 층 선택기·위치 지정 버튼이 계속 남는다.
-            trackCameraPosition: true,
-            // 웹의 maplibre_gl은 기본값(false)이면 상호작용 가능한 벡터 레이어
-            // (건물 fill처럼 enableInteraction이 켜진 레이어)를 탭한 순간 별도
-            // feature-tap만 발화하고 onMapClick은 삼켜버린다. 그러면 사용자가
-            // 실내 진입 오버레이 위에서 "위치 지정" → 건물 폴리곤을 탭했을
-            // 때 _handleMapClick이 아예 호출되지 않아 PDR 앵커 배치가 조용히
-            // 실패한다. 이 값을 켜서 feature-tap이 있어도 onMapClick도 함께
-            // 오게 만든다.
-            // 실내 오버레이 레이어는 전부 인터랙션을 꺼 두었다 — 이유는
-            // _ensureIndoorTilesRegistered의 레이어 등록 주석 참고.
-            featureTapsTriggersMapClick: true,
-            compassEnabled: false,
-            myLocationEnabled: false,
-            logoEnabled: false,
-            attributionButtonPosition: AttributionButtonPosition.bottomRight,
-            scrollGesturesEnabled: _interactive,
-            zoomGesturesEnabled: _interactive,
-            rotateGesturesEnabled: _interactive,
-            tiltGesturesEnabled: _interactive,
-            dragEnabled: _interactive,
           )
         else
           const ColoredBox(color: AppColors.surface),
 
-        if (guidance != null)
+        if (!topBanner.isEmpty)
           Positioned(
             top: 0,
             left: 12,
@@ -180,7 +228,7 @@ extension OutdoorMapUi on OutdoorMapBodyState {
                 onTap: indoorRouteDestination == null
                     ? null
                     : () => _showIndoorRouteSteps(indoorRouteDestination),
-                child: GuidanceBanner(instruction: guidance),
+                child: topBanner,
               ),
             ),
           ),
@@ -353,14 +401,56 @@ extension OutdoorMapUi on OutdoorMapBodyState {
             left: 16,
             bottom:
                 floorSelectorBottomOffset +
-                (indoorRouteVisible ? bottomBarLiftPx : 0),
+                (indoorRouteVisible ? bottomBarLiftPx : 0) +
+                widget.bottomOverlayLiftPx,
             child: SafeArea(
               top: false,
-              child: FloorSelector(
+              // 키가 열 전체를 덮어야 한다. 선택기에만 걸면 그 위 "내 위치로"를
+              // 누른 탭이 지도까지 새어들어가 건물 밖 탭으로 판정된다
+              // ([_floorSelectorKey]의 주석이 말하는 그 증상).
+              child: KeyedSubtree(
                 key: _floorSelectorKey,
-                floors: _building!.floors,
-                selectedFloor: _activeFloor!,
-                onSelectFloor: _onFloorChipSelected,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // 다른 층을 보는 동안에만 뜬다. 같은 층에서는 하단 바의
+                    // "위치 보정"이 이미 그 일을 하므로, 늘 띄우면 비슷하게 생긴
+                    // 두 조작이 화면에 남는다([GuidanceRecenterButton]).
+                    if (_viewingOtherFloor) ...[
+                      GuidanceRecenterButton(
+                        key: const Key('return-to-my-floor'),
+                        onPressed: () => unawaited(_returnToMyFloor()),
+                      ),
+                      const SizedBox(height: RoutexSpacing.controlGap),
+                    ],
+                    // 편의시설은 **층 선택기 바로 위**다. 둘 다 "건물 안에서 몸을
+                    // 옮기는" 조작이고, 상단 카테고리 칩 줄은 엄지에서 가장 먼
+                    // 자리다. 조건부인 위 버튼이 이 아래가 아니라 위에 붙는 이유는
+                    // 자리 이동 때문이다 — 뜨고 질 때마다 아래 둘이 밀리면 방금
+                    // 누른 자리가 매번 달라진다.
+                    if (widget.onFacilitiesTap case final onPressed?) ...[
+                      RoutexMapControl(
+                        key: const Key('nearby-facilities'),
+                        label: '가까운 편의시설',
+                        // Kit에 시설 글리프가 없다. `wc`는 셋 중 가장 많이 찾는
+                        // 화장실을 가리키면서 "편의시설"로도 읽히는 유일한 아이콘이다
+                        // (엘리베이터·에스컬레이터 글리프는 그 하나만 가리킨다).
+                        icon: Icons.wc_rounded,
+                        tone: widget.facilitiesActive
+                            ? RoutexMapControlTone.active
+                            : RoutexMapControlTone.neutral,
+                        onPressed: onPressed,
+                      ),
+                      const SizedBox(height: RoutexSpacing.controlGap),
+                    ],
+                    FloorSelector(
+                      floors: _building!.floors,
+                      selectedFloor: _activeFloor!,
+                      onSelectFloor: _onFloorChipSelected,
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -389,55 +479,86 @@ extension OutdoorMapUi on OutdoorMapBodyState {
             ),
           ),
 
-        // 디버그 전용 — 강제 층 전환. "내 위치로" 버튼 바로 위, 안내 중 +
-        // 디버그 모드 + 에스컬레이터 환승이 남아 있을 때만 뜬다.
-        // 무엇을 태우는지는 [_debugForceFloorTransition]에 있다.
-        if (debugEnabled && _guidanceActive && _debugForceableTransfer != null)
+        // 디버그 전용 — 강제 층 전환. 위층·아래층 두 개가 **오른쪽 아래**에
+        // 선다. 왼쪽 열은 층 선택기·"내 위치로"·안내 중 보정 버튼이 상황에 따라
+        // 번갈아 쓰는 자리라, 디버그 버튼을 끼워 넣으면 그 셋과 겹친다.
+        //
+        // 오른쪽 맨 아래는 셸의 하단 바(위치 보정·위치 지정)가 쓴다 — 그 줄은
+        // 오른쪽 정렬이라 왼쪽 열과 달리 여기서 부딪힌다. 한 칸 높이만큼 올려
+        // 그 위에 세운다. 안 올리면 **아래 버튼이 하단 바 뒤에 깔려** 위층
+        // 버튼 하나만 보인다(2026-08-22 실기기).
+        //
+        // **안내 중이 아니어도 뜬다** — 책상에서는 GPS가 실내 상태를 지워 안내를
+        // 끝까지 못 태우는데, 층 전환 연출은 그와 무관하게 봐야 한다. 무엇을
+        // 태우는지는 [_debugForceFloorTransition]에 있다.
+        //
+        // 버튼에 적히는 것은 방향이 아니라 **가는 층**이다. 그 층은 도면의 탑승
+        // 노드 이름이 정하며(두 층을 건너뛰기도 한다), 그 자리에 화살표만 그리면
+        // 눌러 보기 전에는 어디로 가는지 알 수 없다.
+        if (debugEnabled && (_indoorEntered || pdrActive))
           AnimatedPositioned(
             duration: const Duration(milliseconds: 200),
             curve: Curves.easeOut,
-            left: 16,
+            right: 16,
             bottom:
                 floorSelectorBottomOffset +
                 (indoorRouteVisible ? bottomBarLiftPx : 0) +
-                52,
+                RoutexMetrics.minimumTouchTarget +
+                RoutexSpacing.controlGap,
             child: SafeArea(
               top: false,
-              child: RoutexMapControl(
-                key: const Key('debug-force-floor-transition'),
-                label: '층 전환 시뮬레이션',
-                icon: RoutexIcons.escalator,
-                onPressed: _debugForceFloorTransition,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (final up in const [true, false])
+                    Padding(
+                      padding: EdgeInsets.only(bottom: up ? 8 : 0),
+                      child: Builder(
+                        builder: (context) {
+                          final boarding = _debugEscalatorBoarding(up: up);
+                          return RoutexMapControl(
+                            key: Key(
+                              'debug-force-floor-transition-${up ? 'up' : 'down'}',
+                            ),
+                            label: up ? '위층으로 층 전환' : '아래층으로 층 전환',
+                            // 방향 화살표는 디자인 시스템에 없다. 층 이동은
+                            // 접기/펼치기가 아니라 위아래 이동이라 그쪽 아이콘을
+                            // 빌려 쓰지 않는다.
+                            icon: up
+                                ? Icons.arrow_upward_rounded
+                                : Icons.arrow_downward_rounded,
+                            text: boarding?.name.otherFloorLabel,
+                            onPressed: boarding == null
+                                ? null
+                                : () => _debugForceFloorTransition(up: up),
+                          );
+                        },
+                      ),
+                    ),
+                ],
               ),
             ),
           ),
 
-        // PDR 제어 — 실내 지도 탭과 같은 자리(하단 홈/실내 세그먼트 왼쪽,
-        // 층 선택기 옆)에 같은 위젯으로 놓는다. 두 화면에서 버튼이 옮겨 다니면
-        // 실측 중에 "지금 어느 화면인지"를 먼저 확인해야 해서 테스트가 끊긴다.
+        // PDR 제어 — **오른쪽 위**, 디버그 칩 열과 같은 줄이다. 하단은 도착
+        // 카드·ETA 카드가 통째로 덮어, 실측 직후 세션 JSON을 꺼낼 수 없었다.
+        // 자리를 고른 이유는 [pdrControlTopPx].
         //
         // 노출 조건에 pdrActive를 함께 두는 이유: 세션이 도는 중에 사용자가
         // 지도를 축소하면 _handleCameraIdle이 실내 진입 오버레이를 끄는데,
         // 그때 버튼까지 사라지면 방금 걸은 세션을 내보낼 수단이 없어진다.
         if (debugEnabled && (_indoorEntered || pdrActive))
-          AnimatedPositioned(
-            duration: const Duration(milliseconds: 200),
-            curve: Curves.easeOut,
-            right: pdrControlRightInsetPx,
-            bottom: indoorRouteVisible ? bottomBarLiftPx : 0,
+          Positioned(
+            top: pdrControlTopPx,
+            right: RoutexSpacing.componentPadding,
             child: SafeArea(
-              top: false,
-              child: Padding(
-                padding: const EdgeInsets.only(
-                  bottom: bottomBarInnerBottomPaddingPx,
-                ),
-                child: PdrMapControl(
-                  key: _pdrControlKey,
-                  canExport: _pdrDebugRecorder?.hasSnapshot ?? false,
-                  exporting: _exportingPdrDebugJson,
-                  onExport: () => unawaited(_exportPdrDebugJson()),
-                  shareButtonKey: _pdrShareButtonKey,
-                ),
+              bottom: false,
+              child: PdrMapControl(
+                key: _pdrControlKey,
+                canExport: _pdrDebugRecorder?.hasSnapshot ?? false,
+                exporting: _exportingPdrDebugJson,
+                onExport: () => unawaited(_exportPdrDebugJson()),
+                shareButtonKey: _pdrShareButtonKey,
               ),
             ),
           ),
@@ -461,31 +582,35 @@ extension OutdoorMapUi on OutdoorMapBodyState {
 
         // 도착은 Runtime Kit의 전용 표면으로 바뀐다. 안내 중 배너는 아래에서
         // 구조적으로 빠지므로 같은 자리에 있어도 진행 상태와 섞이지 않는다.
-        if (_arrivedDestination case final arrived?)
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: IndoorArrivalCard(
+        //
+        // 여기까지 안내해 놓고 "그래서 이 매장이 뭔데"로 가는 길을 끊지 않는다 —
+        // 상세를 못 여는 목적지(placeId 없는 POI)에서만 그 버튼이 빠진다.
+        if (arrived != null)
+          _bottomDockedCard(
+            IndoorArrivalCard(
               key: _arrivalCardKey,
               destinationName: arrived.name,
               destinationFloor: arrived.floor,
               onConfirm: _confirmArrival,
+              onShowDetail: arrived.placeId == null
+                  ? null
+                  : () => widget.onStoreTap?.call(arrived),
               onConfirmPointerDown: (position) =>
                   _etaClosePointerDown = position,
             ),
           ),
 
-        // 도착하면 하단 배너를 걷는다. 도착 문구는 화면에 하나여야 하고, 그
-        // 하나는 위 도착 카드다 — 걷는 중 안내와 같은 자리·같은 무게로 또 말하면
-        // 안내가 끝난 줄 모르고 계속 걷는다. 지나쳐 걸어가 안내가 되살아나면
-        // (`arrived`가 풀리면) 배너도 함께 돌아온다.
+        // 도착하면 남은 거리·시간 카드를 걷는다. **끝난 여정의 `0m`는 정보가
+        // 아니다** — 걷는 중과 같은 자리·같은 모양으로 남아 있으면 안내가 끝난
+        // 줄 모르고 계속 걷는다. 그 자리는 도착 카드가 받는다.
+        //
+        // 도착을 말하는 표면이 위(배너)·아래(카드) 둘인 것은 역할이 달라서다.
+        // 배너는 **무슨 일이 일어났는지**를, 카드는 **이제 무엇을 할지**(매장
+        // 정보·안내 종료)를 말한다. 지나쳐 걸어가 안내가 되살아나면(`arrived`가
+        // 풀리면) 이 카드가 다시 돌아온다.
         if (indoorRouteDestination != null && !_showingArrivalOnly)
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: EtaCard(
+          _bottomDockedCard(
+            EtaCard(
               key: _etaCardKey,
               distanceMeters: indoorEta.distanceM,
               // 시간은 비용 기준 — 엘리베이터 대기·탑승 시간이 여기 들어 있다.
@@ -510,11 +635,8 @@ extension OutdoorMapUi on OutdoorMapBodyState {
         // 후보 목록이 덮고 있는 동안에는 아예 안 그린다([OutdoorMapBody.transitRoutesSheetOpen]).
         else if (_transitItinerary case final itinerary?
             when !widget.transitRoutesSheetOpen)
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: TransitSummaryCard(
+          _bottomDockedCard(
+            TransitSummaryCard(
               key: _etaCardKey,
               itinerary: itinerary,
               label: _transitLabel ?? '목적지까지',
@@ -527,11 +649,8 @@ extension OutdoorMapUi on OutdoorMapBodyState {
             ),
           )
         else if (route != null)
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: EtaCard(
+          _bottomDockedCard(
+            EtaCard(
               key: _etaCardKey,
               distanceMeters: _outdoorEta(route).distanceM,
               minutes: _outdoorEta(route).minutes,
@@ -601,34 +720,18 @@ extension OutdoorMapUi on OutdoorMapBodyState {
     return null;
   }
 
-  /// 후보 패널과 상세보기 버튼을 묶어 [EtaCard.routeOptions]에 얹는다.
-  /// 디자인시스템 카드에 상세보기 전용 슬롯이 없어 우리가 직접 붙인다.
+  /// 자동차 후보가 여럿일 때 고르는 줄. 하나뿐이면 null이라 카드는 **제목부터
+  /// 시작한다.**
+  ///
+  /// **`상세보기`를 걷어냈다.** 턴 목록을 시트로 한 겹 더 띄웠는데, 지도에 이미
+  /// 그려진 선보다 알려 주는 것이 적었다 — 카드만 높아져서 정작 봐야 할 경로를
+  /// 그만큼 더 가렸다. 경로를 자세히 보는 자리는 지도 자체다.
   Widget? _directionsRouteExtras(BuildContext context, DirectionsRoute route) {
-    final panel = _directionsRouteOptions.length > 1
-        ? DirectionsRouteOptionsPanel(
-            options: _directionsRouteOptions,
-            selectedIndex: _selectedDirectionsOptionIndex,
-            onSelect: (index) => unawaited(selectDirectionsOption(index)),
-          )
-        : null;
-    final detailButton = route.steps.isEmpty
-        ? null
-        : Align(
-            alignment: AlignmentDirectional.centerEnd,
-            child: TextButton(
-              onPressed: () => showDirectionsRouteDetailSheet(
-                context,
-                route: route,
-                destinationLabel: _userDestinationLabel ?? '목적지',
-              ),
-              child: const Text('상세보기'),
-            ),
-          );
-    if (panel == null && detailButton == null) return null;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [?panel, ?detailButton],
+    if (_directionsRouteOptions.length <= 1) return null;
+    return DirectionsRouteOptionsPanel(
+      options: _directionsRouteOptions,
+      selectedIndex: _selectedDirectionsOptionIndex,
+      onSelect: (index) => unawaited(selectDirectionsOption(index)),
     );
   }
 

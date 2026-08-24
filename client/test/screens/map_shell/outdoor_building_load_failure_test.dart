@@ -179,6 +179,10 @@ class _FlakyBuildingRepository implements BuildingRepository {
   // 자동완성 원본. 이 테스트들은 후보를 보지 않으므로 빈 목록으로 둔다 —
   // 패널은 목록이 비면 후보를 그리지 않고 서버 검색만 돈다.
   @override
+  Future<Map<String, dynamic>?> getBuildingEvents(String buildingId) async =>
+      null;
+
+  @override
   Future<List<StoreIndexEntry>?> getStoreIndex(String buildingId) async =>
       const [];
   _FlakyBuildingRepository(this._inner);

@@ -15,7 +15,13 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
   /// **접는 조건은 종료 버튼이 있는 조건과 같아야 한다** — 아래 ETA 카드 두
   /// 분기가 `onClose`를 다는 조건과 이 getter가 정확히 맞물려야 하고, 어느
   /// 한쪽을 고치면 그 함수를 통해 다른 쪽도 같이 바뀐다.
-  bool get _guidanceActive => _guidanceStarted && _guidancePlanned;
+  ///
+  /// **도착 카드가 떠 있는 동안은 여정이 아직 안 끝났다.** 도착 몇 초 뒤 경로는
+  /// 스스로 지워지는데([_syncArrival]), 그것만으로 접기를 풀면 방금 도착한 화면
+  /// 위쪽에 출발/도착 두 칸이 되살아난다 — 끝난 길찾기를 다시 시키는 그림이다.
+  /// 여기서도 규칙은 그대로다: 그때 종료 버튼은 도착 카드가 들고 있다.
+  bool get _guidanceActive =>
+      _arrivedDestination != null || (_guidanceStarted && _guidancePlanned);
 
   /// 하단에 **"안내 시작" 카드가 떠 있는지.** [_guidanceActive]에서 "이미
   /// 시작했는가"만 뺀 값이라, 시작 버튼을 누르기 전부터 참이다.
@@ -84,6 +90,10 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
       walkingHeadingDeg: snapshot == null || toFloor == null
           ? null
           : toFloor.toFloorBearing(snapshot.walkingHeadingDeg),
+      // 탑승 중에는 이탈 판정을 건너뛴다. 조기 층 전환이 탑승점 고정을 풀어
+      // `isPositionHeld`가 먼저 false가 되므로, 이 인자가 없으면 리셋된
+      // 트래커 위치로 이탈 증거가 쌓여 재탐색이 돈다.
+      onEscalator: _escalatorRide != null,
     );
     for (final advance in update.stepAdvances) {
       _pdrDebugRecorder?.recordRouteStepAdvance(
@@ -132,6 +142,9 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
           hasDestination: destination != null,
         )) {
       setState(() => _arrivedDestination = destination);
+      // 도착 카드가 뜨는 것 자체가 접기 조건이다([_guidanceActive]). 안 알리면
+      // 경로가 자동으로 지워지는 순간 셸이 chrome을 펴 버린다.
+      _notifyRouteStateIfChanged();
     }
 
     final decision = decideArrivalAutoClear(
@@ -226,8 +239,11 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
     );
     if (!mounted) return;
     _notifyRouteStateIfChanged();
-    // 앵커를 방금 찍었으므로 이제 옮길 자리가 있다. 야외 갈래와 같은 연출이다.
-    _moveCameraToGuidanceStart();
+    if (!mounted) return;
+    // 야외와 **같은 약속**이다 — 시작을 누르면 화면이 내 자리로 내려간다. 실내는
+    // 걸음이 카메라를 끌고 가지만([_indoorFollowActive]) 그건 다음 걸음부터라,
+    // 첫 걸음을 떼기 전까지는 경로 전체를 보던 화면 그대로 서 있었다.
+    await _recenterOnCurrentPosition();
   }
 
   /// 안내 시작 판정에 쓸, 지금 지도에 그려진 야외 경로의 좌표열.
@@ -256,14 +272,26 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
   /// 보던 경로가 화면에서 사라질 뿐이다. 도보도 함께 막는다. 카메라를 안 옮겨도
   /// 안내 상태로 들어가면 엉뚱한 위치에서 진행 판정이 돌기 시작한다.
   Future<void> _startCurrentGuidance() async {
-    if (_indoorRoutePreviewOrigin != null) {
+    // 이번 안내는 팔로우를 켠 채로 시작한다. 지난 안내에서 지도를 만져 물려
+    // 뒀던 것이 남으면, 새로 "안내 시작"을 눌러도 화면이 따라오지 않는다.
+    _followCameraReleasedByUser = false;
+    _followCameraBearingDeg = null;
+    _followCameraTarget = null;
+    // **이 여정에 야외 구간이 있으면 실내 갈래로 새지 않는다.** 묻는 것은
+    // "미리 보기 출발지가 남아 있나"가 아니라 **"지금 시작할 구간이 실내인가"**다.
+    // 두 질문이 갈리면, 문 경유 안내(실외 → 건물 안 매장)를 그려 놓고도
+    // [_startIndoorGuidance]의 "건물에 도착하면…"에 막힌다 — 그 여정은 정의상
+    // 밖에서 시작하는데, 밖이라는 이유로 시작을 거부하는 화면이 된다.
+    //
+    // 이 목록이 비었다는 것이 곧 "실내 구간만 살아 있다"이다([_guidanceStartRoutePoints]).
+    final points = _guidanceStartRoutePoints;
+    if (points.isEmpty && _indoorRoutePreviewOrigin != null) {
       await _startIndoorGuidance();
       return;
     }
     if (_guidanceStarted || !_hasAnyRouteVisible) return;
     // 좌표를 못 얻는 경로(실내 구간만 살아 있는 경우)에는 가드를 걸지 않는다.
     // 잴 수 없는 것을 막으면 지금 되던 흐름이 조용히 죽는다.
-    final points = _guidanceStartRoutePoints;
     if (points.length >= 2) {
       // 위치를 아직 못 받은 것과 경로에서 먼 것은 **다른 사건이다.** 둘 다 막지만
       // 문구를 같이 쓰면, GPS를 기다리는 중인 사용자가 경로를 잘못 잡았다고 읽고
@@ -286,76 +314,28 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
       _guidanceStarted = true;
     });
     _notifyRouteStateIfChanged();
-    if (_routeIsDriving) {
-      await startFollowingCurrentLocation();
-      return;
+    // **시작을 누른 순간 화면이 내 자리로 내려간다.** 계획 카드가 떠 있는 동안
+    // 카메라는 경로 전체를 담으려고 물러서 있는데, 시작해도 그대로 두면 화면은
+    // 여전히 "지도를 보고 있다"에 머문다 — 따라가야 할 화면이 아니다. 한동안
+    // 자동차에만 걸려 있어서, 걷는 사람은 시작을 눌러도 아무 일도 안 일어났다.
+    //
+    // **대중교통만 뺀다.** 타고 가는 구간은 내가 걷는 것이 아니라, 카메라가 나를
+    // 확대해 따라가면 여정 전체가 화면 귀퉁이로 밀린다
+    // (`transit_guidance_does_not_follow_test.dart`).
+    //
+    // 배율이 갈리는 이유는 보는 거리가 달라서다 — 자동차는 다음 교차로가 화면에
+    // 들어와야 하고, 걸을 때는 지금 서 있는 통로가 보여야 한다.
+    if (_indoorLocationVisible) {
+      // **실내 위치로 서 있는 사람을 GPS로 데려가지 않는다.** 그 좌표는 건물
+      // 밖이라(도면을 펴 놓고 손으로 위치를 찍은 경우가 특히 그렇다) 화면이
+      // 통째로 튀고 보던 도면과 경로를 잃는다. 실내는 걸음이 카메라를 끌고
+      // 간다([_indoorFollowActive]) — 여기서는 첫 자리만 잡아 준다.
+      await _recenterOnCurrentPosition();
+    } else if (_transitItinerary == null) {
+      await startFollowingCurrentLocation(
+        zoom: _routeIsDriving ? carGuidanceZoom : walkingViewZoom,
+      );
     }
-    _moveCameraToGuidanceStart();
-  }
-
-  /// 안내를 시작하는 순간 시점을 **지금 서 있는 자리**로 내린다.
-  ///
-  /// 개요는 "어디로 가는가"를 보여 주는 화면이고, 시작을 누른 사람이 다음에
-  /// 봐야 하는 것은 "지금 어디서 어느 쪽으로 첫 걸음을 떼는가"다. 개요 배율에
-  /// 그대로 두면 첫 갈림길이 몇 픽셀이라 어느 쪽인지 읽히지 않는다.
-  ///
-  /// 위치의 주인을 그대로 따른다 — 실내면 도면 위 실내 마커(바라보는 방향으로
-  /// 회전까지), 야외면 GPS 좌표다. 둘 다 없으면 아무것도 하지 않는다: 옮길
-  /// 자리를 모르면서 배율만 당기면 엉뚱한 곳을 확대한다.
-  /// **다음 프레임에 옮긴다.** 개요 맞추기([_fitCameraToPoints])가 자기 이동을
-  /// `addPostFrameCallback`으로 미뤄 두기 때문이다. 지금 자리에서 바로 옮기면
-  /// 그 예약이 뒤에 도착해 카메라를 경로 전체로 도로 끌고 간다 — 시작을 눌러도
-  /// 화면이 그대로인 것처럼 보인 원인이 이것이다. 콜백은 등록 순서대로 도므로
-  /// 뒤에 걸면 이쪽이 마지막이 된다.
-  /// **기다리지 않는다.** 프레임이 돌아야 콜백이 뜨는데, 이 함수를 await하는
-  /// 호출부가 프레임을 진행시키지 않으면 그대로 멈춘다(위젯 테스트가 실제로
-  /// 그렇게 걸렸다). 카메라 이동은 호출부가 기다릴 이유가 없는 일이다.
-  void _moveCameraToGuidanceStart() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) unawaited(_moveCameraToStartPointNow());
-    });
-  }
-
-  Future<void> _moveCameraToStartPointNow() async {
-    if (_indoorEntered) {
-      await _centerOnIndoorMarker(zoom: guidanceStartZoom);
-      return;
-    }
-    final position = _position;
-    if (position == null) return;
-    await _moveCameraToUser(position, zoom: guidanceStartZoom);
-  }
-
-  /// 걷는 안내 중 실내 마커를 화면 가운데 언저리에 붙들어 둔다.
-  ///
-  /// **시작할 때 한 번 가운데로 옮기는 것만으로는 부족하다.** 걸으면 마커가
-  /// 그만큼 화면 위쪽으로 밀려나고, 몇 걸음이면 가장자리에 닿는다 — 정작
-  /// 사용자는 자기가 어디로 가고 있는지 보려고 그 화면을 보고 있다.
-  ///
-  /// **매 걸음 따라가지는 않는다.** PDR은 한 걸음마다 값을 내놓으므로 그대로
-  /// 따라가면 지도가 걷는 내내 끌려다니고 도면을 읽을 수 없다. 화면 절반의
-  /// [guidanceFollowDeadbandRatio]만큼 벗어났을 때만 다시 가운데로 부른다
-  /// (근거: `docs/client/camera-choreography-plan.md` 4.3 「추적 데드밴드」).
-  void _followIndoorMarkerDuringGuidance() {
-    if (!_guidanceStarted || !_indoorEntered) return;
-    final controller = _mapController;
-    final here = _pdrCurrentWgs84();
-    if (controller == null || !_styleReady || here == null) return;
-    final camera = controller.cameraPosition;
-    if (camera == null) return;
-    final viewport = MediaQuery.sizeOf(context);
-    if (viewport.height <= 0) return;
-    if (!isBeyondFollowDeadband(
-      camera: ll.LatLng(camera.target.latitude, camera.target.longitude),
-      marker: here,
-      zoom: camera.zoom,
-      viewport: viewport,
-    )) {
-      return;
-    }
-    // 배율은 건드리지 않는다 — 사용자가 도면을 들여다보려 당겨 둔 값을 걸음마다
-    // 되돌리면, 따라가기가 배율 조작을 통째로 막는 것이 된다.
-    unawaited(_centerOnIndoorMarker());
   }
 
   /// 안내만 끈다 — 경로선·후보·목적지는 남는다. **뒤로가기가 부른다.**
@@ -524,20 +504,72 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
     );
   }
 
+  /// 진단 세션 하나를 새로 연다.
+  ///
+  /// **디버그 모드에서는 레코더를 갈아 끼우지 않는다.** 경계만 찍고 이어 간다.
+  /// 여기가 실측에서 파일이 잘리던 자리다 — 문 앞에서 안내가 끝나면
+  /// [_endRouteRecordingSession]이 `routeEnded`를 찍고, 밖에서 다시 길을 잡는
+  /// 순간 이 함수가 새 레코더를 만들어 방금까지의 구간을 통째로 버렸다. 정작
+  /// 보려던 것(문 밖 GPS 표류, 길 건너에서 시작하는 경로, 재진입 뒤 마커)은
+  /// 전부 그 다음에 일어난다.
+  ///
+  /// **닫는 것은 사람이다** — 사용자가 JSON을 내보내는 순간이 세션의 끝이다
+  /// ([_exportPdrDebugJson]). 그래야 파일이 무한히 자라지 않는다(표본 배열에는
+  /// 상한이 없다).
+  ///
+  /// 디버그가 꺼진 일반 사용자에게는 예전 그대로 **길안내 한 건이 세션 하나**다.
+  /// 실외 구간을 품은 세션만은 그때도 갈지 않는다
+  /// ([PdrDebugSessionRecorder.spansBuildingExit]) — 나갈 때 걸은 구간이 사라진다.
   void _beginRouteRecordingSession() {
     _ensureGuidanceTrailSessionStarted();
-    _pdrDebugRecorder = PdrDebugSessionRecorder()
-      ..recordRuntime(indoorNavigationDriver.currentRuntimeStatus);
-    final snapshot = indoorNavigationDriver.currentSnapshot;
-    if (snapshot != null) _pdrDebugRecorder?.recordSnapshot(snapshot);
-    _pdrDebugRecorder?.recordCalibration(
-      indoorNavigationDriver.currentCalibration,
-    );
+    final continued = _pdrDebugRecorder;
+    if (continued != null &&
+        (_debugModeController.enabled || continued.spansBuildingExit)) {
+      continued.recordSessionBoundary(
+        continued.spansBuildingExit
+            ? 'routeStartedAfterReEntry'
+            : 'routeStarted',
+      );
+      return;
+    }
+    _pdrDebugRecorder = _openRouteRecordingSession();
   }
 
-  /// 경로가 해제되면 세션을 닫는다. [announceExport]는 세션 경계 기록에만 쓴다
-  /// — 사용자가 끝낸 것(routeEnded)과 새 경로로 갈아탄 것(routeReplaced)을
+  /// 레코더 하나를 만들어 지금의 런타임·스냅샷·보정으로 채운다. 새 세션이
+  /// 열리는 자리가 둘이라([_beginRouteRecordingSession]·[_exportPdrDebugJson])
+  /// 채우는 순서를 한 곳에 둔다.
+  PdrDebugSessionRecorder _openRouteRecordingSession() {
+    final recorder = PdrDebugSessionRecorder()
+      ..recordRuntime(indoorNavigationDriver.currentRuntimeStatus);
+    final snapshot = indoorNavigationDriver.currentSnapshot;
+    if (snapshot != null) recorder.recordSnapshot(snapshot);
+    recorder.recordCalibration(indoorNavigationDriver.currentCalibration);
+    return recorder;
+  }
+
+  /// 진단 세션을 여는 테스트 진입점. 실기기에서는 길안내 시작이 이 자리를
+  /// 지나는데(`_computeAndShow*IndoorRoute`), 그 흐름은 층 그래프·목적지·경로
+  /// 응답을 모두 갖춰야 해서 GPS 출입만 시험하는 테스트는 준비할 수 없다
+  /// ([OutdoorMapIndoor.enterIndoorForTest]와 같은 이유).
+  @visibleForTesting
+  void beginRouteRecordingSessionForTest() => _beginRouteRecordingSession();
+
+  /// 안내가 끝나는 순간의 테스트 진입점. 위와 같은 이유로 실제 경로 해제
+  /// 흐름(`_clearIndoorRoute`)을 준비할 수 없다.
+  @visibleForTesting
+  void endRouteRecordingSessionForTest() => _endRouteRecordingSession();
+
+  /// 지금 열려 있는 진단 세션. 나갔다 들어와도 **같은 인스턴스**인지가
+  /// "한 주행이 JSON 하나로 남는가"의 검증 기준이다.
+  @visibleForTesting
+  PdrDebugSessionRecorder? get debugRecorderForTest => _pdrDebugRecorder;
+
+  /// 경로가 해제된 것을 시계열에 남긴다. [announceExport]는 세션 경계 기록에만
+  /// 쓴다 — 사용자가 끝낸 것(routeEnded)과 새 경로로 갈아탄 것(routeReplaced)을
   /// 사후 분석에서 구분하기 위해서다.
+  ///
+  /// **레코더는 여기서 놓지 않는다.** 경계를 찍을 뿐이고, 갈아 끼울지는
+  /// [_beginRouteRecordingSession]이 정한다.
   ///
   /// 예전에는 여기서 "진단 JSON을 내보낼 수 있다"는 토스트를 띄웠다. 안내가
   /// 끝나는 순간은 도착 카드가 뜨는 순간이라 토스트가 그 위를 덮었고, 내보내기

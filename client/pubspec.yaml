@@ -53,12 +53,17 @@ dependencies:
   pointer_interceptor: ^0.10.1+2
 
   # 제품 UI의 semantic token과 공통 컴포넌트. 아래 SHA는 디자인시스템 PR #8의
-  # 검증된 커밋이다. 브랜치나 로컬 sibling 경로를 쓰지 않아 개발자·CI가 항상
-  # 같은 화면을 빌드하게 한다. PR #8 병합 뒤에도 이 객체 SHA는 그대로 유효하다.
+  # 검증된 커밋 위에 정보 행 복사 글자 정렬 수정 하나를 얹은 것이다
+  # (`fix/info-row-copy-baseline`). 브랜치가 아니라 SHA로 못박아 개발자·CI가 항상
+  # 같은 화면을 빌드하게 한다. 병합 뒤에도 이 객체 SHA는 그대로 유효하다.
+  #
+  # **디자인시스템 main으로 올리지 않는다.** main은 PR #8 커밋과 갈라져 있어
+  # (lib에서만 36파일·630줄 차이) 팔레트·테마·경로 플래너가 통째로 바뀐다. 올릴
+  # 때는 그것이 이 앱에서 의도한 변경인지 따로 판단한다.
   routex_design_system:
     git:
       url: https://github.com/Routex-labs/routex-design-system.git
-      ref: 104f0fce777d9e2596b281e6a8ed8c98b3e13b77
+      ref: 302675e0240816ff778ce0c7b525fddb86e67847
       path: packages/routex_design_system
   url_launcher: ^6.3.2
   # 공유 링크 수신. cold start의 최초 URI와 실행 중 URI stream을 함께 준다.
@@ -108,16 +113,19 @@ flutter:
 
   assets:
     # 매장 상세 이미지는 파일을 하나씩 적지 않고 디렉터리째 등록한다. 어떤 파일을
-    # 쓸지는 서버 오버레이(`backend/resources/store_details/*.json`)가 정하는데,
+    # 쓸지는 서버 오버레이(`resources/store_details/*.json`(Routex-labs/fastapi))가 정하는데,
     # 등록을 빠뜨려도 빌드는 성공하고 실행 중에 카드만 빈 채로 뜬다 — 메뉴를 30종으로
     # 늘렸을 때 실제로 31개가 미등록으로 남아 있었다. 한쪽 목록을 지우는 편이 두 목록을
     # 맞춰 두는 것보다 낫다.
     - assets/place_details/
     - assets/mock/sample_building.json
+    - assets/events/
+    - assets/floors/
     - assets/mock/hyundai_floor_1f.json
     - assets/mock/hyundai_floor_map.svg
     - assets/mock/demo_floor_map_v5.svg
     - assets/icons/place_location_pin.svg
+    - assets/branding/routee_marker.png
 
   # 앱 전체 기본 글꼴. 지정하지 않으면 플랫폼 기본(iOS Apple SD Gothic Neo,
   # Android Noto Sans CJK, 웹 브라우저 기본)이 쓰여 같은 화면이 기기마다 다르게
@@ -142,6 +150,13 @@ flutter:
           weight: 700
         - asset: assets/fonts/Pretendard-ExtraBold.otf
           weight: 800
+    # 제목 세리프. **가변 폰트 파일 하나**로 400~900을 다 쓴다(축은 wght 하나).
+    # 굵기는 pubspec이 아니라 쓰는 자리에서 FontVariation으로 고른다 — 여기에
+    # weight를 여러 줄 적으면 같은 파일이 굵기마다 한 벌씩 등록된다.
+    # 원본 사이트가 제목에 쓰는 것과 같은 폰트다(docs/client/thehyundai-event-source.md).
+    - family: PlayfairDisplay
+      fonts:
+        - asset: assets/fonts/PlayfairDisplay-Variable.ttf
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

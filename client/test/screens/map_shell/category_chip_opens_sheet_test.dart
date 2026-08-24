@@ -2,16 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:navigation_client/theme/app_theme.dart';
 import 'package:navigation_client/service_locator.dart';
-import 'package:navigation_client/models/building/category_count.dart';
 import 'package:navigation_client/repositories/building/building_repository.dart';
 import 'package:navigation_client/repositories/place/destination_repository.dart';
-import 'package:navigation_client/repositories/building/mock_building_repository.dart';
 import 'package:navigation_client/repositories/place/mock_destination_repository.dart';
 import 'package:navigation_client/screens/map_shell/map_shell_screen.dart';
 import 'package:navigation_client/screens/outdoor_map/outdoor_map_screen.dart';
 import 'package:navigation_client/screens/map_shell/widgets/sheets/category_stores_sheet.dart';
 import 'package:navigation_client/screens/map_shell/widgets/sheets/place_detail_sheet.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../../support/categorized_building_repository.dart';
 
 /// 지도 위 대분류 chip을 누르면 **그 자리에서** 매장 목록 시트가 뜨는지 고정한다.
 ///
@@ -27,7 +27,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     originalBuilding = buildingRepository;
     originalDestination = destinationRepository;
-    final repository = _CategorizedBuildingRepository();
+    final repository = CategorizedBuildingRepository();
     buildingRepository = repository;
     destinationRepository = MockDestinationRepository(repository);
     // asset 캐시를 미리 채운다. 위젯 테스트의 가짜 시계는 실제 파일 I/O를
@@ -155,42 +155,3 @@ void main() {
 /// 목업 asset 건물에 대분류가 붙은 매장을 얹는다.
 /// `assets/mock/sample_building.json`에는 category가 달린 매장이 하나도 없어
 /// 그대로 쓰면 칩 줄 자체가 뜨지 않는다.
-class _CategorizedBuildingRepository extends MockBuildingRepository {
-  static const _storesByFloor = {
-    '1F': ['우리은행 ATM'],
-    '2F': ['신한은행 ATM'],
-  };
-
-  @override
-  Future<List<CategoryCount>?> getCategoryCounts(String buildingId) async => [
-    for (final entry in _storesByFloor.entries)
-      CategoryCount(
-        floor: entry.key,
-        category: '서비스',
-        subcategory: 'ATM',
-        count: entry.value.length,
-      ),
-  ];
-
-  @override
-  Future<Map<String, dynamic>?> getFloorGeoJson(
-    String buildingId,
-    String floor,
-  ) async {
-    final names = _storesByFloor[floor] ?? const <String>[];
-    return {
-      'footprint_wgs84': <dynamic>[],
-      'stores': [
-        for (var i = 0; i < names.length; i++)
-          {
-            'id': '$floor-$i',
-            'name': names[i],
-            'category': '서비스',
-            'subcategory': 'ATM',
-            'centroid_wgs84': {'lat': 37.5665, 'lng': 126.978},
-          },
-      ],
-      'pois': <dynamic>[],
-    };
-  }
-}

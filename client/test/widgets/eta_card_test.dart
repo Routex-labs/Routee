@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:navigation_client/domain/guidance/route_guidance.dart';
+import 'package:navigation_client/features/indoor_navigation/contract/floor_transition_ui_state.dart';
 import 'package:navigation_client/theme/app_theme.dart';
 import 'package:navigation_client/widgets/eta_card.dart';
 import 'package:routex_design_system/routex_design_system.dart';
@@ -58,6 +59,59 @@ void main() {
 
       expect(find.text('경로를 벗어났습니다'), findsOneWidget);
       expect(find.text('새 경로를 자동으로 찾고 있습니다'), findsOneWidget);
+    });
+  });
+
+  group('상단 배너는 한 자리다 — 무엇이 그 자리를 쓰는가', () {
+    // 예전에는 층 전환만 셸이 흰 알약으로 따로 띄워, 초록 배너 위에 알약이
+    // 겹쳤다. 이제 네 상태가 같은 자리를 나눠 쓰고 우선순위가 하나뿐이다.
+
+    FloorTransitionUiState riding() => const FloorTransitionUiState(
+      stage: FloorTransitionStage.swapping,
+      fromFloorLabel: 'B2',
+      toFloorLabel: 'B1',
+      goingUp: true,
+    );
+
+    testWidgets('층 전환이 다음 행동을 밀어낸다', (tester) async {
+      // 타는 동안 걸음이 멈춰 있어 남은거리가 갱신되지 않는다. 그대로 두면
+      // "92m 뒤 오른쪽"이 에스컬레이터를 타는 내내 붙어 있다.
+      await tester.pumpWidget(
+        wrap(GuidanceBanner(instruction: turn(), floorTransition: riding())),
+      );
+
+      expect(find.text('B2 → B1'), findsOneWidget);
+      expect(find.text('에스컬레이터로 이동 중'), findsOneWidget);
+      expect(find.text('오른쪽 통로로 이동'), findsNothing);
+    });
+
+    testWidgets('도착은 다음 행동보다 앞서고 층 전환보다 뒤다', (tester) async {
+      await tester.pumpWidget(
+        wrap(GuidanceBanner(instruction: turn(), arrivalAt: '오설록 · B1')),
+      );
+
+      expect(find.text('목적지에 도착했습니다'), findsOneWidget);
+      expect(find.text('오설록 · B1'), findsOneWidget);
+      expect(find.text('오른쪽 통로로 이동'), findsNothing);
+
+      await tester.pumpWidget(
+        wrap(
+          GuidanceBanner(
+            instruction: turn(),
+            floorTransition: riding(),
+            arrivalAt: '오설록 · B1',
+          ),
+        ),
+      );
+
+      expect(find.text('에스컬레이터로 이동 중'), findsOneWidget);
+      expect(find.text('목적지에 도착했습니다'), findsNothing);
+    });
+
+    testWidgets('그릴 것이 없으면 호출부가 자리를 비울 수 있다', (tester) async {
+      expect(const GuidanceBanner().isEmpty, isTrue);
+      expect(GuidanceBanner(instruction: turn()).isEmpty, isFalse);
+      expect(const GuidanceBanner(arrivalAt: '오설록 · B1').isEmpty, isFalse);
     });
   });
 

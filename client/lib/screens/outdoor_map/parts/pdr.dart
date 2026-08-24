@@ -59,6 +59,14 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
   /// 안내만 띄운 탭까지 세면, 사용자가 위치를 잡은 뒤 누른 다음 탭이 "회전"
   /// 차례로 밀려 정작 중앙 정렬이 안 된다.
   Future<void> _recalibrateIndoor() async {
+    // 다른 층을 보는 중이면 **먼저 내 층으로 되돌린다.** 그 상태에서는
+    // `_pdrCurrentWgs84()`가 null이라 아래 갈래가 "위치를 지정하라"며 하단 바
+    // 버튼을 깜빡였다 — 위치는 이미 잡혀 있는데 다시 잡으라고 말하는 셈이라,
+    // 층을 훑어본 사용자에게 돌아올 문이 아니라 막다른 길이었다.
+    if (_viewingOtherFloor) {
+      await _returnToMyFloor();
+      return;
+    }
     if (_recalibrateTapCount.isEven) {
       // 홀수 번째 탭 — 실내 위치를 화면 정중앙으로. 앵커가 다른 층에 있거나
       // 층 그래프가 아직 없으면 null이라 여기서 걸린다. 지도가 아직 준비되지
@@ -71,6 +79,7 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
       }
       final controller = _mapController;
       if (controller == null || !_styleReady) return;
+      _holdFollowCamera(recenterDuration);
       await controller.animateCamera(CameraUpdate.newLatLng(_toGl(target)));
     } else {
       // 짝수 번째 탭 — 바라보는 방향이 화면 위쪽에 오도록 회전. 이때 내 실내
@@ -83,7 +92,10 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
         // 홀수 탭과 같다). 남는 것은 "조금 걸어야 방향이 잡힌다"는 사실 하나뿐
         // 이라 한 줄로 짧게, 잠깐만 띄운다.
         widget.onNeedLocationPlacement?.call();
-        _showSnack('조금 걸으면 방향이 잡힙니다', duration: OutdoorMapUi._briefSnackDuration);
+        _showSnack(
+          '조금 걸으면 방향이 잡힙니다',
+          duration: OutdoorMapUi._briefSnackDuration,
+        );
         return;
       }
       final controller = _mapController;
@@ -94,6 +106,7 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
       final center = myLocation != null
           ? _toGl(myLocation)
           : camera?.target ?? _toGl(_entrance ?? fallbackLocation);
+      _holdFollowCamera(recenterDuration);
       await controller.animateCamera(
         CameraUpdate.newCameraPosition(
           CameraPosition(
@@ -162,14 +175,36 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
   /// 실내 위치(PDR) 마커. 야외 상태에서는 [_indoorLocationVisible]이 false라
   /// 항상 빈 소스를 밀어 넣어 마커가 사라진다 — 야외에서는 GPS 마커
   /// ([_syncCurrentLayer])만 보이고, 실내에서는 이쪽만 보인다.
+  ///
+  /// 다른 층을 펴 놓은 동안에는 [_offFloorIndoorMarker]를, 진입 직후 실내 위치가
+  /// 아직 없는 동안에는 [_indoorGapGpsPoint]를 **흐리게** 그린다. 셋 중 무엇을
+  /// 고르는지는 [indoorMarkerAt] 하나가 정한다 — 소스가 하나뿐이라 화면 위의
+  /// 점도 항상 하나다.
   Future<void> _syncPdrCurrentLayer() {
     final revision = ++_pdrMarkerRevision;
     final controller = _mapController;
     if (controller == null || !_styleReady) return Future<void>.value();
 
-    final location = _indoorLocationVisible ? _pdrCurrentWgs84() : null;
-    final heading = location == null ? null : _pdrCurrentHeadingDeg;
-    final data = pdrLocationData(location, headingDeg: heading);
+    if (!_indoorLocationVisible) _lastIndoorMarker = null;
+    final here = _indoorLocationVisible ? _pdrCurrentWgs84() : null;
+    final floor = _activeFloor;
+    if (here != null && floor != null) {
+      _lastIndoorMarker = (floorId: floor, point: here);
+    }
+    final marker = indoorMarkerAt(
+      indoorPoint: here,
+      offFloorPoint: here == null ? _offFloorIndoorMarker() : null,
+      gpsFallback: _indoorGapGpsPoint,
+    );
+    // 흐린 마커에는 방향을 붙이지 않는다. 마지막으로 알던 자리이거나 건물 밖
+    // GPS라, 지금 어디를 보고 있는지는 모른다 — 삼각형을 그리면 모르는 것을
+    // 아는 척한다.
+    final heading = here == null ? null : _pdrCurrentHeadingDeg;
+    final data = pdrLocationData(
+      marker?.point,
+      headingDeg: heading,
+      offFloor: marker?.offFloor ?? false,
+    );
     _publishHeadingDebug(heading);
 
     final previous = _pdrMarkerWriteQueue;
@@ -194,6 +229,35 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
       }
     }();
     return _pdrMarkerWriteQueue;
+  }
+
+  /// **다른 층에 서 있을 때** 흐리게 그릴 자리. 그릴 근거가 없으면 null.
+  ///
+  /// 앵커가 지금 보고 있는 층에 없으면 `IndoorGuidanceSession.position`이 통째로
+  /// null이 되어([indoor_guidance_session.dart]의 우선순위) 마커가 사라진다.
+  /// 사용자는 자기가 어디 있는지도, 왜 없는지도 모른 채 빈 도면을 본다 —
+  /// 실기기에서 "파란 점이 아예 안 보인다"로 올라온 화면이 이것이다.
+  ///
+  /// **아무것도 안 그리는 것보다 흐린 점 하나가 낫다.** 층이 갈린 동안은 걸음
+  /// 보정도 멈추므로(`onSnapshot`이 층 불일치에서 되돌아간다) 이 자리는 그
+  /// 층에서 마지막으로 알던 자리 그대로이고, 다시 그 층으로 돌아오면 원래
+  /// 마커가 이어받는다. 흐린 것 자체가 "이 층 이야기가 아니다"라는 표시다.
+  ll.LatLng? _offFloorIndoorMarker() {
+    if (!_viewingOtherFloor) return null;
+    final last = _lastIndoorMarker;
+    if (last == null) return null;
+    return last.floorId == _pdrTrailState.anchor?.floorId ? last.point : null;
+  }
+
+  /// 내 위치가 **지금 보고 있는 층이 아닌 다른 층**에 찍혀 있다.
+  ///
+  /// 이 상태에서는 마커가 흐린 점 하나로 물러나고([_offFloorIndoorMarker]) 걸음
+  /// 보정도 멈춘다. 되돌아오는 문을 띄우는 조건이자([GuidanceRecenterButton])
+  /// "위치 보정"이 층부터 되돌려야 하는 조건이다([_recalibrateIndoor]).
+  bool get _viewingOtherFloor {
+    if (!_indoorLocationVisible) return false;
+    final anchorFloor = _pdrTrailState.anchor?.floorId;
+    return anchorFloor != null && anchorFloor != _activeFloor;
   }
 
   ll.LatLng? _pdrCurrentWgs84() {
@@ -395,7 +459,7 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
 
   /// 사용자가 바라보는 방향(true north 기준, 시계방향 도). PDR 세션이 heading을
   /// 아직 못 얻은 상태(예: 자북 못 잡음 + 수동 방향 보정 아직 안 함, 첫 걸음
-  /// 전)에는 null을 돌려주고, 이 경우 마커도 heading 원뿔 없이 도트만 뜬다.
+  /// 전)에는 null을 돌려주고, 이 경우 마커도 방향 삼각형 없이 도트만 뜬다.
   /// 계산식은 실내와 동일하며 walkOffset·복도 bias를 섞지 않는다.
   double? get _pdrCurrentHeadingDeg {
     final snapshot = _pdrTrailState.snapshot;
@@ -431,6 +495,143 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     if (backward == null) return;
     _anchorAxisSignProbed = anchor;
     if (backward) unawaited(indoorNavigationDriver.flipAnchorRotation());
+  }
+
+  /// 실제로 걸어가고 있는 방향(true north 기준). [_pdrCurrentHeadingDeg]와 **같은
+  /// 변환**을 지나야 두 각을 섞을 수 있다 — 한쪽만 층 좌표계에 있으면 도면이
+  /// 돌아간 건물에서 섞은 결과가 엉뚱한 데를 가리킨다.
+  double? get _pdrWalkingHeadingDeg {
+    final snapshot = _pdrTrailState.snapshot;
+    final anchor = _pdrTrailState.anchor;
+    if (snapshot == null || anchor == null || !snapshot.hasHeading) return null;
+    final transform = FloorCoordinateTransform(anchor);
+    return transform.floorBearingToMapBearing(
+      transform.toFloorBearing(snapshot.walkingHeadingDeg),
+    );
+  }
+
+  /// 실내 안내 카메라가 지금 사용자를 따라가도 되는 상태인지.
+  ///
+  /// **미리보기가 아니라 안내 중일 때만**이다 — 판정은 기존 [_guidanceActive]를
+  /// 그대로 쓰고, 실내 목적지가 있다는 조건만 더한다(야외·자동차 안내는
+  /// [_followingUser]가 따로 맡는다).
+  ///
+  /// 뒤쪽 셋은 **카메라의 주인이 잠시 다른 데 있는** 구간이다. 탑승 중에는
+  /// `_aimCameraAtEscalatorExit`이 하차 방향으로 각을 잡고, 층 크로스페이드
+  /// 중에는 도면 fit이 돈다 — 여기서 겹치면 두 애니메이션이 한 프레임씩 서로를
+  /// 자른다. 시간으로 겹치는 것은 [_holdFollowCamera]가 따로 막는다.
+  bool get _indoorFollowActive =>
+      !_followCameraReleasedByUser &&
+      _indoorEntered &&
+      _guidanceActive &&
+      _indoorRouteDestination != null &&
+      _escalatorRide == null &&
+      _floorSwapVeil == 0 &&
+      _retiringIndoorBlocks.isEmpty &&
+      !_applyingFloorTransition;
+
+  /// 지도에 손이 닿았다 — **두 팔로우를 다 물린다.**
+  ///
+  /// 안 물리면 다음 걸음(실내)이나 다음 좌표(야외)가 곧바로 화면을 되돌려 놓아
+  /// 지도를 조작할 수 없다. 한동안 실내 것만 물려서, 안내 중 야외 지도를 옮기면
+  /// 1초 만에 제자리로 끌려왔다 — 잠깐 다른 데를 보는 것조차 안 됐다.
+  ///
+  /// 되돌아오는 문은 "내 위치" 버튼 하나다([_recenterOnCurrentPosition]).
+  /// setState하지 않는다 — 이 값으로 갈리는 위젯이 없다.
+  void _releaseFollowCamera() {
+    _followCameraReleasedByUser = true;
+    _stopFollowingUser();
+  }
+
+  /// 다른 카메라 주인이 도는 동안 팔로우를 재운다. **애니메이션을 거는 쪽이**
+  /// 자기 길이만큼 불러 준다 — 여기서 상태를 뒤져 맞히려 들면, 주인이 하나
+  /// 늘 때마다 조건이 하나씩 늘고 언젠가 빠뜨린다.
+  void _holdFollowCamera(Duration duration) {
+    final until =
+        DateTime.now().millisecondsSinceEpoch + duration.inMilliseconds;
+    if (until > _followCameraNextMoveAtMs) _followCameraNextMoveAtMs = until;
+  }
+
+  /// 사용자를 따라 카메라를 옮긴다. 매 스냅샷마다 부르되 실제로 명령이 나가는
+  /// 것은 최소 간격·데드밴드를 지난 틱뿐이다(판정은 [nextFollowCameraBearingDeg]).
+  ///
+  /// bearing은 **나침반 각을 그대로** 쓴다. MapLibre 카메라 bearing은 진북
+  /// 기준이라 층 좌표계로 옮기면 안 된다 — [_pdrCurrentHeadingDeg]가 이미
+  /// 진북으로 되돌려 주고, 마커 화살표도 같은 값을 본다.
+  Future<void> _moveFollowCamera(PdrSnapshot snapshot) async {
+    _recordFollowCameraSteps(snapshot);
+    if (!_indoorFollowActive) return;
+    final controller = _mapController;
+    if (controller == null || !_styleReady) return;
+    final here = _pdrCurrentWgs84();
+    final orientation = _pdrCurrentHeadingDeg;
+    if (here == null || orientation == null) return;
+
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final last = _followCameraTarget;
+    final bearing = nextFollowCameraBearingDeg(
+      nowMs: nowMs,
+      notBeforeMs: _followCameraNextMoveAtMs,
+      lastBearingDeg: _followCameraBearingDeg,
+      targetMoved:
+          last == null ||
+          last.latitude != here.latitude ||
+          last.longitude != here.longitude,
+      desiredBearingDeg: blendedFollowBearingDeg(
+        orientationHeadingDeg: orientation,
+        walkingHeadingDeg: _pdrWalkingHeadingDeg,
+        walking:
+            nowMs - _followCameraLastStepAtMs < followCameraWalkingStepWindowMs,
+        walkingPullWeight: followCameraWalkingPullWeight,
+      ),
+      deadbandDeg: followCameraBearingDeadbandDeg,
+    );
+    if (bearing == null) return;
+
+    _followCameraBearingDeg = bearing;
+    _followCameraTarget = here;
+    _followCameraNextMoveAtMs = nowMs + followCameraMinIntervalMs;
+    await controller.animateCamera(
+      CameraUpdate.newCameraPosition(
+        CameraPosition(
+          target: _toGl(_followCameraTargetFor(here, bearing)),
+          zoom: indoorFollowZoom,
+          bearing: bearing,
+          // **기울이지 않는다.** 도면 판독이 쉽고 매장 라벨이 안 가려지는 쪽을
+          // 골랐다. 3D로 눕히면 앞쪽이 더 보이는 대신 도면이 사다리꼴로 찌그러진다.
+          tilt: 0,
+        ),
+      ),
+      duration: followCameraMoveDuration,
+    );
+  }
+
+  /// 내 위치가 화면 아래쪽에 오도록 카메라 목표점을 **진행 방향으로 민다.**
+  ///
+  /// 카메라 목표점은 늘 화면 한가운데에 그려지므로, 목표점을 앞으로 민 만큼
+  /// 내 위치가 아래로 내려온다([followCameraForwardLiftRatio]).
+  ll.LatLng _followCameraTargetFor(ll.LatLng here, double bearingDeg) {
+    final viewportHeightPx = MediaQuery.sizeOf(context).height;
+    return offsetByMeters(
+      here,
+      azimuthDeg: bearingDeg,
+      meters:
+          viewportHeightPx *
+          followCameraForwardLiftRatio *
+          visibleWidthMeters(
+            zoom: indoorFollowZoom,
+            availablePx: 1,
+            latitude: here.latitude,
+          ),
+    );
+  }
+
+  /// 걸음 수가 늘어난 시각을 기록한다. 정지/보행 판정의 유일한 입력이다.
+  void _recordFollowCameraSteps(PdrSnapshot snapshot) {
+    final previous = _followCameraLastSteps;
+    _followCameraLastSteps = snapshot.steps;
+    if (previous == null || snapshot.steps <= previous) return;
+    _followCameraLastStepAtMs = DateTime.now().millisecondsSinceEpoch;
   }
 
   void _syncCorridorTracking(PdrSnapshot? snapshot) {
@@ -549,6 +750,16 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     );
   }
 
+  /// **내보내기가 세션을 닫는다**(디버그 모드에서 세션을 닫는 유일한 자리).
+  ///
+  /// 디버그 모드에서는 안내가 끝나도 레코더를 갈지 않으므로
+  /// ([_beginRouteRecordingSession]), 끝을 정하는 것이 여기밖에 없다. 표본
+  /// 배열에 상한이 없어서 아무도 안 닫으면 파일이 주행 시간에 비례해 계속 자란다
+  /// (20분 ≈ 1 MB).
+  ///
+  /// 닫는 즉시 새 세션을 연다 — 내보낸 뒤 계속 걸으면 그 구간도 남아야 한다.
+  /// 그 사실은 스낵으로 한 줄 말한다. 안 말하면 방금 내보낸 파일에 다음 걸음이
+  /// 이어 붙는 줄 알고 계속 걷게 된다.
   Future<void> _exportPdrDebugJson() async {
     final recorder = _pdrDebugRecorder;
     if (recorder == null || !recorder.hasSnapshot || _exportingPdrDebugJson) {
@@ -558,6 +769,9 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     setState(() => _exportingPdrDebugJson = true);
     try {
       final device = await PdrDebugDeviceInfo.load();
+      // 경계는 [buildJson] **앞에서** 찍는다. 뒤에 찍으면 내보낸 파일에만
+      // 그 줄이 없어, 파일만 보고는 어디서 끝난 세션인지 알 수 없다.
+      recorder.recordSessionBoundary('exported');
       final session = recorder.buildJson(
         buildingId: _building?.id ?? demoBuildingId,
         selectedFloor: _activeFloor,
@@ -569,11 +783,22 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
         session,
         sharePositionOrigin: _pdrSharePositionOrigin(),
       );
+      if (mounted) rotateRecordingSessionAfterExport();
     } on Object catch (error) {
+      // 공유가 실패했으면 **갈지 않는다.** 넘기지도 못한 세션을 버리면 그
+      // 주행이 통째로 없어진다.
       if (mounted) _showSnack('PDR JSON을 내보내지 못했습니다: $error');
     } finally {
       if (mounted) setState(() => _exportingPdrDebugJson = false);
     }
+  }
+
+  /// 내보낸 세션을 놓고 새 세션을 연다. 공유 시트를 띄우지 않고 이 전이만
+  /// 시험할 수 있도록 이름 있는 자리로 뺐다.
+  @visibleForTesting
+  void rotateRecordingSessionAfterExport() {
+    _pdrDebugRecorder = _openRouteRecordingSession();
+    _showSnack('세션을 내보냈습니다. 지금부터는 새 세션으로 기록합니다.');
   }
 
   /// iOS 공유 시트는 popover 기준 사각형이 필요하다. 전달하지 않으면

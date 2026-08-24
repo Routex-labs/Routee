@@ -9,7 +9,7 @@ import '../../theme/app_theme.dart';
 ///
 /// `식음료`는 **유통업계 용어라 사용자가 쓰는 말이 아니어서** 음식점·카페·식품관
 /// 셋으로 나눴고, `서비스`는 **편의시설과의 경계가 정의된 적이 없어** 리테일이
-/// 섞여 들던 자리라 없앴다(`docs/backend/store-category-resurvey.md`). 둘 다 옛
+/// 섞여 들던 자리라 없앴다(`docs/store-category-resurvey.md`). 둘 다 옛
 /// 이름을 지우지 않고 남겨 두는 이유는 배포 시차다 — 클라이언트가 먼저 올라가고
 /// 백엔드 시드가 아직 옛 어휘를 주는 동안, 지우면 그 매장들이 회색 storefront로
 /// 떨어진다.
@@ -73,6 +73,38 @@ IconData categoryIconFor(String category) =>
 Color categoryColorFor(String category) =>
     _colorByCategory[category] ?? AppColors.primary;
 
+/// 대분류 색을 **같은 색 계열에서 더 진하게** 만든다. 색상각은 그대로 두고
+/// 채도를 [saturate]배 올린 뒤 명도를 [darken]만큼만 내린다.
+///
+/// **채널을 통째로 곱하지 않는다.** 곱셈은 명도와 함께 절대 채도까지 끌어내려
+/// 같은 색의 진한 쪽이 아니라 **탁하고 어두운 색**이 된다(실기기에서 되돌린
+/// 방식이다). 파스텔의 문제는 어두움이 아니라 옅음이므로, 대비는 채도에서
+/// 먼저 얻고 명도는 거들기만 한다.
+///
+/// 두 단계로 쓴다 — 카테고리 강조 테두리(약하게)와 고른 매장 하나
+/// ([kCategorySelectedSaturate]·[kCategorySelectedDarken], 진하게).
+/// 실제 값과 근거는 `docs/client/map-style-rules.md` 1절.
+Color categoryColorDeepen(
+  String category, {
+  required double saturate,
+  required double darken,
+}) {
+  final hsl = HSLColor.fromColor(categoryColorFor(category));
+  return hsl
+      .withSaturation((hsl.saturation * saturate).clamp(0.0, 1.0))
+      .withLightness((hsl.lightness - darken).clamp(0.0, 1.0))
+      .toColor();
+}
+
+/// 고른 매장 하나를 가리키는 잉크. 폴리곤 테두리이자 아이콘 원 배경이다.
+///
+/// 같은 카테고리의 **안 고른** 매장 테두리(1.25·0.06)보다 한 단계 진하다.
+/// 위에 흰 글리프가 올라가지만 도면 아이콘은 원래 그 대비로 그려 왔다 — 여기서
+/// 4.5:1을 맞추려고 명도를 더 내리면 다시 "어둡다"로 돌아간다. 대신 안 고른
+/// 배지보다 **반드시 대비가 높다**는 것만 테스트가 지킨다.
+const kCategorySelectedSaturate = 1.4;
+const kCategorySelectedDarken = 0.14;
+
 /// 매장 리스트에서 단일 아이템 왼쪽에 붙는 아이콘. 편의시설처럼 이질적인
 /// 하위 항목이 섞이는 카테고리에서 어떤 종류인지 한 눈에 알 수 있게 한다.
 /// subcategory가 있으면 그것으로 먼저 판정하고, 없으면 매장 이름의 부분
@@ -126,4 +158,3 @@ IconData storeIconFor({String? name, String? subcategory, String? category}) {
   }
   return Icons.storefront;
 }
-

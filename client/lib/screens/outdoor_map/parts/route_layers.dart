@@ -214,6 +214,9 @@ extension OutdoorMapRouteLayers on OutdoorMapBodyState {
   /// 완료 구간이다. 재탐색이 확정되면 같은 점들이
   /// [_completedRouteHistory]에 저장되고, 새 파란 경로가 이 자리를 대체한다.
   /// GuidanceTrailSession은 여기에 들어오지 않는다.
+  ///
+  /// 넘어온 값을 그대로 쓰지 않고 [CompletedRouteHistory.advance]를 거친다 —
+  /// 이번 틱의 완료 구간이 직전보다 짧아도 회색선은 줄이지 않는다.
   Future<void> _syncCompletedRouteLayer({
     required String? scopeId,
     List<ll.LatLng> currentCompleted = const [],
@@ -221,11 +224,18 @@ extension OutdoorMapRouteLayers on OutdoorMapBodyState {
     final controller = _mapController;
     if (controller == null || !_styleReady) return;
     final segments = <List<ll.LatLng>>[];
+    final drawn = scopeId == null
+        ? currentCompleted
+        : _completedRouteHistory.advance(
+            scopeId: scopeId,
+            generation: _routeGeneration,
+            completed: currentCompleted,
+          );
     if (scopeId != null) {
       segments.addAll(_completedRouteHistory.segmentsFor(scopeId));
     }
-    if (currentCompleted.length >= 2) {
-      segments.add(currentCompleted);
+    if (drawn.length >= 2) {
+      segments.add(drawn);
     }
     await controller.setGeoJsonSource(
       kOutdoorWalkedRouteSourceId,

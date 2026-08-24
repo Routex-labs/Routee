@@ -22,8 +22,8 @@
 | 5 | 경로선 스타일 | **완료** | PR #74 머지 |
 | 6 | 매장 라벨 시스템 | **진행 중** | 아이콘 레이어·타이포그래피 통일(6c) 완료 · 카테고리 색 텍스트와 밀도 필터가 남음 |
 | 7 | 길찾기 입력 구조 | **다음 차수** | 시트 chain 재배선으로 범위가 큼 |
-| — | 영업시간 | **완료** | B안(구조체 + 실시간 판정). 근거는 [9-1 D2‴](../backend/place-detail/place-detail-interface.md) |
-| — | 연락처 | **부분 해소** | 소개 영상용 1개 매장에만 `demoInfo`로 열림. 전 매장 확대는 여전히 보류 |
+| — | 영업시간 | **완료** | B안(구조체 + 실시간 판정). 근거는 [9-1 D2‴](https://github.com/Routex-labs/fastapi/blob/main/docs/place-detail/place-detail-interface.md) |
+| — | 연락처 | **완료** | B안(구조체 `contact` + 출처·확인일 필수). 아래 [연락처](#연락처--b안으로-열렸다-2026-08-22) |
 | — | 도착지 이름 라벨 | 보류 | 4 이후 |
 
 ### 지난 차수 (1~5번, 완료)
@@ -74,7 +74,7 @@ graph LR
 | 3 | 도면 색이 `map_palette.dart` 한곳으로 모임 | `map/style/palette.dart` |
 | 4 | 도착 핀 두 화면 통일 · 시설물 텍스트 라벨 제거 | `outdoor_map_screen.dart`, `floor_plan_view.dart` |
 | 5 | 진한 테두리 + 진행 방향 화살표, 두 화면 동일 | `map/style/route_style.dart` |
-| 6 | 타일에 `category`·`subcategory`는 실림 — **라벨은 아직 `textColor: '#444846'` 고정, 카테고리 아이콘 레이어 없음** | `backend/app/geo/tiling.py`, `floor_plan_view.dart` |
+| 6 | 타일에 `category`·`subcategory`는 실림 — **라벨은 아직 `textColor: '#444846'` 고정, 카테고리 아이콘 레이어 없음** | `app/geo/tiling.py`, `floor_plan_view.dart` |
 | 7 | **완료** — 상단 바 두 칸 + `route_field_results.dart` 후보 목록, `directions_sheet.dart` 제거 | `map_shell_screen.dart`, `map_top_bar.dart` |
 
 ⚠️ **`feature/store-icons` 원격 브랜치가 삭제된 이력이 있다.** 이름이 6번과 겹치는데
@@ -154,7 +154,7 @@ Studio 원본만 보면 1,640개 중 1,278개가 `category: "매장"`이라 무�
 같은 화면이 기기마다 다르게 보인다.
 
 **(2) 지도 라벨 폰트는 Regular 하나뿐이다.**
-`backend/resources/fonts/`에는 지도용 Regular 글리프 하나만 둔다. 그래서 지도에서
+`resources/fonts/`에는 지도용 Regular 글리프 하나만 둔다. 그래서 지도에서
 **굵기로 위계를 만들 수 없다.** 상용 지도는 중요한 POI를 굵게 해서 밀도 속에서도
 읽히게 하는데, 우리는 선택지가 없다.
 
@@ -174,7 +174,7 @@ Studio 원본만 보면 1,640개 중 1,278개가 `category: "매장"`이라 무�
 
 - 앱: `Pretendard-Regular/Medium/SemiBold/Bold/ExtraBold.otf` → `client/assets/fonts/`,
   `pubspec.yaml`에 실제 사용 weight(400·500·600·700·800)를 모두 등록 + `theme.fontFamily` 지정
-- 지도: Regular glyph만 생성 → `backend/resources/fonts/Pretendard Regular/`
+- 지도: Regular glyph만 생성 → `resources/fonts/Pretendard Regular/`
 - fontstack 이름은 `client/lib/map/style/fonts.dart` 상수 하나로 모은다
 
 ### 위험
@@ -479,7 +479,7 @@ casing이 안 보이는 것과 정확히 같은 실수를 마커에서 반복하
 
 ### ✅ 차단 요인 해소 — 백엔드 선행 작업은 끝났다
 
-`backend/app/geo/tiling.py`의 stores 레이어 properties에 `category`·`subcategory`가
+`app/geo/tiling.py`의 stores 레이어 properties에 `category`·`subcategory`가
 실린다(카테고리 필터 작업에서 함께 처리). MapLibre가 `['get', 'category']`로 색·아이콘을
 고를 수 있으므로 이제 클라이언트 스타일링만으로 가능하다.
 
@@ -864,30 +864,37 @@ chain 관련부 재배선 + `SearchPanel` 1,400여 줄의 이동. **한 번에 �
 
 ---
 
-## 보류 항목
+## 해소된 항목
 
-### 연락처 — 한 매장만 열렸고, 확대는 여전히 보류다
+### 연락처 — B안으로 열렸다 (2026-08-22)
 
-> **2026-08-11 갱신 — 영업시간은 이 절을 떠났다.** 아래 표의 **B안이 채택·구현됐다.**
-> `hours` 전용 구조체 + 클라이언트 실시간 판정이고, `demo_allowlist`는 걸지 않아
-> 전 매장에 쓸 수 있다. 계약·실패 조건·게이팅 근거는
-> [매장 상세 인터페이스 9-1 D2‴](../backend/place-detail/place-detail-interface.md).
-> 여기에 베껴 적지 않는다.
+> **이 절은 끝났다.** 영업시간이 2026-08-11에 B안으로 떠났고, **연락처도 같은 길로
+> 따라갔다**(2026-08-22). 아래 논의는 그 결정에 이르는 기록으로 남긴다.
 >
-> **연락처(대표번호)는 그대로 보류다.** 지금은 D안(`demoInfo` + `demo_allowlist`)으로
-> 소개 영상용 한 곳에만 올라가 있고, 전 매장 확대는 열리지 않았다. 아래 논의는 그쪽에
-> 대한 것으로 읽는다.
+> 스키마 v5의 `contact`가 그것이다 — `tel`·`source`·`confirmed_at`이 전부 필수인
+> 구조체이고, 하나라도 없으면 서버가 섹션을 만들지 않는다. `demo_allowlist`는 걸지
+> 않아 전 매장에 쓸 수 있다. 지금 403곳에 들어가 있다.
+>
+> **"B가 연락처에도 통할까"의 답은 통한다였다.** 아래에서 걱정한 것은 "구조를 준다고
+> 낡음이 잡히지 않는다"였는데, 낡음을 잡는 것은 구조가 아니라 **출처와 확인일**이었다.
+> 번호가 바뀌면 여전히 조용히 틀리지만, `source`를 열면 그 자리에서 확인할 수 있고
+> `confirmed_at`이 며칠 지난 값인지 말해 준다. 영업시간이 "지금 영업 중"을 계산하기
+> 위해 구조체가 필요했던 것과 이유는 다르고, 도착한 답은 같다.
+>
+> 아래 **"연락처 확대 시 정할 것"의 두 질문도 답이 났다.** 출처는 더현대 서울 공식
+> 층별 안내(`/store/floor-guide`)이고, 매장 직통 번호가 거기 있어 `1522-3232`(전국
+> 공통 고객센터)를 쓸 이유가 사라졌다. 라벨은 `전화번호`다.
 
 ⚠️ **이건 UI 작업이 아니다. 저장소가 의도적으로 금지하고 있고 코드로 강제한다.**
 
-`backend/resources/store_details/_schema.json`의 `forbidden_labels`:
+`resources/store_details/_schema.json`의 `forbidden_labels`:
 
 ```
 "영업시간", "영업 시간", "운영시간", "운영 시간",
 "전화", "전화번호", "대표번호", "연락처", "문의", "평점", "리뷰"
 ```
 
-`backend/app/repositories/place_details.py`가 시드 **적재 전에** 검증 실패시킨다.
+`app/repositories/place_details.py`가 시드 **적재 전에** 검증 실패시킨다.
 스키마 주석에 남은 이유:
 
 > 출처가 없어 검증할 수 없고, 영업시간류는 시간이 지나면 자동으로 거짓이 된다.
@@ -902,9 +909,9 @@ chain 관련부 재배선 + `SearchPanel` 1,400여 줄의 이동. **한 번에 �
 | 안 | 내용 | 평가 |
 |---|---|---|
 | A | `forbidden_labels`에서 빼고 `source` URL 필수화 | 정직하지만 "영업 중" 판정 불가. **한 번 시도했다 철회**(9-1 D2′) — 조건부 예외가 곧 우회 경로가 됐다 |
-| B | **전용 구조체 필드로 승격** + `source` 필수 | **영업시간에 채택(2026-08-11 · 9-1 D2‴).** 연락처는 아직 |
+| B | **전용 구조체 필드로 승격** + `source` 필수 | **채택.** 영업시간 2026-08-11(9-1 D2‴) · 연락처 2026-08-22(`contact`) |
 | C | "데모 데이터" 배지 달고 그냥 표시 | 비추 — 결국 거짓이 화면에 뜬다 |
-| D | **`demoInfo` + 매장 허용 목록** | **연락처는 여기 머문다(2026-08-10).** 소개 영상용 1곳 한정 |
+| D | **`demoInfo` + 매장 허용 목록** | 연락처가 2026-08-10~08-22 머물던 자리. 지금은 B안으로 옮겼고, 여기 남는 것은 영업시간·연락처가 아닌 낡는 값뿐이다 |
 
 **B가 영업시간에서 통한 이유**가 연락처에도 그대로 적용될지는 아직 모른다. 영업시간은
 "지금 영업 중"이라는 **계산이 필요해서** 구조체가 값을 했다. 전화번호는 계산할 것이 없고
@@ -916,7 +923,7 @@ chain 관련부 재배선 + `SearchPanel` 1,400여 줄의 이동. **한 번에 �
 - **출처를 뭘로?** — 더현대서울 공식 매장 페이지 URL 하나로 정하면 될 것 같지만
   **이건 사람이 결정해야 한다**
 - 지금 값(`1522-3232`)은 매장 직통이 아니라 **전국 공통 고객센터**다. 라벨을
-  `고객센터`로 바꿀지 등은 [다음 작업 순서 3번](../backend/place-detail/next-steps.md)
+  `고객센터`로 바꿀지 등은 [다음 작업 순서 3번](https://github.com/Routex-labs/fastapi/blob/main/docs/place-detail/next-steps.md)
 
 **UI 배치 — 반영된 것과 남은 것**
 
@@ -924,9 +931,14 @@ chain 관련부 재배선 + `SearchPanel` 1,400여 줄의 이동. **한 번에 �
 |---|---|---|
 | 홈 탭 맨 위 | `영업 중 · 20:00 종료` 한 줄 + 오늘 줄(나머지 요일은 접음) | **반영됨.** 섹션 배열이라 "헤더 바로 아래"까지는 못 가고, 서버가 정한 순서에서 가장 위다 |
 | 소개 → 사진 → 메뉴 | 지금 그대로 | 유지 |
-| 매장 정보 | 연락처 · 주소 | 연락처는 아직 `영업 정보`(`demoInfo`) 섹션에 있다 |
+| 매장 정보 | 연락처 · 주소 | **반영됨.** 연락처는 `demoInfo`를 떠나 `contact` 섹션이 됐고, 서버가 정한 순서에서 영업시간 바로 아래다 |
 
-연락처는 탭하면 전화가 걸리게 한다. 주소를 맨 아래로 내린 기존 판단은 유지한다.
+연락처는 탭하면 전화가 걸린다(복사 버튼은 남긴다 — 다이얼러가 없는 기기가 있다).
+주소를 맨 아래로 내린 기존 판단은 유지한다.
+
+---
+
+## 보류 항목
 
 ### 도착지 이름 라벨 배지
 

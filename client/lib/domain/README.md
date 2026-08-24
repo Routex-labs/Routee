@@ -35,7 +35,7 @@ flowchart LR
 현재 `BuildingRepository.getShortestRoute` 계약은 층 하나를 받는다. 층 간 길찾기는
 건물 전체 그래프, 수직 전이 간선, 층별 지도 조립을 함께 연결해야 하며 단일 층 함수에
 임의로 섞지 않는다. 설계는
-[`../../../docs/backend/navigate/client-handoff.md`](../../../docs/backend/navigate/client-handoff.md)를 참고한다.
+[`../../../docs/navigate/client-handoff.md`](../../../docs/navigate/client-handoff.md)를 참고한다.
 
 ## 경로 기준 위치 해석 — 단방향
 

@@ -93,7 +93,7 @@ flowchart LR
 `HttpDestinationRepository`가 두 엔드포인트를 모두 호출하고, Mock은 이미 로드된 건물
 데이터에서 검색한다. 앱 배선은 기본이 `HttpDestinationRepository`다
 (`../service_locator.dart`) — 자연어·탐색 검색 설계는
-[`../../../docs/backend/native/client-handoff.md`](../../../docs/backend/native/client-handoff.md)를 참고한다.
+[`../../../docs/native/client-handoff.md`](../../../docs/native/client-handoff.md)를 참고한다.
 
 ## 반환·오류 규칙
 

@@ -11,6 +11,7 @@ import 'package:navigation_client/repositories/building/mock_building_repository
 import 'package:navigation_client/repositories/place/mock_destination_repository.dart';
 import 'package:navigation_client/repositories/place/outdoor_poi_repository.dart';
 import 'package:navigation_client/screens/map_shell/map_shell_screen.dart';
+import 'package:navigation_client/screens/outdoor_map/outdoor_map_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// **상단 검색창과 길찾기 시트가 같은 것을 찾는지**에 대한 회귀 테스트.
@@ -25,6 +26,17 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// 그래서 후보를 정하는 자리를 하나로 모았고(`_searchDirectionsCandidates`),
 /// 이 테스트가 그 하나를 지킨다. 새 출처를 붙일 때 한쪽에만 붙이면 여기서
 /// 걸린다.
+///
+/// ## 갈리는 축은 **딱 하나**, 그리고 그건 의도한 것이다
+///
+/// 상단 검색은 서 있는 쪽만 보여준다 — 실외면 TMAP, 실내면 우리 도면
+/// (`search-result-list-ux.md` Y절). 길찾기 도착지 칸은 안 가른다: 그 칸의
+/// 본업이 **밖에 서서 안을 고르는 것**이라, 같이 가르면 야외에서 건물 안 매장으로
+/// 가는 길을 아예 못 찍는다(`walk_route_kind.dart`의 「야외 → 실내」).
+///
+/// 그래서 아래 테스트들은 **같은 컨텍스트에서** 두 진입점을 맞춰 본다. 실내
+/// 매장은 실내에서, 바깥 장소는 실외에서. 컨텍스트를 넘나드는 비교는 이제
+/// 규칙 위반이 아니라 규칙 그 자체다.
 void main() {
   late BuildingRepository originalBuildingRepository;
   late DestinationRepository originalDestinationRepository;
@@ -89,16 +101,26 @@ void main() {
   /// 상단 검색창에 [query]를 치고 목록에 [name]이 있는지 본다.
   ///
   /// 이름은 검색어 강조 때문에 `Text.rich`로 그려지므로 findRichText가 필요하다.
+  /// [indoor]면 먼저 도면 안으로 들어간다 — 상단 검색은 서 있는 쪽만 보여주므로,
+  /// 실내 매장을 실외에서 찾는 것은 이제 실패가 아니라 규칙이다.
   Future<bool> foundInTopSearch(
     WidgetTester tester, {
     required String query,
     required String name,
+    bool indoor = false,
   }) async {
     await resetShell(tester);
     await tester.pumpWidget(
       MaterialApp(theme: AppTheme.light, home: const MapShellScreen()),
     );
     await drain(tester);
+    if (indoor) {
+      tester
+          .state<OutdoorMapBodyState>(find.byType(OutdoorMapBody))
+          // ignore: invalid_use_of_visible_for_testing_member
+          .enterIndoorForTest();
+      await drain(tester);
+    }
     await tester.enterText(find.byType(TextField).first, query);
     await tester.pump();
     await drain(tester);
@@ -127,10 +149,15 @@ void main() {
   }
 
   testWidgets('건물 안 매장은 두 진입점 모두에서 찾아진다', (WidgetTester tester) async {
-    // 밖에서도 우리 매장 줄이 목록에 남는다. 층·노드가 붙어 있어 문을 경유해
-    // 매장 앞까지 데려다주는 줄이라, 겹치는 POI 줄을 빼고 이쪽을 남긴다.
+    // 상단 검색은 **도면 안에서** 물어본다. 길찾기 칸은 밖에서 물어도 답한다 —
+    // 그 비대칭이 의도한 것이고, 그 이유는 이 파일 머리말에 있다.
     expect(
-      await foundInTopSearch(tester, query: '강의실', name: '강의실 101'),
+      await foundInTopSearch(
+        tester,
+        query: '강의실',
+        name: '강의실 101',
+        indoor: true,
+      ),
       isTrue,
       reason: '상단 검색에서 매장이 안 나왔다',
     );

@@ -20,7 +20,8 @@ typedef NearestStore = ({StoreIndexEntry store, NodeReach? reach});
 /// [stores] 중 보행 거리가 가장 짧은 매장을 고른다. 빈 목록은 호출부의 버그다.
 ///
 /// **거리를 모를 때** — 거리 정보 자체가 없으면 [currentFloorId]와 같은 층을,
-/// 그마저 없으면 입력 첫 번째를 대표로 세운다. 일부만 도달 가능하면 **그중
+/// 그마저 없으면 입력 첫 번째를 대표로 세운다. [currentFloorId]는 내부 id와 화면
+/// 라벨(`B2`) 둘 다 받는다. 일부만 도달 가능하면 **그중
 /// 최근접**을 고른다(도달 못 하는 곳을 "가장 가깝다"고 적지 않는다).
 ///
 /// **묶인 개수는 손대지 않는다** — 19곳 중 3곳만 거리를 안다고 `등 3곳`이 되면
@@ -57,7 +58,12 @@ NearestStore nearestByWalkingDistance({
 }
 
 
-/// [stores] 중 [currentFloorId] 층에 있는 첫 매장. 없으면 null.
+/// [currentFloorId] 층에 있는 첫 매장. 없으면 null.
+///
+/// **내부 id(`FL-…`)와 화면 라벨(`B2`)을 모두 받는다.** 부르는 쪽이 둘 다 넘긴다 —
+/// 저장소도 같은 규칙이다([DestinationRepository]). 한쪽만 대조하던 동안 화면이
+/// 넘긴 라벨이 한 번도 안 맞아서, 거리를 모르는 자리(위치 미지정)의 `화장실`이
+/// 늘 색인 첫 줄인 B6로 떨어졌다 — B2에 서 있어도 그랬다.
 ///
 /// 같은 층이 여럿이어도 첫 번째로 족하다 — 어느 쪽이 더 가까운지는 거리를 알아야
 /// 정할 수 있는 값이고, 이 함수가 불리는 자리는 그 거리를 모르는 자리다.
@@ -67,7 +73,9 @@ StoreIndexEntry? _onCurrentFloor(
 ) {
   if (currentFloorId == null) return null;
   for (final store in stores) {
-    if (store.floorId == currentFloorId) return store;
+    if (store.floorId == currentFloorId || store.floorName == currentFloorId) {
+      return store;
+    }
   }
   return null;
 }

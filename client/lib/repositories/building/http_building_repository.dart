@@ -4,11 +4,15 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../../core/api_config.dart';
+import '../../domain/route/corridor_shortcuts.dart';
+import '../../domain/route/corridor_shortcuts_data.dart';
+import '../../domain/route/entrance_door_nodes.dart';
 import '../../domain/route/floor_router.dart';
 import '../../models/building/building.dart';
 import '../../models/building/building_graph.dart';
 import '../../models/building/category_count.dart';
 import '../../models/building/floor_graph.dart';
+import '../../models/building/floor_plan.dart';
 import '../../models/route/indoor_route.dart';
 import '../../models/place/store_index_entry.dart';
 import 'building_repository.dart';
@@ -32,6 +36,7 @@ class HttpBuildingRepository implements BuildingRepository {
   final Map<String, Future<BuildingGraph?>> _buildingGraphFutures = {};
   final Map<String, Future<List<CategoryCount>?>> _categoryCountFutures = {};
   final Map<String, Future<List<StoreIndexEntry>?>> _storeIndexFutures = {};
+  final Map<String, Future<Map<String, dynamic>?>> _eventFutures = {};
 
   // 아래 둘은 네트워크가 아니라 계산 결과라 값 캐시로 충분하다.
   final Map<String, FloorGraph> _floorGraphCache = {};
@@ -139,6 +144,17 @@ class HttpBuildingRepository implements BuildingRepository {
   }
 
   @override
+  Future<Map<String, dynamic>?> getBuildingEvents(String buildingId) {
+    return _shared(_eventFutures, buildingId, () async {
+      final response = await _client.get(
+        Uri.parse('$apiBaseUrl/buildings/$buildingId/events'),
+      );
+      if (response.statusCode == 404) return null;
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    });
+  }
+
+  @override
   Future<Map<String, dynamic>?> getFloorGeoJson(
     String buildingId,
     String floor,
@@ -163,8 +179,22 @@ class HttpBuildingRepository implements BuildingRepository {
       // navigation_graph가 이 응답에 이미 포함돼 있으므로, 최단 경로 계산용
       // nodes/edges도 여기서 함께 캐싱해둔다 — getShortestRoute가 별도로
       // /floors/{floor}/graph를 다시 호출하지 않게 하기 위함이다.
+      // 출구 문 노드도 **여기서** 꿰맨다. 이 응답 하나에 그래프와 출구가 함께
+      // 있어 추가 요청이 0이고, 화면이 따로 파싱하는 FloorGraph(지도 매칭·복도
+      // 추적용)와는 다른 인스턴스라 스냅 동작에 영향이 없다.
       if (navigationGraph != null) {
-        _floorGraphCache[cacheKey] = FloorGraph.fromJson(navigationGraph);
+        // 지름길은 출구 문 노드와 달리 **화면 쪽 FloorGraph에도 같이 들어가야
+        // 한다**(corridor_shortcuts.dart 머리말). 여기서만 얹으면 경로선은
+        // 대각선인데 복도 추적은 그 간선을 몰라 마커가 ㄱ자에 남는다.
+        _floorGraphCache[cacheKey] = floorGraphWithEntranceDoors(
+          floorGraphWithCorridorShortcuts(
+            FloorGraph.fromJson(navigationGraph),
+            kCorridorShortcuts,
+            buildingId: buildingId,
+            floorName: floor,
+          ),
+          FloorPlan.fromJson(geojson),
+        );
       }
       return geojson;
     });
@@ -230,9 +260,31 @@ class HttpBuildingRepository implements BuildingRepository {
         Uri.parse('$apiBaseUrl/buildings/$buildingId/graph?vertical=$vertical'),
       );
       if (response.statusCode == 404) return null;
-      return BuildingGraph.fromJson(
+      final graph = BuildingGraph.fromJson(
         jsonDecode(response.body) as Map<String, dynamic>,
       );
+      return _withEntranceDoors(buildingId, graph);
     });
+  }
+
+  /// 지상 출구의 문 노드를 꿰맨 그래프. 출구를 못 얻으면 [graph] 그대로.
+  ///
+  /// 출구는 지상 기본 층 도면에서만 추려지므로 그 층 응답이 필요하다. 둘 다
+  /// 이미 캐시하는 접근자를 그대로 쓴다 — 야외 안내 흐름에서는 그때 이미 받아
+  /// 둔 값이라 네트워크가 늘지 않는다. **실패하면 꿰매지 않고 원본을 돌려준다**:
+  /// 출구 데이터를 못 받았다고 층 간 길찾기까지 죽으면 안 된다.
+  Future<BuildingGraph> _withEntranceDoors(
+    String buildingId,
+    BuildingGraph graph,
+  ) async {
+    try {
+      final floor = (await getBuilding(buildingId))?.initialFloor;
+      if (floor == null) return graph;
+      final geojson = await getFloorGeoJson(buildingId, floor);
+      if (geojson == null) return graph;
+      return buildingGraphWithEntranceDoors(graph, FloorPlan.fromJson(geojson));
+    } catch (_) {
+      return graph;
+    }
   }
 }

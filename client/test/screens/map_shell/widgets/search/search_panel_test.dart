@@ -204,6 +204,117 @@ void main() {
   // 정렬 규칙 자체는 domain/search_result_order.dart의 테스트가 덮는다. 여기서는
   // **패널이 그 규칙을 실제로 태우는지**와, 정렬 뒤에도 추천 이유가 제 매장에
   // 붙어 있는지를 본다.
+  group('결과 줄 끝 도착 버튼', () {
+    // 문서 F의 검증 기준을 그대로 옮긴 것이다
+    // (`docs/client/naver-map-ui-ux-analysis.md`): 행 본문 탭은 상세,
+    // 버튼 탭은 경로 — 서로 침범하지 않는다.
+    late DestinationRepository originalDestination;
+    late BuildingRepository originalBuilding;
+
+    setUp(() {
+      originalDestination = destinationRepository;
+      originalBuilding = buildingRepository;
+      buildingRepository = _FakeBuildingRepository();
+    });
+
+    tearDown(() {
+      destinationRepository = originalDestination;
+      buildingRepository = originalBuilding;
+    });
+
+    Widget buildSubject({
+      required List<PoiSearchResult> results,
+      ValueChanged<PoiSearchResult>? onStoreDestination,
+      ValueChanged<PoiSearchResult>? onStorePicked,
+    }) {
+      destinationRepository = _FakeDestinationRepository(results);
+      return MaterialApp(
+        theme: AppTheme.light,
+        home: Scaffold(
+          body: SizedBox(
+            height: 400,
+            child: SearchPanel(
+              buildingId: 'building-1',
+              query: '나이키',
+              submitTick: 0,
+              onStorePicked: onStorePicked ?? (_) {},
+              onBuildingPicked: (_) {},
+              onSuggestionPicked: (_) {},
+              onQueryPicked: (_) {},
+              onStoreDestination: onStoreDestination,
+              indoorContextActive: true,
+            ),
+          ),
+        ),
+      );
+    }
+
+    Future<void> settleSearch(WidgetTester tester) async {
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('버튼을 누르면 경로만 시작하고 상세는 열지 않는다', (tester) async {
+      PoiSearchResult? destination;
+      PoiSearchResult? opened;
+      await tester.pumpWidget(
+        buildSubject(
+          results: [_result(subcategory: '여성패션', category: '패션')],
+          onStoreDestination: (store) => destination = store,
+          onStorePicked: (store) => opened = store,
+        ),
+      );
+      await settleSearch(tester);
+
+      await tester.tap(find.byTooltip('도착'));
+      await tester.pumpAndSettle();
+
+      expect(destination?.placeId, 'place-1');
+      expect(opened, isNull, reason: '버튼 탭이 행 본문까지 눌러 상세가 함께 열렸다');
+    });
+
+    testWidgets('행 본문은 그대로 상세를 연다 — 기존 경로가 살아 있다', (tester) async {
+      PoiSearchResult? destination;
+      PoiSearchResult? opened;
+      await tester.pumpWidget(
+        buildSubject(
+          results: [_result(subcategory: '여성패션', category: '패션')],
+          onStoreDestination: (store) => destination = store,
+          onStorePicked: (store) => opened = store,
+        ),
+      );
+      await settleSearch(tester);
+
+      await tester.tap(find.text('여성패션 · 3F'));
+      await tester.pumpAndSettle();
+
+      expect(opened?.placeId, 'place-1');
+      expect(destination, isNull);
+    });
+
+    testWidgets('입구 노드가 없는 매장에는 버튼을 그리지 않는다', (tester) async {
+      // 눌러도 경로를 못 그리는 버튼이다. 그 사실은 행의 `경로 안내 불가`가 말한다.
+      await tester.pumpWidget(
+        buildSubject(
+          results: [
+            const PoiSearchResult(
+              name: '나이키 강남',
+              floor: '3F',
+              point: LatLng(37.5, 127.0),
+              placeId: 'place-1',
+              category: '패션',
+            ),
+          ],
+          onStoreDestination: (_) {},
+        ),
+      );
+      await settleSearch(tester);
+
+      expect(find.textContaining('경로 안내 불가'), findsOneWidget);
+      expect(find.byTooltip('도착'), findsNothing);
+    });
+  });
+
   group('검색 결과 정렬', () {
     late DestinationRepository originalDestination;
     late BuildingRepository originalBuilding;

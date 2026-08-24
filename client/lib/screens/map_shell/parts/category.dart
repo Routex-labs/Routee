@@ -24,7 +24,7 @@ extension _MapShellCategory on _MapShellScreenState {
 
   void _onActiveFloorChanged(String? floor) {
     if (_activeFloorLabel == floor || !mounted) return;
-    setState(() => _activeFloorLabel = floor);
+    setState(() => _activeFloorNotifier.value = floor);
   }
 
   /// 카테고리 선택을 바꾼다. 지도 강조는 상태를 내려받은 두 지도가 알아서
@@ -88,7 +88,19 @@ extension _MapShellCategory on _MapShellScreenState {
     _categorySheetClosing = showing;
     final picked = await showing;
     if (identical(_categorySheetClosing, showing)) _categorySheetClosing = null;
-    if (_closeSheetChainRequested || picked == null || !mounted) return false;
+    if (!mounted) return false;
+    if (_closeSheetChainRequested || picked == null) {
+      // **목록이 그냥 닫혔다 — 첫 매장에 걸어 둔 강조를 여기서 걷는다.**
+      // 카메라를 그 매장으로 옮기면서 강조도 함께 서는데
+      // ([_focusCategoryFirstStore] → `focusStore`), 지우는 자리가 매장 상세
+      // 쪽에만 있었다. 그래서 목록을 X로 닫으면 그 칸 하나가 도면에 남고,
+      // 칩을 꺼도 남아 되돌릴 수단이 화면에서 사라졌다(실기기 확인).
+      //
+      // **상세로 이어지는 아래 갈래에서는 지우지 않는다** — 그쪽이 자기
+      // 매장으로 곧바로 다시 세우므로, 여기서 지우면 한 프레임이 빈다.
+      _outdoorKey.currentState?.clearHighlight();
+      return false;
+    }
     return _showStoreInfo(picked, focusOnMap: true);
   }
 
@@ -108,6 +120,66 @@ extension _MapShellCategory on _MapShellScreenState {
         keepZoom: true,
       );
     }
+  }
+
+  /// 층 선택기 위 편의시설 버튼. 지금 층의 시설을 **종류로 골라 지도에 띄우고**
+  /// 그중 하나를 도착지로 삼는 시트를 연다.
+  ///
+  /// 고른 종류는 도면 위에 파랗게 칠해지고([facilityHighlightPolygons]) 줄을 누르면
+  /// 곧바로 경로가 된다 — 상세 시트를 거치지 않는다. 시설을 찾는 사람이 원하는 것은
+  /// 영업시간이나 사진이 아니라 길이다.
+  ///
+  /// **닫으면 강조도 걷는다.** 남겨 두면 시트를 닫은 사용자가 도면에 걸린 강조를
+  /// 되돌릴 수단이 없다(칩 줄의 `편의시설`은 소분류까지 되돌리지 못한다).
+  Future<void> _onFacilitiesTap() async {
+    if (_facilitiesSheetOpen) return;
+    // 색인은 저장소가 캐시한다 — 두 번째부터는 기다림이 없다.
+    final index = await buildingRepository.getStoreIndex(_buildingId);
+    if (!mounted) return;
+    final facilities = [
+      for (final entry in index ?? const <StoreIndexEntry>[])
+        if (entry.category == kFacilityCategory &&
+            kFacilityFilters.any((f) => f.value == entry.subcategory))
+          entry,
+    ];
+    setState(() => _facilitiesSheetOpen = true);
+    // 지도 강조가 이 시트의 결과물이라 지도를 잠그지 않는다([_withMapsLocked]를
+    // 쓰지 않는 이유). 시트를 놔둔 채 도면을 움직여 확인할 수 있어야 한다.
+    final picked = await showFacilityFilterSheet(
+      context,
+      floorLabel: _activeFloorNotifier,
+      facilities: facilities,
+      selected: _categorySelection?.category == kFacilityCategory
+          ? _categorySelection?.subcategory
+          : null,
+      onSelected: (value) => _onCategorySelectionChanged(
+        value == null
+            ? null
+            : CategorySelection(
+                category: kFacilityCategory,
+                subcategory: value,
+              ),
+      ),
+    );
+    if (!mounted) return;
+    setState(() => _facilitiesSheetOpen = false);
+    if (_categorySelection?.category == kFacilityCategory) {
+      _onCategorySelectionChanged(null);
+    }
+    if (picked == null) return;
+
+    // 좌표·노드 해석은 검색·근처 매장과 **같은 경로**를 쓴다([resolveIndexEntry]).
+    final resolved = await _outdoorKey.currentState?.resolveIndexEntry(picked);
+    if (!mounted) return;
+    if (resolved == null) {
+      // 도면에서 그 시설을 못 찾았다. 조용히 끝내면 누른 사람에게는 아무 일도
+      // 안 일어난 화면이 된다.
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('이 시설의 위치를 찾지 못했습니다')));
+      return;
+    }
+    await _setRouteDestination(candidateForPlace(resolved));
   }
 
   /// 지도 위 카테고리 chip 줄의 아래 끝(화면 좌표·논리 픽셀). 상수로 박지 않고

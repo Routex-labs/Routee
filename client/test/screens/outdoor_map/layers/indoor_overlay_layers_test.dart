@@ -1,3 +1,6 @@
+import 'dart:math' as math;
+
+import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
 
@@ -14,6 +17,9 @@ int _luminance(String hex) {
   final value = int.parse(hex.substring(1), radix: 16);
   return ((value >> 16 & 0xFF) + (value >> 8 & 0xFF) + (value & 0xFF)) ~/ 3;
 }
+
+Color _color(String hex) =>
+    Color(int.parse(hex.substring(1), radix: 16) | 0xFF000000);
 
 /// 실기기에서 건물이 **불투명한 검정 덩어리**로 덮이던 회귀를 막는 테스트.
 ///
@@ -93,6 +99,18 @@ void main() {
       expect(
         _luminance(mapNonWalkableOutline),
         greaterThan(_luminance(mapStoreOutline)),
+      );
+      // **밝기로는 가를 수 없는 자리다.** 위 두 조건(통로보다 어둡고 매장보다
+      // 밝다)이 남기는 폭은 0.14뿐이라, 그 안에서 매장과 구분하려면 색조가
+      // 갈려야 한다. 옛 값 `#F4F1ED`는 매장과 같은 웜 베이지(색상각 34°)에
+      // 채널 평균이 3 밝을 뿐이라 실기기에서 같은 색으로 읽혔다.
+      final storeHue = HSLColor.fromColor(_color(mapStoreFill)).hue;
+      final voidHue = HSLColor.fromColor(_color(mapNonWalkableFill)).hue;
+      final gap = (voidHue - storeHue).abs();
+      expect(
+        math.min(gap, 360 - gap),
+        greaterThan(90),
+        reason: '못 걷는 면이 매장과 같은 색조면 이 밝기 폭으로는 구분되지 않는다',
       );
     });
 

@@ -390,6 +390,63 @@ void main() {
 /// 여기가 두 화면의 단일 출처다.
 void _focusZoomTests() {
   group('focusZoomFor', () {
+    test('fromZoom을 주면 지금 배율이 아니라 거기서 절반을 잰다', () {
+      // 카테고리로 한 매장을 크게 본(20.4) 뒤 칩을 풀고 다른 매장을 누른
+      // 상황이다. 지금 배율에서 재면 20.4 → 19.95로 확대된 채 머무는데,
+      // 도면 전체가 보이는 배율(17.5)에서 재면 18.75까지 **물러선다**.
+      expect(
+        focusZoomFor(
+          currentZoom: 20.4,
+          keepZoom: false,
+          storeFocusZoom: 20.0,
+          storeFitsViewport: true,
+          ratio: 0.5,
+          fromZoom: 17.5,
+        ),
+        18.75,
+      );
+      // 어디서 눌렀든 결과가 같다 — 그게 이 인자의 이유다.
+      expect(
+        focusZoomFor(
+          currentZoom: 17.6,
+          keepZoom: false,
+          storeFocusZoom: 20.0,
+          storeFitsViewport: true,
+          ratio: 0.5,
+          fromZoom: 17.5,
+        ),
+        18.75,
+      );
+    });
+
+    test('ratio 0.5면 지금 배율과 목표의 중간까지만 간다', () {
+      // 지도에서 그냥 누른 매장이 쓰는 값이다. 예전에는 keepZoom으로 배율을
+      // 아예 고정했는데, 도면 전체가 보이는 상태에서는 화면이 그대로였다.
+      expect(
+        focusZoomFor(
+          currentZoom: 17.0,
+          keepZoom: false,
+          storeFocusZoom: 19.0,
+          storeFitsViewport: true,
+          ratio: 0.5,
+        ),
+        18.0,
+      );
+      // 매장이 더 넓어 물러서는 방향일 때도 절반만 물러선다.
+      expect(
+        focusZoomFor(
+          currentZoom: 20.0,
+          keepZoom: false,
+          storeFocusZoom: 18.0,
+          storeFitsViewport: true,
+          ratio: 0.5,
+        ),
+        19.0,
+      );
+      // keepZoom이면 목표가 곧 지금 배율이라 비율과 무관하게 안 움직인다.
+      expect(focusZoomFor(currentZoom: 16.0, keepZoom: true, ratio: 0.5), 16.0);
+    });
+
     test('keepZoom이면 지금 배율을 그대로 둔다', () {
       // 카테고리를 고르는 것은 층 전체를 훑는 행동이라 당기면 맥락을 잃는다.
       expect(focusZoomFor(currentZoom: 16.0, keepZoom: true), 16.0);

@@ -1,0 +1,563 @@
+<title>실내·실외 전환 해부</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+KR:wght@400;500;600&family=Noto+Serif+KR:wght@600;700&display=swap">
+
+<style>
+:root {
+  --paper:      #F6F5F1;
+  --surface:    #FFFFFF;
+  --surface-2:  #EFEEE8;
+  --ink:        #16211D;
+  --ink-2:      #46554E;
+  --muted:      #77857E;
+  --rule:       #DCDAD2;
+  --rule-soft:  #E8E6DF;
+  --accent:     #0B5B45;
+  --accent-dim: #E1EDE7;
+  --evidence:   #2C5FD0;
+  --inside:     #DCE9E2;
+  --unclear:    #F4EBD8;
+  --outside:    #E3E8F4;
+  --hot:        #A63B22;
+  --hot-bg:     #F6E4DE;
+  --warn:       #8A6414;
+  --warn-bg:    #F4EBD8;
+  --ok:         #2C6B4C;
+  --ok-bg:      #E0EDE4;
+
+  --f-display: "Noto Serif KR", Georgia, "Times New Roman", serif;
+  --f-body: "IBM Plex Sans KR", "Malgun Gothic", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "Consolas", monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper:      #0E1413;
+    --surface:    #151D1B;
+    --surface-2:  #1C2523;
+    --ink:        #E7EDEA;
+    --ink-2:      #B3C0BA;
+    --muted:      #869390;
+    --rule:       #2A3532;
+    --rule-soft:  #212B29;
+    --accent:     #52C09A;
+    --accent-dim: #17302A;
+    --evidence:   #7FA6F0;
+    --inside:     #1B2E27;
+    --unclear:    #302716;
+    --outside:    #1B2233;
+    --hot:        #E08A6E;
+    --hot-bg:     #33201A;
+    --warn:       #D8B456;
+    --warn-bg:    #302716;
+    --ok:         #6EC095;
+    --ok-bg:      #1A2E24;
+  }
+}
+:root[data-theme="dark"] {
+  --paper:      #0E1413;
+  --surface:    #151D1B;
+  --surface-2:  #1C2523;
+  --ink:        #E7EDEA;
+  --ink-2:      #B3C0BA;
+  --muted:      #869390;
+  --rule:       #2A3532;
+  --rule-soft:  #212B29;
+  --accent:     #52C09A;
+  --accent-dim: #17302A;
+  --evidence:   #7FA6F0;
+  --inside:     #1B2E27;
+  --unclear:    #302716;
+  --outside:    #1B2233;
+  --hot:        #E08A6E;
+  --hot-bg:     #33201A;
+  --warn:       #D8B456;
+  --warn-bg:    #302716;
+  --ok:         #6EC095;
+  --ok-bg:      #1A2E24;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--f-body);
+  font-size: 16px;
+  line-height: 1.72;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap { max-width: 62rem; margin: 0 auto; padding: 4rem 1.5rem 6rem; }
+
+.masthead { display: flex; flex-direction: column; gap: 1.1rem; padding-bottom: 2rem; border-bottom: 2px solid var(--ink); }
+.eyebrow { font-family: var(--f-mono); font-size: .72rem; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); }
+h1 {
+  font-family: var(--f-display); font-weight: 700;
+  font-size: clamp(2rem, 5.5vw, 3.1rem); line-height: 1.18;
+  letter-spacing: -.01em; margin: 0; text-wrap: balance;
+}
+.standfirst { max-width: 44rem; margin: 0; color: var(--ink-2); font-size: 1.05rem; }
+.runline { display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; font-family: var(--f-mono); font-size: .78rem; color: var(--muted); }
+
+section { margin-top: 4.5rem; }
+h2 {
+  font-family: var(--f-display); font-weight: 600; font-size: 1.5rem;
+  line-height: 1.32; margin: 0 0 1.4rem; padding-bottom: .6rem;
+  border-bottom: 1px solid var(--rule); text-wrap: balance;
+}
+h3 {
+  font-family: var(--f-mono); font-size: .72rem; font-weight: 600;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--muted);
+  margin: 2.2rem 0 .6rem;
+}
+
+p { margin: 0 0 1rem; max-width: 44rem; }
+ul, ol { margin: 0 0 1rem; padding-left: 1.2rem; max-width: 44rem; }
+li { margin-bottom: .4rem; }
+li::marker { color: var(--muted); }
+
+code {
+  font-family: var(--f-mono); font-size: .855em;
+  background: var(--surface-2); padding: .1em .35em; border-radius: 2px;
+  word-break: break-word;
+}
+.loc { font-family: var(--f-mono); font-size: .8rem; color: var(--evidence); }
+
+pre {
+  font-family: var(--f-mono); font-size: .82rem; line-height: 1.62;
+  background: var(--surface); border: 1px solid var(--rule);
+  border-left: 3px solid var(--accent);
+  padding: 1rem 1.1rem; overflow-x: auto; margin: 0 0 1.2rem;
+}
+pre code { background: none; padding: 0; font-size: 1em; }
+.cmt { color: var(--muted); }
+
+blockquote {
+  margin: 0 0 1.4rem; padding: 1rem 1.2rem;
+  background: var(--accent-dim); border-left: 3px solid var(--accent);
+  max-width: 44rem;
+}
+blockquote p:last-child { margin-bottom: 0; }
+blockquote .lead {
+  font-family: var(--f-mono); font-size: .7rem; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--accent); display: block; margin-bottom: .35rem;
+}
+
+.scroller { overflow-x: auto; margin-bottom: 1.4rem; }
+table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+th, td { text-align: left; padding: .68rem .8rem; border-bottom: 1px solid var(--rule-soft); vertical-align: top; }
+thead th {
+  font-family: var(--f-mono); font-size: .7rem; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--muted); font-weight: 400;
+  border-bottom: 1px solid var(--rule); white-space: nowrap;
+}
+tbody tr:last-child td { border-bottom: none; }
+td.num, th.num { font-variant-numeric: tabular-nums; font-family: var(--f-mono); white-space: nowrap; }
+
+figure { margin: 2rem 0 2.4rem; }
+figure svg { display: block; width: 100%; max-width: 100%; height: auto; color: var(--ink); }
+figcaption {
+  margin-top: .8rem; font-size: .86rem; color: var(--muted);
+  max-width: 44rem; line-height: 1.6;
+}
+
+.chip {
+  font-family: var(--f-mono); font-size: .68rem; letter-spacing: .07em;
+  text-transform: uppercase; padding: .18rem .5rem; border-radius: 2px; white-space: nowrap;
+}
+.chip.ok { color: var(--ok); background: var(--ok-bg); }
+.chip.warn { color: var(--warn); background: var(--warn-bg); }
+.chip.hot { color: var(--hot); background: var(--hot-bg); }
+
+.stat-row { display: flex; flex-wrap: wrap; gap: 1px; background: var(--rule); border: 1px solid var(--rule); margin-bottom: 1.6rem; }
+.stat { flex: 1 1 8rem; background: var(--surface); padding: .9rem 1rem; }
+.stat .k { font-family: var(--f-mono); font-size: .66rem; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); display: block; }
+.stat .v { font-family: var(--f-mono); font-size: 1.45rem; font-variant-numeric: tabular-nums; display: block; margin-top: .15rem; }
+.stat .n { font-size: .78rem; color: var(--muted); display: block; }
+
+footer { margin-top: 5rem; padding-top: 2rem; border-top: 2px solid var(--ink); font-size: .88rem; color: var(--ink-2); }
+a { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+
+<div class="wrap">
+
+<header class="masthead">
+  <span class="eyebrow">실측 세션 3건 · 더현대 서울 · schema v16</span>
+  <h1>실내·실외 전환 해부</h1>
+  <p class="standfirst">건물을 드나드는 순간에 앱이 무엇을 재고, 무엇으로 판단하고, 어디서 실패하는지. 전부 실기기 로그에서 나온 숫자다.</p>
+  <div class="runline">
+    <span>2026-08-20</span>
+    <span>SM-S918N</span>
+    <span>B2 스타벅스 리저브 → 출구 → 실외 → 재진입</span>
+    <span>GPS 표본 193건</span>
+  </div>
+</header>
+
+<!-- ───────────────────── 1 ───────────────────── -->
+
+<section>
+  <h2>무엇을 재고 있나</h2>
+
+  <p>판정의 입력은 <strong>좌표 한 건</strong>뿐이다. 그 좌표의 오차 반경과, 건물 외곽선에서 얼마나 안쪽/바깥쪽인지. 이 둘로 안·밖·모름 셋 중 하나를 고른다.</p>
+
+  <pre><code><span class="cmt">// screens/outdoor_map/entry/indoor_entry_gps.dart — _verdictFrom</span>
+inside  : 정확도 ≤ 20m  AND  외곽선 안쪽 ≥ 5m
+outside : 정확도 ≤ 30m  AND  외곽선 바깥 ≥ 8m
+그 외    : unclear
+
+<span class="cmt">// 외곽선은 바깥으로 6m 부풀려 쓴다 — 우리 도면과 실제 벽의 알려진 어긋남</span></code></pre>
+
+  <p><strong>문턱이 두 갈래인 것이 이 설계의 핵심이다.</strong> 진입은 20m로 엄격하고 이탈은 30m로 느슨하다. 코드 주석이 이유를 적어 뒀다 — <em>"건물에서 막 나온 순간이 정확히 오차가 큰 구간이라, 진입과 같은 20m를 요구하면 그 구간이 통째로 <code>unclear</code>가 돼 전환이 늦는다."</em> 아래 실측이 이 문장을 그대로 확인해 준다.</p>
+
+  <p>여기에 이번 빌드에서 <strong>2단계 이탈</strong>이 얹혔다. 이탈이 하는 일이 여섯 가지인데 틀렸을 때의 비용이 제각각이라, 되돌릴 수 있는 것과 파괴적인 것을 갈랐다.</p>
+
+  <figure>
+    <svg viewBox="0 0 760 268" role="img" aria-label="2단계 이탈 판정: 약한 이탈은 문 도달이나 unclear 지속으로 걸려 재무장·층 리셋만 하고, 확정 이탈은 GPS outside 문턱으로만 걸려 앵커 폐기와 PDR 정지를 한다">
+      <defs>
+        <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+
+      <text x="0" y="14" font-family="monospace" font-size="11" fill="currentColor" opacity="0.6">근거</text>
+      <text x="278" y="14" font-family="monospace" font-size="11" fill="currentColor" opacity="0.6">단계</text>
+      <text x="500" y="14" font-family="monospace" font-size="11" fill="currentColor" opacity="0.6">하는 일 / 틀렸을 때</text>
+
+      <!-- weak evidence -->
+      <rect x="0" y="30" width="230" height="40" rx="2" fill="none" stroke="currentColor" stroke-width="1"/>
+      <text x="12" y="46" font-size="12.5" fill="currentColor">문 앞 좌표 15m 안 도달</text>
+      <text x="12" y="62" font-size="11" fill="currentColor" opacity="0.62">기본 층 · 트래커 확신 있을 때</text>
+
+      <rect x="0" y="80" width="230" height="30" rx="2" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="4 3"/>
+      <text x="12" y="99" font-size="12.5" fill="currentColor">unclear + 바깥, 20초 지속</text>
+
+      <!-- confirmed evidence -->
+      <rect x="0" y="160" width="230" height="40" rx="2" fill="none" stroke="currentColor" stroke-width="1"/>
+      <text x="12" y="176" font-size="12.5" fill="currentColor">정확도 ≤ 30m</text>
+      <text x="12" y="192" font-size="12.5" fill="currentColor">AND 외곽선 바깥 ≥ 8m</text>
+
+      <!-- stages -->
+      <rect x="290" y="46" width="150" height="48" rx="2" fill="var(--warn-bg)" stroke="var(--warn)" stroke-width="1.5"/>
+      <text x="365" y="68" font-size="13.5" text-anchor="middle" fill="var(--warn)" font-weight="600">약한 이탈</text>
+      <text x="365" y="85" font-size="11" text-anchor="middle" fill="var(--warn)">weak</text>
+
+      <rect x="290" y="156" width="150" height="48" rx="2" fill="var(--hot-bg)" stroke="var(--hot)" stroke-width="1.5"/>
+      <text x="365" y="178" font-size="13.5" text-anchor="middle" fill="var(--hot)" font-weight="600">확정 이탈</text>
+      <text x="365" y="195" font-size="11" text-anchor="middle" fill="var(--hot)">confirmed</text>
+
+      <!-- arrows evidence -> stage -->
+      <line x1="232" y1="50" x2="286" y2="62" stroke="currentColor" stroke-width="1.2" marker-end="url(#ar)"/>
+      <line x1="232" y1="95" x2="286" y2="80" stroke="currentColor" stroke-width="1.2" marker-end="url(#ar)"/>
+      <line x1="232" y1="180" x2="286" y2="180" stroke="currentColor" stroke-width="1.2" marker-end="url(#ar)"/>
+
+      <!-- effects -->
+      <line x1="442" y1="70" x2="496" y2="70" stroke="currentColor" stroke-width="1.2" marker-end="url(#ar)"/>
+      <text x="504" y="52" font-size="12.5" fill="currentColor">자동 진입 재무장</text>
+      <text x="504" y="70" font-size="12.5" fill="currentColor">활성 층 → 기본 층</text>
+      <text x="504" y="88" font-size="12.5" fill="currentColor">진입 질문 리셋</text>
+      <text x="504" y="108" font-size="11" fill="var(--warn)">틀려도 — 층 하나가 기본값으로. 선택기로 되돌리면 끝</text>
+
+      <line x1="442" y1="180" x2="496" y2="180" stroke="currentColor" stroke-width="1.2" marker-end="url(#ar)"/>
+      <text x="504" y="162" font-size="12.5" fill="currentColor">PDR 앵커 폐기</text>
+      <text x="504" y="180" font-size="12.5" fill="currentColor">PDR 정지 · 복도 보정 정지</text>
+      <text x="504" y="198" font-size="12.5" fill="currentColor">실내 경로 정리</text>
+      <text x="504" y="218" font-size="11" fill="var(--hot)">틀리면 — 걷던 중에 위치를 잃는다. 다시 지정해야 한다</text>
+
+      <line x1="0" y1="132" x2="756" y2="132" stroke="currentColor" stroke-width="0.5" opacity="0.25" stroke-dasharray="2 4"/>
+      <text x="756" y="252" font-size="11" text-anchor="end" fill="currentColor" opacity="0.55">두 단계는 독립이다 — 약한 이탈이 확정으로 승격되지 않는다</text>
+    </svg>
+    <figcaption><strong>그림 1.</strong> 이탈 하나가 여섯 가지를 하던 것을 비용으로 갈랐다. 위쪽은 되돌릴 수 있어 약한 근거로도 실행하고, 아래쪽은 걷던 사람의 위치를 지우므로 기존 문턱을 그대로 유지한다.</figcaption>
+  </figure>
+</section>
+
+<!-- ───────────────────── 2 ───────────────────── -->
+
+<section>
+  <h2>나가는 순간 — 정확도가 거꾸로 간다</h2>
+
+  <div class="stat-row">
+    <div class="stat"><span class="k">표본</span><span class="v">193</span><span class="n">GPS 좌표 건수</span></div>
+    <div class="stat"><span class="k">중앙 정확도</span><span class="v">6.7 m</span><span class="n">최소 3.2 · 최대 68.2</span></div>
+    <div class="stat"><span class="k">≤ 20m (진입 문턱)</span><span class="v">88 %</span><span class="n">169 / 193</span></div>
+    <div class="stat"><span class="k">≤ 30m (이탈 문턱)</span><span class="v">97 %</span><span class="n">188 / 193</span></div>
+  </div>
+
+  <p>먼저 통념을 하나 지운다. <strong>정확도는 병목이 아니다.</strong> 중앙값이 6.7m이고 97%가 이탈 문턱 안에 든다. 그런데 정작 판정이 필요한 순간에는 그 좋은 값이 없다.</p>
+
+  <figure>
+    <svg viewBox="0 0 760 320" role="img" aria-label="이탈 전후 57초간 GPS 정확도 변화. 실내에서 5.5미터로 좋다가 문 근처에서 23미터까지 나빠지고, 밖으로 나오면 4미터로 회복된다. 문 도달 근거가 GPS 확정보다 12초 빨랐다.">
+      <!-- verdict bands -->
+      <rect x="60" y="40" width="433" height="210" fill="var(--inside)"/>
+      <rect x="493" y="40" width="104" height="210" fill="var(--unclear)"/>
+      <rect x="597" y="40" width="133" height="210" fill="var(--outside)"/>
+      <text x="276" y="58" font-size="11" font-family="monospace" text-anchor="middle" fill="currentColor" opacity="0.6">inside</text>
+      <text x="545" y="58" font-size="11" font-family="monospace" text-anchor="middle" fill="currentColor" opacity="0.6">unclear</text>
+      <text x="663" y="58" font-size="11" font-family="monospace" text-anchor="middle" fill="currentColor" opacity="0.6">outside</text>
+
+      <!-- axes -->
+      <line x1="60" y1="250" x2="730" y2="250" stroke="currentColor" stroke-width="1"/>
+      <line x1="60" y1="40" x2="60" y2="250" stroke="currentColor" stroke-width="1"/>
+
+      <!-- thresholds -->
+      <line x1="60" y1="118.8" x2="730" y2="118.8" stroke="currentColor" stroke-width="1" stroke-dasharray="5 4" opacity="0.55"/>
+      <text x="66" y="114" font-size="10.5" font-family="monospace" fill="currentColor" opacity="0.7">20m · 진입 문턱</text>
+      <line x1="60" y1="53.1" x2="730" y2="53.1" stroke="currentColor" stroke-width="1" stroke-dasharray="5 4" opacity="0.55"/>
+      <text x="66" y="48" font-size="10.5" font-family="monospace" fill="currentColor" opacity="0.7">30m · 이탈 문턱</text>
+
+      <!-- y ticks -->
+      <text x="54" y="254" font-size="10.5" font-family="monospace" text-anchor="end" fill="currentColor" opacity="0.6">0</text>
+      <text x="54" y="188" font-size="10.5" font-family="monospace" text-anchor="end" fill="currentColor" opacity="0.6">10</text>
+      <text x="54" y="122" font-size="10.5" font-family="monospace" text-anchor="end" fill="currentColor" opacity="0.6">20</text>
+      <text x="54" y="57" font-size="10.5" font-family="monospace" text-anchor="end" fill="currentColor" opacity="0.6">30</text>
+      <text x="30" y="150" font-size="10.5" font-family="monospace" text-anchor="middle" fill="currentColor" opacity="0.6" transform="rotate(-90 30 150)">정확도 (m)</text>
+
+      <!-- x ticks -->
+      <text x="60" y="268" font-size="10.5" font-family="monospace" text-anchor="middle" fill="currentColor" opacity="0.6">08:14:51</text>
+      <text x="395" y="268" font-size="10.5" font-family="monospace" text-anchor="middle" fill="currentColor" opacity="0.6">+29s</text>
+      <text x="718" y="268" font-size="10.5" font-family="monospace" text-anchor="middle" fill="currentColor" opacity="0.6">08:15:48</text>
+
+      <!-- accuracy polyline -->
+      <polyline fill="none" stroke="var(--evidence)" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"
+        points="60,211.9 106,213.9 129,213.9 141,213.3 152,213.3 164,213.3 176,212.6 256,135.8 268,135.8 280,134.5 291,133.8 303,131.2 314,128.6 349,128.6 430,133.8 441,130.6 453,128.6 464,125.9 476,123.3 499,115.5 511,111.5 522,107.6 534,105.0 545,103.7 557,101.7 568,100.4 580,99.7 591,99.7 603,108.3 614,118.8 626,143.7 638,173.9 649,191.6 661,210.6 672,218.5 684,221.8 695,222.4 707,223.8 718,223.8"/>
+
+      <!-- event: weak exit -->
+      <line x1="464" y1="40" x2="464" y2="250" stroke="var(--warn)" stroke-width="1.6"/>
+      <circle cx="464" cy="125.9" r="4.5" fill="var(--warn)"/>
+      <text x="459" y="292" font-size="11" text-anchor="end" fill="var(--warn)" font-weight="600">약한 이탈 · 문 14.63m</text>
+      <text x="459" y="307" font-size="10.5" text-anchor="end" fill="var(--warn)" opacity="0.85">08:15:26 — GPS는 아직 inside</text>
+
+      <!-- event: confirmed -->
+      <line x1="603" y1="40" x2="603" y2="250" stroke="var(--hot)" stroke-width="1.6"/>
+      <circle cx="603" cy="108.3" r="4.5" fill="var(--hot)"/>
+      <text x="609" y="292" font-size="11" fill="var(--hot)" font-weight="600">확정 이탈 · 정확도 21.6m</text>
+      <text x="609" y="307" font-size="10.5" fill="var(--hot)" opacity="0.85">08:15:38 — 바깥 8.51m</text>
+
+      <!-- 12s span -->
+      <line x1="464" y1="76" x2="603" y2="76" stroke="currentColor" stroke-width="1.2" opacity="0.75"/>
+      <line x1="464" y1="71" x2="464" y2="81" stroke="currentColor" stroke-width="1.2" opacity="0.75"/>
+      <line x1="603" y1="71" x2="603" y2="81" stroke="currentColor" stroke-width="1.2" opacity="0.75"/>
+      <rect x="502" y="66" width="63" height="18" fill="var(--paper)"/>
+      <text x="533" y="80" font-size="12" text-anchor="middle" fill="currentColor" font-weight="600">12초</text>
+    </svg>
+    <figcaption><strong>그림 2.</strong> 정확도가 실내 5.5m → 문 앞 22.9m → 실외 4.0m로 움직인다. 가장 나쁜 구간이 정확히 판정이 필요한 구간이다. 파란 선이 20m 문턱 위로 올라간 8초가 <code>unclear</code> 구간이고, 문 도달 근거(주황)가 GPS 확정(빨강)보다 12초 앞섰다.</figcaption>
+  </figure>
+
+  <h3>세 가지가 여기서 확정된다</h3>
+
+  <p><strong>하나 — 정확도는 문 근처에서 오히려 나빠진다.</strong> 건물 깊숙한 곳에서 5.5m였다가 문으로 다가가며 22.9m까지 올라가고, 밖으로 나오자 4.0m로 떨어진다. 실내에서는 융합 측위가 낙관적인 값을 들고 있다가 문을 지나며 수신기가 위성을 다시 잡는 구간으로 들어가기 때문이다. <em>"실내는 부정확, 실외는 정확"</em>이라는 통념과 정반대다.</p>
+
+  <p><strong>둘 — 이탈이 정확도 21.6m에서 걸렸다.</strong> 진입 문턱(20m)을 그대로 썼다면 <strong>이 순간 걸리지 않았다.</strong> 문턱을 20/30으로 갈라 둔 기존 설계가 실측으로 검증됐다. 주석에 적힌 예측이 정확히 그대로 일어났다.</p>
+
+  <p><strong>셋 — 문 노드가 GPS를 12초 앞질렀다.</strong> 08:15:26에 약한 이탈이 걸렸을 때 GPS 판정은 아직 <code>inside</code>였다. 실내 근거(보정된 위치가 문 앞 좌표에서 14.63m)가 그 8초짜리 <code>unclear</code> 공백을 건너뛴 것이다.</p>
+
+  <blockquote>
+    <span class="lead">문턱값 하나가 아슬아슬했다</span>
+    <p>약한 이탈의 반경 <strong>R은 15m</strong>이고 실제로 걸린 거리는 <strong>14.63m</strong>였다. 37cm 차이다. 이 값을 12m로 잡았다면 조건이 <em>영원히</em> 안 걸렸다 — 화면의 층 그래프에는 문 노드를 일부러 넣지 않았기 때문에, 보정 위치가 문 앞 좌표에 닿을 수 있는 최단 거리가 곧 문-앵커 실측 간격(7~12m)이다. 설계 제약이 문턱값의 하한을 정한 셈인데, 그 귀결을 처음 스펙에서는 놓쳤다.</p>
+  </blockquote>
+</section>
+
+<!-- ───────────────────── 3 ───────────────────── -->
+
+<section>
+  <h2>들어오는 순간 — 25초 동안 아무것도 없다</h2>
+
+  <p>나가는 쪽은 고쳐졌다. 들어오는 쪽에서 새 실패가 나왔다. 실측 중 <em>"파란 점이 안 찍혀서 실패해서 종료했어"</em>라고 기록된 그 구간이다.</p>
+
+  <figure>
+    <svg viewBox="0 0 760 250" role="img" aria-label="재진입 타임라인. 밖에 있는 동안 활성 층은 목적지인 B2였고, 진입 순간 층은 1F로 바뀌지만 그 뒤 25초 동안 표시할 위치가 없어 마커가 사라진다.">
+      <defs>
+        <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+
+      <!-- timeline axis -->
+      <line x1="60" y1="150" x2="730" y2="150" stroke="currentColor" stroke-width="1"/>
+
+      <!-- outside segment -->
+      <rect x="60" y="112" width="300" height="38" fill="var(--outside)" stroke="currentColor" stroke-width="0.8"/>
+      <text x="210" y="136" font-size="12.5" text-anchor="middle" fill="currentColor">실외 · 정확도 3.9~5.3m</text>
+
+      <!-- dead window -->
+      <rect x="360" y="112" width="270" height="38" fill="var(--hot-bg)" stroke="var(--hot)" stroke-width="1.6"/>
+      <text x="495" y="130" font-size="13" text-anchor="middle" fill="var(--hot)" font-weight="600">position_source = null</text>
+      <text x="495" y="145" font-size="11.5" text-anchor="middle" fill="var(--hot)">그릴 위치가 없다 — 마커가 화면에서 사라진다</text>
+
+      <!-- tracked segment -->
+      <rect x="630" y="112" width="100" height="38" fill="var(--inside)" stroke="currentColor" stroke-width="0.8"/>
+      <text x="680" y="136" font-size="12.5" text-anchor="middle" fill="currentColor">tracked</text>
+
+      <!-- entry marker -->
+      <line x1="360" y1="76" x2="360" y2="176" stroke="currentColor" stroke-width="1.6"/>
+      <circle cx="360" cy="150" r="4.5" fill="currentColor"/>
+      <text x="354" y="70" font-size="12" text-anchor="end" fill="currentColor" font-weight="600">진입 판정</text>
+      <text x="354" y="86" font-size="11" text-anchor="end" fill="currentColor" opacity="0.7">indoor_entered = true</text>
+
+      <line x1="630" y1="76" x2="630" y2="176" stroke="currentColor" stroke-width="1.6"/>
+      <circle cx="630" cy="150" r="4.5" fill="currentColor"/>
+      <text x="636" y="70" font-size="12" fill="currentColor" font-weight="600">위치 복구</text>
+
+      <!-- 25s span -->
+      <line x1="360" y1="196" x2="630" y2="196" stroke="var(--hot)" stroke-width="1.4"/>
+      <line x1="360" y1="191" x2="360" y2="201" stroke="var(--hot)" stroke-width="1.4"/>
+      <line x1="630" y1="191" x2="630" y2="201" stroke="var(--hot)" stroke-width="1.4"/>
+      <text x="495" y="216" font-size="15" text-anchor="middle" fill="var(--hot)" font-weight="600">25초</text>
+
+      <!-- floor lane -->
+      <text x="52" y="34" font-size="11" font-family="monospace" text-anchor="end" fill="currentColor" opacity="0.6">활성 층</text>
+      <rect x="60" y="20" width="300" height="24" fill="var(--warn-bg)" stroke="var(--warn)" stroke-width="1"/>
+      <text x="210" y="37" font-size="12" text-anchor="middle" fill="var(--warn)" font-weight="600">B2 — 목적지(스타벅스 리저브)의 층</text>
+      <rect x="360" y="20" width="370" height="24" fill="var(--surface-2)" stroke="currentColor" stroke-width="0.8"/>
+      <text x="545" y="37" font-size="12" text-anchor="middle" fill="currentColor">1F — 실제로 서 있는 층</text>
+
+      <text x="60" y="240" font-size="10.5" font-family="monospace" fill="currentColor" opacity="0.6">08:16:23</text>
+      <text x="730" y="240" font-size="10.5" font-family="monospace" text-anchor="end" fill="currentColor" opacity="0.6">08:17:07</text>
+    </svg>
+    <figcaption><strong>그림 3.</strong> 재진입 직후 25초 동안 <code>position_source</code>가 <code>null</code>이다. 진입 직전까지 활성 층은 사용자가 서 있는 1F가 아니라 <strong>목적지가 있는 B2</strong>였다.</figcaption>
+  </figure>
+
+  <h3>왜 위치가 없어지나</h3>
+
+  <ol>
+    <li>야외에서 <strong>B2 매장</strong>(스타벅스 리저브)을 목적지로 고른다 → <code>_activeFloor</code>가 B2가 된다</li>
+    <li>1F 지상 입구로 들어온다 → <code>_askEntryFloorThenTrack</code>이 <code>_guidancePlanned</code>라 <strong>층을 묻지 않고</strong> 넘어간다 <span class="loc">parts/gps.dart:113</span></li>
+    <li><code>_startTrackingFromGpsFix</code>가 <code>final floor = _activeFloor;</code>로 앵커 층을 정한다 — 즉 <strong>B2</strong>다. 사용자는 1F에 서 있는데</li>
+    <li>층이 1F가 되면 <code>anchor.floorId(B2) != _floorId(1F)</code> → <code>IndoorGuidanceSession.position</code>이 <strong><code>null</code></strong>을 돌려준다 → 마커가 없다</li>
+  </ol>
+
+  <p>로그가 이 사슬을 그대로 찍었다.</p>
+
+  <pre><code><span class="cmt">// indoor_state_changes</span>
+{"at":"08:16:41","entered":true,"source":"gps","floor_id":"B2","steps":139}
+
+<span class="cmt">// gps_position_deltas — 그 직후 25초</span>
+{"at":"08:16:55","distance_m":null,"position_source":null,"floor_id":"1F","indoor_entered":true}
+{"at":"08:16:56","distance_m":null,"position_source":null,...}
+{"at":"08:16:57","distance_m":null,"position_source":null,...}
+<span class="cmt">                            ↑ 그릴 위치가 없다</span></code></pre>
+
+  <blockquote>
+    <span class="lead">한 값이 두 가지를 뜻한다</span>
+    <p><code>_activeFloor</code>가 <strong>"지금 보고 있는 층"</strong>과 <strong>"이 사람이 서 있는 층"</strong>을 겸하고 있다. 다른 층 도면을 훑는 것은 기능이고, 목적지 층으로 도면이 열리는 것도 정상이다. 문제는 그것이 <em>앵커 층까지 정한다</em>는 것이다. 같은 겸용이 <code>_indoorEntered</code>에도 있다 — 지도를 확대하는 것만으로 켜진다(<span class="loc">parts/map.dart:337</span>).</p>
+  </blockquote>
+</section>
+
+<!-- ───────────────────── 4 ───────────────────── -->
+
+<section>
+  <h2>상수와 그 근거</h2>
+
+  <p>이 판정에 걸린 숫자는 여섯 개다. 어디까지가 실측이고 어디부터가 가정인지 갈라 둔다 — <strong>가정을 근거처럼 쓰지 않기 위해서다.</strong></p>
+
+  <div class="scroller">
+  <table>
+    <thead><tr><th>상수</th><th class="num">값</th><th>근거</th><th>실측</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>decisiveAccuracyMeters</code><br><span class="loc">진입 정확도</span></td>
+        <td class="num">20 m</td>
+        <td>표본의 88%가 이 안에 든다. 진입은 잘못 들어가는 비용이 낮아 엄격해도 된다</td>
+        <td><span class="chip ok">확인</span></td>
+      </tr>
+      <tr>
+        <td><code>outdoorExitAccuracyMeters</code><br><span class="loc">이탈 정확도</span></td>
+        <td class="num">30 m</td>
+        <td><strong>실제 이탈이 21.6m에서 걸렸다.</strong> 20m였으면 못 걸렸다</td>
+        <td><span class="chip ok">확인</span></td>
+      </tr>
+      <tr>
+        <td><code>indoorEnterInsetMeters</code></td>
+        <td class="num">5 m</td>
+        <td>외곽선 안쪽으로 이만큼 들어와야 진입</td>
+        <td><span class="chip ok">확인</span></td>
+      </tr>
+      <tr>
+        <td><code>outdoorExitMarginMeters</code></td>
+        <td class="num">8 m</td>
+        <td>실제 이탈이 <strong>8.51m</strong>에서 걸렸다 — 최소 조건에서 즉시 발화</td>
+        <td><span class="chip ok">확인</span></td>
+      </tr>
+      <tr>
+        <td><code>footprintOutwardToleranceMeters</code></td>
+        <td class="num">6 m</td>
+        <td>도면 외곽선과 실제 벽의 알려진 어긋남</td>
+        <td><span class="chip warn">미검증</span></td>
+      </tr>
+      <tr>
+        <td>약한 이탈 반경 <code>R</code></td>
+        <td class="num">15 m</td>
+        <td>문-앵커 간격(7~12m)이 하한을 정한다. <strong>실제 발화 14.63m</strong> — 여유 0.37m</td>
+        <td><span class="chip ok">확인 · 아슬</span></td>
+      </tr>
+      <tr>
+        <td>약한 이탈 hold</td>
+        <td class="num">20 초</td>
+        <td>가정이다. 이번 주행에서는 문 근거가 먼저 걸려 <strong>발화한 적이 없다</strong></td>
+        <td><span class="chip hot">미검증</span></td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p><strong><code>unclear</code>가 193건 중 51건(26%)이다.</strong> 줄일 여지가 여기 있는데, 방향은 문턱을 푸는 쪽이 아니다 — 확정 이탈은 걷던 사람의 위치를 지우므로 엄격한 편이 맞다. 줄이려면 <strong>실내 근거를 넓히는 쪽</strong>(입구 노드도 함께 보기)이다.</p>
+</section>
+
+<!-- ───────────────────── 5 ───────────────────── -->
+
+<section>
+  <h2>지금 고치는 중 · 남은 것</h2>
+
+  <div class="scroller">
+  <table>
+    <thead><tr><th>항목</th><th>상태</th><th>내용</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>나가는 판정</td>
+        <td><span class="chip ok">고쳐짐</span></td>
+        <td>2단계 이탈 + 문 노드 근거. GPS보다 12초 빠르다</td>
+      </tr>
+      <tr>
+        <td>재진입 층</td>
+        <td><span class="chip ok">고쳐짐</span></td>
+        <td>이탈 시 기본 층으로 리셋. 실기기에서 1F로 잡히는 것 확인</td>
+      </tr>
+      <tr>
+        <td>진입 시 앵커 층</td>
+        <td><span class="chip hot">작업 중</span></td>
+        <td>목적지 층이 아니라 <strong>진입 근거</strong>에서 정하도록. 앵커 층과 보는 층이 갈려도 마커가 사라지지 않게</td>
+      </tr>
+      <tr>
+        <td>헤딩 계통 오차</td>
+        <td><span class="chip hot">작업 중</span></td>
+        <td>자편각 미적용(<code>rotationDeg: 0</code>으로 못 박힘). 서울 ≈ −8°에 현장 보정 노브</td>
+      </tr>
+      <tr>
+        <td>확대 = 실내</td>
+        <td><span class="chip warn">계측만</span></td>
+        <td><code>_indoorEntered</code> 겸용 확인됨. 진입 출처를 v16에 기록 중, 수정은 아직</td>
+      </tr>
+      <tr>
+        <td>약한 이탈 hold 20초</td>
+        <td><span class="chip warn">미검증</span></td>
+        <td>발화한 적이 없어 값이 맞는지 모른다. 문 근거가 없는 출구에서 확인 필요</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <blockquote>
+    <span class="lead">이 문서가 못 말하는 것</span>
+    <p>표본이 <strong>한 번의 주행, 한 건물, 한 기기</strong>다. 정확도가 문 근처에서 나빠지는 현상은 이 출구에서 관측된 것이고, 지하 출구나 다른 건물에서 같은 모양일지는 모른다. 표에서 "확인"이라고 적은 것들도 <em>이 주행에서 반증되지 않았다</em>는 뜻이지 일반적으로 옳다는 뜻이 아니다.</p>
+  </blockquote>
+</section>
+
+<footer>
+  <p>데이터 출처: <code>pdr-debug-session</code> JSON 3건(schema v16), 2026-08-20 08:13~08:18 UTC. 파일 경로는 <code>client/lib/</code> 기준이며 줄 번호는 작업 중 밀린다 — 함수 이름으로 찾는 편이 안전하다.</p>
+</footer>
+
+</div>

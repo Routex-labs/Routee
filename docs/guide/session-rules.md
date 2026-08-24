@@ -2,7 +2,7 @@
 
 앱을 띄우고 고칠 때 지키는 것들. 작업 규칙 전반은 저장소 루트 [AGENTS.md](../../AGENTS.md).
 
-Flutter 클라이언트 + FastAPI·SQLAlchemy·SQLite 백엔드 데모다. 개발자는 Windows(PowerShell)와
+Flutter 클라이언트 데모다. 백엔드는 이 저장소에 없다 — Spring Boot이고 Routex-labs/backend에 있다. 개발자는 Windows(PowerShell)와
 macOS 양쪽에 있다.
 
 ## 백엔드는 배포된 Cloud Run에 붙고, 로컬에선 클라이언트만 띄운다
@@ -31,10 +31,8 @@ flutter run --dart-define-from-file=config.local.json 2>&1 | tee frontend.log
 주입 값은 **컴파일 타임에 박히므로** URL·키를 바꾸면 hot reload가 아니라 `flutter run`을
 재시작한다.
 
-백엔드 python은 반대로 기본 CP949 출력이라, 콘솔을 UTF-8로 바꾸면 `$env:PYTHONUTF8=1`도
-함께 준다.
-
-백엔드를 직접 수정·검증해야 할 때만 로컬 Python으로 띄운다 —
+백엔드를 직접 고쳐야 할 때만 [Routex-labs/backend](https://github.com/Routex-labs/backend)를
+받아 `./gradlew bootRun`으로 띄운다(별도 WAS 불필요, 포트 8080) —
 [로컬 개발 가이드](local-development-guide.md), [GCP 배포 문서](gcp-instance.md).
 
 ## 경계
@@ -42,5 +40,6 @@ flutter run --dart-define-from-file=config.local.json 2>&1 | tee frontend.log
 - **경로 계산은 클라이언트 온디바이스**(Dijkstra, `client/lib/domain/route/`)가 담당한다.
   서버는 그래프(nodes·edges)만 준다. 최단 경로 로직을 서버로 옮기지 않는다.
 - **API 계약(JSON)은 Flutter 클라이언트가 소비하는 형태를 우선**한다. 백엔드 응답 스키마를
-  바꾸면 클라이언트의 모델·파싱도 함께 확인한다.
+  바꾸면 클라이언트의 모델·파싱도 함께 확인한다. 계약의 단일 출처는 백엔드 저장소의
+  `docs/api/contract.md`이고, 키 표기는 snake_case다(스프링이 `SNAKE_CASE` 전략으로 변환한다).
 - **문서·주석·커밋·PR은 한국어로 쓴다.** 코드·식별자는 영어다.

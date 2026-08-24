@@ -39,7 +39,8 @@ class _PlaceHoursSectionState extends State<PlaceHoursSection> {
       state: routexHoursState(status.state),
       days: routexHoursDays(week),
       detail: routexHoursDetail(status, week.first.date),
-      staleNote: routexHoursStaleNote(status, widget.hours.confirmedAt),
+      // 확인일 줄은 그리지 않는다. 임계값을 넘기면 판정(`영업 중`)은 여전히
+      // 거두지만, 그 이유를 날짜로 적어 두면 멀쩡한 매장에도 경고처럼 읽힌다.
       expanded: _expanded,
       onExpanded: (value) => setState(() => _expanded = value),
     );

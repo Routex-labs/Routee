@@ -25,6 +25,15 @@ class DebugModeController extends ChangeNotifier {
       'debug_mode.show_map_matched_pdr_path';
   static const _showRoninPdrPathKey = 'debug_mode.show_ronin_pdr_path';
   static const _showCardinalCrossKey = 'debug_mode.show_cardinal_cross';
+  static const _headingOffsetKey = 'debug_mode.heading_offset_deg';
+
+  /// 현장에서 돌리는 heading 보정 노브(도, 시계방향 +).
+  ///
+  /// 자편각 상수(features/indoor_navigation/contract/pdr_anchor.dart)로 다
+  /// 안 맞는 나머지 — 층 좌표 축 피팅 오차나 기기별 자기 편향 — 를 실기기 앞에서
+  /// 맞춰 보는 값이다. **디버그 모드 전용**이라 일반 사용자에게는 적용되지 않고,
+  /// 맞춘 값은 PDR 세션 JSON의 anchor 블록에 함께 기록된다.
+  static const headingOffsetLimitDeg = 45.0;
 
   SharedPreferences? _preferences;
   final bool _hasInjectedPreferences;
@@ -39,6 +48,15 @@ class DebugModeController extends ChangeNotifier {
   bool _showMapMatchedPdrPath = true;
   bool _showRoninPdrPath = true;
   bool _showCardinalCross = true;
+
+  double _headingOffsetRawDeg = 0;
+
+  /// **실제로 적용되는** 보정각. 컨트롤러 전체를 다시 그리지 않고 이 값만 듣는
+  /// 쪽(PDR 드라이버)이 있어 별도 notifier로 노출한다.
+  ///
+  /// 디버그 모드를 끄면 저장된 값은 남기고 0을 흘린다 — 일반 사용자에게는
+  /// 자편각 상수만 적용돼야 하기 때문이다.
+  final ValueNotifier<double> headingOffsetDeg = ValueNotifier<double>(0);
 
   bool get isLoaded => _isLoaded;
   Future<void> get ready => _loadFuture;
@@ -65,9 +83,13 @@ class DebugModeController extends ChangeNotifier {
           preferences.getBool(_showMapMatchedPdrPathKey) ?? true;
       _showRoninPdrPath = preferences.getBool(_showRoninPdrPathKey) ?? true;
       _showCardinalCross = preferences.getBool(_showCardinalCrossKey) ?? true;
+      _headingOffsetRawDeg = _clampHeadingOffset(
+        preferences.getDouble(_headingOffsetKey) ?? 0,
+      );
     } on Object {
       // 플랫폼 저장소가 없는 테스트/개발 환경에서는 기본값으로 동작한다.
     } finally {
+      _syncHeadingOffset();
       _isLoaded = true;
       if (!_disposed) notifyListeners();
     }
@@ -91,8 +113,15 @@ class DebugModeController extends ChangeNotifier {
     return _load();
   }
 
-  Future<void> setEnabled(bool value) =>
-      _setBool(_enabledKey, value, () => _enabled, (next) => _enabled = next);
+  Future<void> setEnabled(bool value) async {
+    await _setBool(
+      _enabledKey,
+      value,
+      () => _enabled,
+      (next) => _enabled = next,
+    );
+    _syncHeadingOffset();
+  }
 
   Future<void> setShowGraphNodes(bool value) => _setBool(
     _showGraphNodesKey,
@@ -143,6 +172,31 @@ class DebugModeController extends ChangeNotifier {
     (next) => _showCardinalCross = next,
   );
 
+  /// 노브를 [headingOffsetLimitDeg] 안으로 자르고 저장한다.
+  ///
+  /// 디버그 모드를 꺼도 값은 남는다 — 실제 적용 여부는 드라이버에 이 notifier를
+  /// 연결하는 조립 루트가 정한다.
+  Future<void> setHeadingOffsetDeg(double value) async {
+    final next = _clampHeadingOffset(value);
+    if (_headingOffsetRawDeg == next) return;
+    _headingOffsetRawDeg = next;
+    _syncHeadingOffset();
+    if (!_disposed) notifyListeners();
+    try {
+      _preferences ??= await SharedPreferences.getInstance();
+      await _preferences!.setDouble(_headingOffsetKey, next);
+    } on Object {
+      // _setBool과 같은 이유로 영속화 실패는 삼킨다.
+    }
+  }
+
+  void _syncHeadingOffset() =>
+      headingOffsetDeg.value = _enabled ? _headingOffsetRawDeg : 0;
+
+  static double _clampHeadingOffset(double value) => value.isFinite
+      ? value.clamp(-headingOffsetLimitDeg, headingOffsetLimitDeg)
+      : 0;
+
   Future<void> _setBool(
     String key,
     bool value,
@@ -164,6 +218,7 @@ class DebugModeController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    headingOffsetDeg.dispose();
     super.dispose();
   }
 }

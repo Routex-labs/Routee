@@ -3,6 +3,7 @@ import 'package:routex_design_system/routex_design_system.dart';
 
 import '../domain/geo/distance_format.dart';
 import '../domain/guidance/route_guidance.dart';
+import '../features/indoor_navigation/contract/floor_transition_ui_state.dart';
 import 'guidance_action_row.dart';
 import 'transit_style.dart' show formatTransitDuration;
 
@@ -99,15 +100,56 @@ class EtaCard extends StatelessWidget {
   }
 }
 
-/// 안내 중 다음 행동 또는 자동 재탐색 상태를 지도 위쪽에 표시한다.
+/// 지도 위쪽 **안내 한 자리**. 아래 네 상태 중 하나만 그린다.
+///
+/// 우선순위는 층 전환 → 도착 → 이탈 → 다음 행동이다. 층 전환이 맨 앞인 이유는
+/// 타는 동안 걸음이 멈춰 있어 [instruction]의 남은거리가 갱신되지 않기 때문이다
+/// — 그대로 두면 "6.8m 뒤 좌회전"이 에스컬레이터를 타는 내내 붙어 있다.
+///
+/// **자리를 하나로 묶은 것이 이 위젯의 존재 이유다.** 예전에는 층 전환만 셸이
+/// 흰 알약으로 따로 띄워, 같은 자리에 초록 배너와 알약이 겹쳤다.
 class GuidanceBanner extends StatelessWidget {
-  const GuidanceBanner({super.key, required this.instruction});
+  const GuidanceBanner({
+    super.key,
+    this.instruction,
+    this.floorTransition,
+    this.arrivalAt,
+  });
 
-  final RouteGuidanceInstruction instruction;
+  final RouteGuidanceInstruction? instruction;
+
+  /// 층 전환이 도는 중이면 그 단계. null이면 전환 중이 아니다.
+  final FloorTransitionUiState? floorTransition;
+
+  /// 도착 배너에 적을 `이름 · 층`. null이면 아직 도착이 아니다.
+  final String? arrivalAt;
+
+  /// 그릴 것이 하나도 없는지. 호출부가 자리를 통째로 비울지 판단한다.
+  bool get isEmpty =>
+      instruction == null && floorTransition == null && arrivalAt == null;
 
   @override
   Widget build(BuildContext context) {
-    if (instruction.action == RouteGuidanceAction.wrongWay) {
+    final transition = floorTransition;
+    if (transition != null) {
+      return RoutexManeuverBanner(
+        distance: transition.headline,
+        detail: transition.detail,
+        icon: RoutexIcons.escalator,
+      );
+    }
+    final arrival = arrivalAt;
+    if (arrival != null) {
+      return RoutexStatusBanner(
+        title: '목적지에 도착했습니다',
+        detail: arrival,
+        icon: RoutexIcons.arrived,
+        tone: RoutexStatusBannerTone.success,
+      );
+    }
+    final guidance = instruction;
+    if (guidance == null) return const SizedBox.shrink();
+    if (guidance.action == RouteGuidanceAction.wrongWay) {
       return const RoutexStatusBanner(
         title: '경로를 벗어났습니다',
         detail: '새 경로를 자동으로 찾고 있습니다',
@@ -116,9 +158,9 @@ class GuidanceBanner extends StatelessWidget {
       );
     }
     return RoutexManeuverBanner(
-      distance: _distanceLabel(instruction.distanceToActionM),
-      detail: instruction.primaryText,
-      icon: routeGuidanceIcon(instruction.action),
+      distance: _distanceLabel(guidance.distanceToActionM),
+      detail: guidance.primaryText,
+      icon: routeGuidanceIcon(guidance.action),
     );
   }
 }

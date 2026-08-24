@@ -120,7 +120,9 @@ void main() {
       expect(today.value, '휴무');
     });
 
-    test('구간이 여럿이면 순서를 지켜 잇는다', () {
+    // 브레이크 타임은 줄로 나눈다. 한 줄에 이으면 가운뎃점이 시각 사이의 줄표에
+    // 묻혀 네 시각이 한 덩어리로 읽힌다.
+    test('구간이 여럿이면 순서를 지켜 줄로 나눈다', () {
       const section = HoursSection(
         weekly: {
           'tue': [
@@ -137,33 +139,7 @@ void main() {
 
       expect(
         routexHoursDays(week).first.value,
-        '10:30 - 14:00 · 17:00 - 20:00',
-      );
-    });
-  });
-
-  group('오래됨 근거', () {
-    StoreHoursStatus statusAt(String confirmedAt, DateTime now) =>
-        computeStoreHoursStatus(hours(confirmedAt: confirmedAt), now);
-
-    // 확인일은 그 자체로 읽을 정보가 아니라 경고의 근거다.
-    test('오래되지 않았으면 넘기지 않는다', () {
-      expect(
-        routexHoursStaleNote(
-          statusAt('2026-08-10', kst(2026, 8, 11, 14)),
-          '2026-08-10',
-        ),
-        isNull,
-      );
-    });
-
-    test('오래됐으면 확인일과 함께 근거를 만든다', () {
-      expect(
-        routexHoursStaleNote(
-          statusAt('2026-01-01', kst(2026, 8, 11, 14)),
-          '2026-01-01',
-        ),
-        '2026-01-01 기준 · 영업시간이 달라졌을 수 있어요',
+        '10:30 - 14:00\n17:00 - 20:00',
       );
     });
   });

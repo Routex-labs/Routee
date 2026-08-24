@@ -13,12 +13,11 @@ enum AnchorSource { entranceGate, userPin, manualHeadingCal, verticalTransfer }
 
 /// [PdrAnchor.rotationDeg]가 **무엇에서 나왔는지.**
 ///
-/// 회전각 하나만으로는 "센서를 믿어서 0"과 "믿을 근거가 없어 0"이 구분되지
-/// 않고, 0이 아닌 값도 어느 근거로 잡은 것인지 사후에 되짚을 수 없다. 실기기
+/// 회전각 하나만으로는 어느 근거로 잡은 값인지 사후에 되짚을 수 없다. 실기기
 /// 진단 칩이 이 값을 그대로 싣는다(`heading_debug.dart`) — 방향이 틀어졌을 때
 /// "게이트가 안 걸렸다"와 "걸렸는데 갈아탄 근거가 나빴다"를 가르는 유일한 자리다.
 enum AnchorRotationBasis {
-  /// 센서 방위를 그대로 믿었다. 회전각은 0이다.
+  /// 센서 방위를 그대로 믿었다. 회전각은 자편각([magneticDeclinationDeg])뿐이다.
   trustedHeading,
 
   /// 문을 걸어서 통과하는 중에 측정된 GPS course.
@@ -34,14 +33,26 @@ enum AnchorRotationBasis {
   inherited,
 }
 
+/// 자북 기준 방위를 진북 기준으로 옮기는 자편각(declination). `진북 = 자북 + 이 값`.
+///
+/// 나침반(iOS xMagneticNorthZVertical, Android rotation vector)은 **자북** 기준
+/// 방위를 준다. 반면 floor `local_m` 축은 WGS84 대응점으로 피팅하므로 **진북**
+/// 기준이다. 이 값을 안 더하면 실내 heading이 통째로 이만큼 돌아간다.
+///
+/// -8.99837° @ 37.5259N/126.9285E(더현대 서울), WMM-2025, 2026.63.
+/// 출처: NOAA NCEI geomag-web calculateDeclination. 연변화 -0.039°/년이라
+/// 12년에 0.5°만 움직인다 — **WMM2030이 나오는 2029년 말에 다시 받는다.**
+/// 건물이 늘어나면 상수 하나로는 부족해지므로 그때 건물별 값으로 쪼갠다.
+const double magneticDeclinationDeg = -9.0;
+
 /// PDR 로컬 미터 좌표를 floor `local_m` 좌표에 고정하는 데 필요한 데이터(§4).
 ///
 /// 변환은 `floor = axes·R(rotationDeg)·pdr + anchorLocalM`이다.
 ///
 /// PDR 좌표는 언제나 +east/+north지만, 평면도 `local_m`은 데이터셋에 따라
 /// +y가 남쪽이거나 축이 회전돼 있을 수 있다. [PdrToFloorAxes]가 이 좌표계
-/// 차이를 흡수하고, [rotationDeg]는 자북을 얻지 못한 기기의 수동 heading
-/// 보정에만 쓴다.
+/// 차이를 흡수하고, [rotationDeg]는 heading frame 자체의 어긋남 — 자북↔진북
+/// 차이([magneticDeclinationDeg])와 수동/현장 보정 — 을 담는다.
 class PdrAnchor {
   const PdrAnchor({
     required this.floorId,
@@ -53,6 +64,7 @@ class PdrAnchor {
     required this.confidence,
     this.axes = const PdrToFloorAxes.identity(),
     this.rotationBasis = AnchorRotationBasis.trustedHeading,
+    this.headingOffsetDeg = 0,
   });
 
   final String floorId;
@@ -61,6 +73,9 @@ class PdrAnchor {
   final PdrLocalPoint anchorLocalM;
 
   /// PDR heading frame → floor frame 회전각(도).
+  ///
+  /// 자북 기준 heading이면 [magneticDeclinationDeg] + [headingOffsetDeg],
+  /// arbitrary reference면 사용자가 고른 방향에서 유도한 각 + [headingOffsetDeg]다.
   final double rotationDeg;
 
   /// [rotationDeg]를 만든 근거.
@@ -69,8 +84,16 @@ class PdrAnchor {
   /// heading이 자북 기준인지. arbitrary corrected fallback이면 수동 보정이 필요하다.
   final HeadingReference headingReference;
 
-  /// 서버 자북 정렬각을 못 쓰는 상태(arbitrary reference)라 수동 방향 보정이 필수인지.
+  /// arbitrary reference라 **사용자에게 방향을 물어야만** anchor가 서는지.
+  ///
+  /// 자북 기준이어도 회전각은 더 이상 0이 아니다([magneticDeclinationDeg]).
+  /// 이 플래그는 "회전 보정이 있는지"가 아니라 "사람 없이 회전각을 못 구하는지"다.
   final bool requiresManualRotationCalibration;
+
+  /// [rotationDeg]에 섞여 있는 현장 보정 노브 값(도). 디버그 모드 전용이고
+  /// 일반 사용자는 언제나 0이다. 세션 JSON에 그대로 남겨, 다음에 상수로 굳힐
+  /// 근거로 쓴다.
+  final double headingOffsetDeg;
 
   final AnchorSource source;
 

@@ -64,7 +64,8 @@ floor = anchorLocalM + PdrToFloorAxes × Rotation(rotationDeg) × pdr
 
 - PDR 좌표는 동쪽·북쪽이 양수다.
 - 층 `local_m`은 데이터셋에 따라 축 회전이나 y축 반전이 있을 수 있다.
-- `PdrToFloorAxes`가 축 차이를, `rotationDeg`가 임의 heading 보정을 담당한다.
+- `PdrToFloorAxes`가 축 차이를, `rotationDeg`가 heading frame 어긋남을 담당한다.
+  후자는 자북→진북 자편각(`magneticDeclinationDeg`)과 현장/수동 보정의 합이다.
 
 ## 실패 지점
 

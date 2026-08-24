@@ -123,6 +123,15 @@ const routeFitMinSideM = 12.0;
 /// 된다 — **주변 매장 몇 개는 함께 보여야** 여기가 어디인지 읽힌다.
 const routeFitMaxZoom = 17.5;
 
+/// 편의시설 강조 상자의 변 하한(m). 경로보다 넉넉하다 — 시설 칸은 화장실 한
+/// 칸처럼 작고, 상자를 그 크기에 딱 맞추면 **주변이 통째로 잘려** 그게 층
+/// 어디쯤인지 읽히지 않는다.
+const facilityFitMinSideM = 40.0;
+
+/// 편의시설 강조 확대 상한. 한 곳만 있는 종류(엘리베이터 한 대)에서 화면이
+/// 그 칸으로 가득 차는 것을 막는다 — **물러서려고 만든 동작이 되레 파고든다.**
+const facilityFitMaxZoom = 18.0;
+
 /// "내 위치로"가 되돌아가는 배율의 **하한**. 이미 더 확대해 둔 사용자에게는
 /// 적용하지 않는다 — 들여다보려 당겨 둔 배율을 버튼 한 번에 뺏지 않는다.
 const walkingViewZoom = indoorTilesMaxZoom;
@@ -140,6 +149,56 @@ const guidanceStartZoom = 19.0;
 
 /// "내 위치로" 이동 시간. 직접 누른 조작이라 과정을 보여 줄 이유가 없다.
 const recenterDuration = Duration(milliseconds: 300);
+
+/// 실내 안내 중 카메라가 사용자를 따라갈 때의 배율.
+///
+/// **실내 타일 maxzoom(18, [indoorTilesMaxZoom])을 넘는 값이다.** MapLibre가 18
+/// 타일을 늘려 그리는 overzoom 구간이라 라벨과 선이 약간 뭉갠다. 그걸 알고도 19를
+/// 고른 이유는 18이 "건물 안에서 안내를 받는" 화면이 아니라 조감도로 읽혔기
+/// 때문이다 — [walkingViewZoom](=18)은 위치를 **확인**하는 배율이고 이건 길을
+/// **따라가는** 배율이다. 뭉개짐이 문제가 되면 여기만 18.5로 내리면 된다.
+const indoorFollowZoom = 19.0;
+
+/// 팔로우 카메라를 다시 명령하기까지의 최소 간격(ms).
+///
+/// PDR 스냅샷은 걸음이 아니라 **모션 이벤트마다** 온다(초당 수십 건). 그대로
+/// animateCamera에 흘리면 이전 애니메이션이 끝나기 전에 다음이 덮어써 지도가
+/// 떨고 배터리를 먹는다. 걸음 간격(2 Hz 안팎)보다 조금 성기게 잡아, 한 걸음에
+/// 최대 한 번만 명령이 나가게 한다.
+const followCameraMinIntervalMs = 400;
+
+/// 팔로우 애니메이션 길이. [followCameraMinIntervalMs]보다 **짧아야** 다음 명령이
+/// 도는 애니메이션을 자르지 않는다.
+const followCameraMoveDuration = Duration(milliseconds: 320);
+
+/// 이 각도 안의 변화로는 화면을 돌리지 않는다(도).
+///
+/// 실내 나침반은 서 있어도 몇 도씩 흔들린다. 그걸 그대로 따르면 지도가 계속
+/// 잘게 진동해 읽을 수가 없다. 8°는 복도 방향(대개 90° 단위)을 가리는 데는
+/// 넉넉히 좁고, 흔들림은 대부분 걸러지는 값으로 잡았다 — 현장에서 조정할 자리다.
+const followCameraBearingDeadbandDeg = 8.0;
+
+/// 걷는 방향 쪽으로 끌어당기는 비율(0=나침반만, 1=걷는 방향만).
+///
+/// 0.5를 넘겨 걷는 방향에 무게를 싣되, 1로 두지는 않는다 — 근거는
+/// `map/camera/follow_camera.dart`의 `blendedFollowBearingDeg`.
+const followCameraWalkingPullWeight = 0.6;
+
+/// 팔로우 중 내 위치를 화면 **아래쪽**으로 내리는 정도(화면 높이 대비 비율).
+///
+/// 가운데 두면 화면의 뒤쪽 절반이 이미 지나온 길로 낭비된다. 이만큼 내리면 내
+/// 위치가 화면의 약 2/3 지점에 오고 갈 길이 그만큼 넓게 보인다. 카메라 목표점을
+/// 진행 방향으로 미는 방식이라, 되돌아오는 "내 위치" 버튼과 층 도면 fit은
+/// 영향을 받지 않는다(그쪽은 여전히 정중앙이다).
+const followCameraForwardLiftRatio = 0.18;
+
+/// 마지막 걸음이 이 시간 안이면 "걷는 중"으로 본다.
+///
+/// 걸음 하나하나가 아니라 **최근에 걸었는가**를 봐야 한다 — 스냅샷은 걸음보다
+/// 훨씬 자주 오므로 "이번 스냅샷에 걸음이 늘었나"로 물으면 대부분의 틱에서
+/// false가 되어 걷는 내내 혼합 비율이 깜빡인다. 느린 걸음(0.5 Hz)도 놓치지
+/// 않으면서 멈춤은 두 걸음 안에 알아채는 길이.
+const followCameraWalkingStepWindowMs = 1800;
 
 /// 도면을 맞출 때 위·아래에서 비워 두는 chrome 높이(논리 px). 안 빼면 도면
 /// 윗부분이 검색창·카테고리 칩에 가린다.
@@ -161,9 +220,14 @@ const floorSelectorBottomOffset = bottomBarInnerBottomPaddingPx;
 /// ETA 카드가 뜨면 하단 바가 이만큼 올라간다. `_etaBarLiftHeight`와 같아야 한다.
 const bottomBarLiftPx = 92.0;
 
-/// 홈/실내 세그먼트 왼쪽에 PDR 제어를 붙이는 right inset. 실내 탭과 야외 오버레이
-/// 에서 버튼이 같은 자리에 놓이려면 실내 화면 상수와 같아야 한다.
-const pdrControlRightInsetPx = 184.0;
+/// PDR 진단 공유 버튼을 화면 **위에서** 내리는 오프셋.
+///
+/// 아래가 아니라 위인 이유: 도착 카드·ETA 카드는 화면 바닥에 붙는 표면이라
+/// (`bottom: 0`) 하단에 둔 버튼을 상태에 따라 덮는다. 조건부로 올리면 "어떤
+/// 상태에서만 안 눌리는" 자리가 되므로 아예 위로 뺀다. 값은 디버그 칩 열과 같은
+/// 줄([placingHintTopPx] + 44) — 그 열은 IgnorePointer라 탭을 다투지 않는다.
+/// 검증은 `test/screens/outdoor_map/widgets/pdr_control_placement_test.dart`.
+const pdrControlTopPx = placingHintTopPx + 44;
 
 /// PDR 토스트를 하단 바(+ETA 카드) 위로 띄우는 오프셋.
 const mapShellBottomChromePx = 112.0;

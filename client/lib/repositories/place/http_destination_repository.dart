@@ -13,7 +13,7 @@ import 'destination_repository.dart';
 /// **두 엔드포인트는 응답 계약이 다르다.** `/query/destination`은 최적 매장
 /// 1건만 돌려주는 DestinationResponse이고(app/dto/query.py), `/query/ai`는
 /// mode + 질문/선택지 + 여러 후보를 담는 DiscoveryResponse다(설계:
-/// docs/backend/native/conversational-discovery.md 8-3절). 예전에는 두 계약이
+/// docs/native/conversational-discovery.md 8-3절). 예전에는 두 계약이
 /// 같아서 [_query] 하나로 파싱을 공유했지만, 지금은 분리한다 — 하나를 고치면
 /// 다른 하나가 조용히 깨지는 걸 막기 위해서다.
 ///

@@ -17,7 +17,7 @@ int categoryLabelCompare(String a, String b) {
 /// 브랜드명을 아는 매장은 이름으로 찾고 **모르는 것만 카테고리로 찾는다.**
 /// `편의시설`은 질의가 가장 많지만 맨 뒤다. 시설은 이미 지도에 아이콘으로 그려져
 /// chip 없이 보이고, chip을 누르면 주차 787건이 따라온다.
-/// 질의 수 표와 세트의 한계는 `docs/backend/store-category-resurvey.md`.
+/// 질의 수 표와 세트의 한계는 `docs/store-category-resurvey.md`.
 ///
 /// 매장 수 내림차순이 아니라 **표로 박아 두는** 이유는, 매장 수는 재분류할 때마다
 /// 바뀌어서 chip 위치가 같이 움직이기 때문이다(이번 재조사에서 실제로 크게 바뀌었다).

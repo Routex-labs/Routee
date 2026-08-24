@@ -120,12 +120,14 @@ void main() {
 
   // 머리 줄의 "오래됐어요"는 주장이고 확인일은 그 근거다. 펼쳐야 근거가 나오면
   // 읽는 사람은 무엇을 보고 판단할지 알 수 없다.
-  testWidgets('오래된 정보는 접혀 있어도 확인일을 근거로 남긴다', (tester) async {
+  // 임계값을 넘기면 `영업 중` 판정은 여전히 거두지만, 확인일은 화면에 적지 않는다.
+  // 날짜 한 줄이 멀쩡한 매장에도 경고처럼 읽혀서다.
+  testWidgets('오래된 정보라도 확인일을 적지 않는다', (tester) async {
     await pump(tester, hours(confirmedAt: '2026-01-01'), kst(2026, 8, 11, 14));
 
-    expect(find.textContaining('2026-01-01 기준'), findsOneWidget);
-    expect(find.textContaining('달라졌을 수 있어요'), findsOneWidget);
-    // 근거만 남기고 나머지 요일은 그대로 접혀 있다.
+    expect(find.textContaining('2026-01-01'), findsNothing);
+    expect(find.textContaining('달라졌을 수 있어요'), findsNothing);
+    // 접힘 상태는 그대로다.
     expect(find.text('수 · 10:30 - 20:00'), findsNothing);
   });
 }

@@ -85,10 +85,14 @@ class MapTopBar extends StatelessWidget {
     onSearchPressed: focusNode.requestFocus,
     onChanged: onChanged,
     onSubmitted: onSubmitted,
-    onClear: () {
-      controller.clear();
-      onChanged('');
-    },
+    // **X는 검색을 끝낸다** — 글자만 지우고 서 있지 않는다. 이 검색창은 입력칸
+    // 하나가 아니라 모드다(결과 패널이 지도를 덮고 제스처를 잠근다). 글자만
+    // 지우면 키보드와 패널이 남은 채 아무 결과도 없는 화면이 되는데, 사용자는
+    // 그것을 "지웠는데 아무 일도 안 일어났다"로 읽는다(실기기 확인).
+    //
+    // 되돌리는 일 자체는 [onCancelSearch] 하나가 맡는다 — ←(뒤로)와 같은 자리다.
+    // 입구마다 따로 지우면 한쪽만 고쳐지는 날이 온다.
+    onClear: onCancelSearch,
     leading: searchActive ? RoutexSearchLeading.back : RoutexSearchLeading.menu,
     onLeadingPressed: searchActive ? onCancelSearch : onMenuTap,
     onDirectionsPressed: onDirectionsTap,

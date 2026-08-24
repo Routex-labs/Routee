@@ -33,6 +33,7 @@ class EscalatorDetectorConfig {
     this.multiFloorRejectM = 10.0,
     this.baselineTrackAlpha = 0.02,
     this.boardingApproachRadiusM = 3.0,
+    this.boardingAbandonRadiusM = 8.0,
     this.boardingApproachUpdates = 2,
     this.boardingPhaseTimeoutMs = 40000,
     this.minVerticalSpeedMps = 0.12,
@@ -150,6 +151,10 @@ class EscalatorDetectorConfig {
   /// 활성 경로의 탑승점에 이만큼 다가오면 **배너만** 띄운다. 되돌리기 비용이 거의
   /// 없어 [minDeltaM]보다 훨씬 이른 근거로 띄운다.
   final double boardingApproachRadiusM;
+
+  /// 보인 탑승 안내를 거리로 접는 반경(m). 접근 반경보다 넓어야 탑승점을 지나
+  /// 에스컬레이터에 올라서는 동작을 이탈로 오인하지 않는다.
+  final double boardingAbandonRadiusM;
 
   /// 탑승점까지 거리가 줄어드는 것을 확인할 **서로 다른 걸음 갱신** 횟수.
   /// 한 프레임의 근접만으로 띄우면 옆을 스쳐 지나가는 사람에게도 뜬다.

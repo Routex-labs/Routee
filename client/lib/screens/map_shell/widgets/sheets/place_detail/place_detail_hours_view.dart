@@ -29,11 +29,15 @@ List<RoutexHoursDay> routexHoursDays(List<StoreHoursDay> week) => [
   for (final day in week)
     RoutexHoursDay(
       label: weekdayLabelOf(day.date),
+      // 브레이크 타임이 있는 날은 구간을 **줄로 나눈다**. 한 줄에 이어 붙이면
+      // `10:30 - 15:00 · 17:00 - 22:00`이 되는데, 가운뎃점이 시각 사이의 짧은
+      // 줄표에 묻혀 네 시각이 한 덩어리로 읽힌다 — 언제 닫았다 다시 여는지가
+      // 사라진다.
       value: day.intervals.isEmpty
           ? '휴무'
           : day.intervals
                 .map((interval) => '${interval.open} - ${interval.close}')
-                .join(' · '),
+                .join('\n'),
       note: day.note,
       closed: day.intervals.isEmpty,
     ),
@@ -51,13 +55,6 @@ String? routexHoursDetail(StoreHoursStatus status, DateTime today) {
   final suffix = status.state == StoreOpenState.open ? '종료' : '영업 시작';
   return '${_whenText(next, today)} $suffix';
 }
-
-/// 판정을 거둔 이유를 적은 한 줄. 거두지 않았으면 null.
-///
-/// 확인일은 그 자체로 읽을 정보가 아니라 **경고의 근거**다. 그래서 오래됐을
-/// 때만 넘긴다 — 늘 넘기면 방금 확인한 영업시간에도 경고가 붙는다.
-String? routexHoursStaleNote(StoreHoursStatus status, String confirmedAt) =>
-    status.isStale ? '$confirmedAt 기준 · 영업시간이 달라졌을 수 있어요' : null;
 
 /// 월~일 한 글자 라벨.
 String weekdayLabelOf(DateTime date) =>

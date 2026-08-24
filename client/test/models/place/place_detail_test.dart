@@ -286,4 +286,32 @@ void main() {
     expect(hours.utcOffsetMinutes, 540);
     expect(hours.confirmedAt, '2026-08-10');
   });
+
+  test('연락처 섹션은 번호와 함께 출처·확인일을 갖는다', () {
+    final detail = PlaceDetail.fromJson({
+      'kind': 'store',
+      'id': 'store-1',
+      'name': '보테가 베네타',
+      'subtitle': '1F · 패션',
+      'location': {'building_id': 'building-1'},
+      'actions': <Object?>[],
+      'sections': [
+        {
+          'type': 'contact',
+          'tel': '02-3277-0132',
+          'confirmed_at': '2026-08-22',
+          'source': 'https://thehyundaiseoul.ehyundai.com/store/floor-guide',
+        },
+      ],
+      'provenance': {'source': 'manual', 'updated_at': '2026-08-22'},
+    });
+
+    final contact = detail.sections.single as ContactSection;
+
+    // 서버가 표기를 다듬지 않는다. 숫자만 남기는 것은 화면 몫이라, 모델이 여기서
+    // 손대면 "출처 페이지에 적힌 값"이라는 말이 깨진다.
+    expect(contact.tel, '02-3277-0132');
+    expect(contact.confirmedAt, '2026-08-22');
+    expect(contact.source, contains('thehyundaiseoul'));
+  });
 }

@@ -218,13 +218,21 @@ void main() {
     // 길찾기 바를 거치지 않고 들어오는 길이다. 실기기에서 제일 흔한 조작이고,
     // 이 길에서는 도착지가 `_routeDraftDestination`에 안 실릴 수 있다.
     await pumpShell(tester);
-    await tester.tap(find.byType(TextField).first);
+    // **상단 검색창이 아니라 길찾기 도착지 칸이다.** 이 화면은 건물 밖에 서
+    // 있고, 실외 상단 검색은 우리 도면 매장을 돌려주지 않는다
+    // (`search-result-list-ux.md` Y절). 후보를 고르면 그 자리에서 경로가
+    // 그려지므로 "도착"을 따로 누르지 않는다.
+    await tester.tap(find.byTooltip('길찾기'));
     await drain(tester);
-    await tester.enterText(find.byType(TextField).first, '강의실');
+    await tester.enterText(
+      find.descendant(
+        of: find.byKey(const Key('route-draft-destination')),
+        matching: find.byType(TextField),
+      ),
+      '강의실',
+    );
     await drain(tester);
     await tester.tap(find.text('강의실 101').first);
-    await drain(tester);
-    await tester.tap(find.text('도착'));
     await drain(tester);
     await tester.tap(find.text('안내 시작'));
     await drain(tester);

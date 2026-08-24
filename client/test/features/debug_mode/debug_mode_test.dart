@@ -73,6 +73,37 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
+  test('heading 보정 노브는 디버그 모드가 켜져 있을 때만 흘러나온다', () async {
+    final preferences = await SharedPreferences.getInstance();
+    final controller = DebugModeController(preferences: preferences);
+    await controller.ready;
+
+    await controller.setHeadingOffsetDeg(12);
+    // 디버그가 꺼져 있으면 일반 사용자와 같아야 한다 — 자편각 상수만 적용된다.
+    expect(controller.headingOffsetDeg.value, 0);
+
+    await controller.setEnabled(true);
+    expect(controller.headingOffsetDeg.value, 12);
+
+    // 상한 밖은 잘린다. 노브를 끝까지 밀어도 anchor가 뒤집히지 않는다.
+    await controller.setHeadingOffsetDeg(1000);
+    expect(
+      controller.headingOffsetDeg.value,
+      DebugModeController.headingOffsetLimitDeg,
+    );
+
+    // 현장에서 맞춘 값은 앱을 다시 켜도 남아야 한다 — 그게 다음 상수의 근거다.
+    final restored = DebugModeController(preferences: preferences);
+    await restored.ready;
+    expect(
+      restored.headingOffsetDeg.value,
+      DebugModeController.headingOffsetLimitDeg,
+    );
+
+    controller.dispose();
+    restored.dispose();
+  });
+
   test(
     'debug settings load defaults and persist every display toggle',
     () async {
@@ -155,7 +186,9 @@ void main() {
 
   testWidgets('방위 격자는 지도와 별개인 전체 화면 painter로 표시된다', (tester) async {
     await tester.pumpWidget(
-      MaterialApp(theme: AppTheme.light, home: SizedBox.expand(
+      MaterialApp(
+        theme: AppTheme.light,
+        home: SizedBox.expand(
           child: CardinalGridOverlay(
             northMapBearingDeg: 305,
             cameraBearingDeg: 90,
@@ -251,7 +284,9 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(
-      MaterialApp(theme: AppTheme.light, home: Scaffold(
+      MaterialApp(
+        theme: AppTheme.light,
+        home: Scaffold(
           body: Builder(
             builder: (context) => TextButton(
               onPressed: () => showDebugToast(
@@ -283,7 +318,9 @@ void main() {
     await controller.ready;
 
     await tester.pumpWidget(
-      MaterialApp(theme: AppTheme.light, home: Scaffold(
+      MaterialApp(
+        theme: AppTheme.light,
+        home: Scaffold(
           body: Builder(
             builder: (context) => TextButton(
               onPressed: () => showDebugModeSettingsSheet(context, controller),

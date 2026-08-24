@@ -135,7 +135,7 @@ fill을 얹는다. **칠이 세 겹이다.**
   **이게 이 항목의 가장 큰 위험이다.**
 - 매장이 수백 개인 층에서 마커를 전부 그리면 겹친다. 카카오도 줌에 따라 솎아낸다 —
   `map/label/store_label_priority.dart`가 이미 라벨에 하는 일을 마커까지 넓혀야 한다.
-- **한 폴리곤을 여러 매장이 나눠 쓰는 자리**가 있다(`docs/backend/shared-polygon-split.md`).
+- **한 폴리곤을 여러 매장이 나눠 쓰는 자리**가 있다(`docs/shared-polygon-split.md`).
   칠에서는 한 칸이 한 색이면 됐지만, 마커는 **매장마다 하나씩** 필요하다.
 
 **검증 기준.**
@@ -149,7 +149,7 @@ fill을 얹는다. **칠이 세 겹이다.**
 코드 주석이 이 절을 가리킨다. 세 가지가 화면을 보고서야 정해졌다.
 
 **1. 핀을 어느 점에 세우나 — centroid도 `entrance`도 아니다.**
-타일은 라벨을 폴리곤의 `label_point`(내접 최대점, `backend/app/geo/label_point.py`)에
+타일은 라벨을 폴리곤의 `label_point`(내접 최대점, `app/geo/label_point.py`)에
 찍는다. 클라이언트에 그 계산이 없어 근사로 골랐는데, 더현대 1F 출구 5개에서 재 보니
 
 | 후보 | 라벨과의 거리 |
@@ -391,7 +391,7 @@ V와 같은 종류(걸을 수 없는 영역)지만 **이름이 붙는다**는 �
 - [x] 도형이 검색 결과에 나오지 않는다 <sub>(V와 같은 근거)</sub>
 
 > **`WATERFALL GARDEN`이라는 이름 자체는 검색에 나온다 — 정상이다.** 그 POI는
-> `stores_1f.json`에 처음부터 매장으로 있고([장소 상세](../backend/place-detail/thehyundai-landmarks-detail.md)도
+> `stores_1f.json`에 처음부터 매장으로 있고([장소 상세](https://github.com/Routex-labs/fastapi/blob/main/docs/place-detail/thehyundai-landmarks-detail.md)도
 > 붙어 있다), 이번에 들어온 것은 **도형뿐**이라 검색 항목이 새로 생기지 않는다.
 
 ---
@@ -449,7 +449,7 @@ W(폭포정원)도 함께 빠진다 — 그 곡선 둘만 짚는 별도 규칙�
 
 **두 실패의 원인이 사실 하나였다 — 레이어를 어디에 꽂느냐다.**
 
-실내 도면은 전부 **MVT 벡터 타일**로 그린다(`backend/app/geo/tiling.py` →
+실내 도면은 전부 **MVT 벡터 타일**로 그린다(`app/geo/tiling.py` →
 `indoor_overlay_layers.dart`). 지난 시도는 그 스택 사이에 **GeoJSON 소스**를 따로 끼웠는데,
 `belowLayerId`가 같은 앵커를 공유하는 구조라 **나중에 등록된 것이 위로 쌓인다.** 스타일이
 로드될 때 GeoJSON이 먼저 등록되고 MVT 블록이 나중에 통째로 다시 꽂히므로, 회색 fill은
@@ -490,10 +490,10 @@ W(폭포정원)도 함께 빠진다 — 그 곡선 둘만 짚는 별도 규칙�
 
 | 무엇을 | 어디서 |
 |---|---|
-| 타일 레이어 굽기 | `backend/app/geo/tiling.py` |
+| 타일 레이어 굽기 | `app/geo/tiling.py` |
 | 레이어 등록·순서 | `client/lib/screens/outdoor_map/layers/indoor_overlay_layers.dart` |
 | 순서를 못 박는 테스트 | `client/test/screens/outdoor_map/layers/indoor_overlay_ids_test.dart` |
-| 타일 바이트까지 가는지 | `backend/tests/integration/map/test_tiles.py` |
+| 타일 바이트까지 가는지 | `tests/integration/map/test_tiles.py` |
 
 **층 응답(`/floors/{층}`)에는 싣지 않는다.** 화면이 타일로 그리므로 응답에 넣으면 아무도
 안 읽는데, B4는 기둥만 209개라 층을 열 때마다 폴리곤 수백 개를 헛되이 변환하게 된다.
@@ -517,7 +517,7 @@ W(폭포정원)도 함께 빠진다 — 그 곡선 둘만 짚는 별도 규칙�
 빠진 둘이 정확히 되돌림을 부른 그 둘이다 — `OB-aGdAGsrQZB9337`(1F 694 m², `스킨 케어룸`·
 `커뮤니티 라운지`)과 `OB-q9sDeJsxE3558`(4F 2,483 m², `엘리베이터`·`정수기`). 1F 폭포정원
 곡선 둘(46.8·56.3 m²)은 매장 중심점을 하나도 안 품어 **살아남는다.** 회귀 테스트가 이 넷을
-id로 박아 뒀다(`backend/tests/unit/transform/test_build_studio_from_dabeeo.py`).
+id로 박아 뒀다(`tests/unit/transform/test_build_studio_from_dabeeo.py`).
 
 **함정 둘을 여기 남긴다.**
 
@@ -554,7 +554,7 @@ id로 박아 뒀다(`backend/tests/unit/transform/test_build_studio_from_dabeeo.
       사라진다.** 피해가 가장 큰 항목이다.
       - 이 저장소는 마이그레이션 도구를 두지 않는 쪽으로 이미 정해져 있다
         (`scripts/seed/reset_and_seed.py` = drop_all + create_all + 시드,
-        [대화형 탐색 문서](../backend/native/conversational-discovery.md) 참고).
+        [대화형 탐색 문서](https://github.com/Routex-labs/fastapi/blob/main/docs/native/conversational-discovery.md) 참고).
         즉 **고칠 코드가 아니라 반드시 밟아야 할 배포 절차**다. Dockerfile은
         `NAV_SEED_ON_START` 미설정이면 시드하지 않으므로, 영속 DB를 쓰는 환경은
         이미지 갱신만으로는 절대 낫지 않는다.
@@ -589,7 +589,7 @@ id로 박아 뒀다(`backend/tests/unit/transform/test_build_studio_from_dabeeo.
 ## 4. 원본을 어떻게 되찾았나
 
 > 아래 임포터 변경은 지금 저장소에 있다
-> (`backend/scripts/transform/build_studio_from_dabeeo.py`). 원본을 **다시 받아야 할 때**
+> (`scripts/transform/build_studio_from_dabeeo.py`(Routex-labs/fastapi)). 원본을 **다시 받아야 할 때**
 > 같은 길을 두 번 찾지 않도록 경로를 남긴다.
 
 **임포터가 버리고 있었다.** `build_studio_from_dabeeo.py`가
@@ -648,7 +648,7 @@ python -m scripts.transform.build_studio_from_dabeeo <payload.json> --non-walkab
 | 상태 | 항목 | 남은 것 |
 |---|---|---|
 | ✅ | **G** 출구 마커 | 없음 — 1F에서 방위 핀 5개 확인 |
-| ✅ | **S** 매장 선택 강조 | 없음 — 별도 핀·크기 변화 없이 기존 카테고리 아이콘의 색만 Runtime Kit `actionPrimary`로 전환. **v2 H는 여전히 미결**(아래) |
+| ✅ | **S** 매장 선택 강조 | 없음 — 별도 핀·크기 변화 없이 기존 카테고리 아이콘의 **색만** 바꾼다. 그 색은 이제 청록 하나가 아니라 그 매장 대분류 색의 진한 쪽이다([map-style-rules.md](map-style-rules.md) 1절). **v2 H는 여전히 미결**(아래) |
 | ⏳ | **V** 보이드 | **실기기 확인 한 칸**(3절 「실기기에서 확인할 것」). 코드·데이터·테스트는 끝 |
 | ⏳ | **W** 폭포정원 | 도형은 V와 함께 들어왔다 — 남은 것은 **회색 대문자 라벨** |
 

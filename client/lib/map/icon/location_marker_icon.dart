@@ -7,7 +7,6 @@
 /// 있으면 새 비트맵을 버린다). 여기는 그림과 크기 상수만 소유한다.
 library;
 
-import 'dart:math' show pi;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -59,14 +58,58 @@ const kLocationMarkerIconCoreRadius =
 const kLocationMarkerIconRimRadius =
     kLocationMarkerRimRadiusPx * kLocationMarkerIconPixelRatio;
 
-/// 상용 지도 앱처럼 흰 테두리의 파란 현재 위치 점 뒤로 반투명 heading cone이
-/// 퍼지는 하나의 심볼을 렌더링한다. MapLibre가 이 비트맵 전체를 회전하므로
-/// 확대/축소해도 점과 방향 범위의 비율·간격이 흐트러지지 않는다.
+/// 방향 삼각형의 치수 — 코어 반지름 대비 비율.
 ///
-/// [showHeading]이 true면 파란 도트 위에 방향 원뿔(radial gradient)이 함께
-/// 그려진 이미지가 나오고, false면 도트만 있는 이미지가 나온다. MapLibre
-/// SymbolLayer는 미리 addImage로 등록된 비트맵만 참조할 수 있어 이렇게 캔버스
-/// 렌더가 필요하다.
+/// 광택 점과 같은 규칙으로 **코어 반지름에서 파생시킨다.** 코어 크기를 바꿔도
+/// 삼각형이 따라 커지고 rim과의 간격 비율이 유지되어야 한다.
+///
+/// [_headingGapRatio]는 흰 rim **바깥**에서 띄우는 거리다. 0이면 삼각형이 rim에
+/// 달라붙어 도트가 물방울처럼 보이고, 너무 크면 따로 떠 있는 점 두 개가 된다.
+const _headingGapRatio = 0.16;
+
+/// 2026-08-20 실기기에서 "방향 나타내는 크기가 좀 작다"는 지적으로 1.5배 키웠다
+/// (높이 0.72 → 1.10, 밑변 반폭 0.58 → 0.86). 코어 반지름 8px 기준으로 높이가
+/// 5.8px였는데, 걸으면서 흘깃 보는 크기로는 방향이 안 읽혔다.
+///
+/// 더 키우려면 캔버스를 먼저 본다 — 꼭짓점이 중심에서
+/// `코어 × (rimToCore + gap + height)`만큼 떨어지고, 그 값이 캔버스 반폭
+/// ([kLocationMarkerIconDesignSize] / 2)을 넘으면 삼각형 끝이 잘린다.
+const _headingHeightRatio = 1.10;
+const _headingHalfBaseRatio = 0.86;
+
+/// rim 반지름 / 코어 반지름. 두 값을 각각 배율에 곱하지 않고 비로 두는 이유는,
+/// 삼각형이 **어느 캔버스 배율에서도** 코어 반지름 하나로 결정되게 하기 위해서다.
+const _rimToCoreRatio =
+    kLocationMarkerRimRadiusPx / kLocationMarkerCoreRadiusPx;
+
+/// 진행 방향 삼각형의 세 꼭짓점(꼭짓점, 밑변 왼쪽, 밑변 오른쪽).
+///
+/// **캔버스 기준 위(-y)를 향한다.** MapLibre는 이 비트맵 **전체**를 heading만큼
+/// 시계 방향으로 돌리므로, 여기서 위를 향해 그려야 회전 뒤 진행 방향과 맞는다.
+///
+/// 밑변은 흰 rim 바깥에서 시작한다 — 참고한 상용 지도처럼 도트 가장자리에 붙은
+/// 별도 도형이지, 도트를 대체하는 화살표가 아니다. 검증 기준은
+/// `test/map/icon/location_marker_icon_test.dart`.
+List<Offset> locationMarkerHeadingTriangle({
+  required Offset center,
+  required double coreRadius,
+}) {
+  final baseY = center.dy - coreRadius * (_rimToCoreRatio + _headingGapRatio);
+  final halfBase = coreRadius * _headingHalfBaseRatio;
+  return [
+    Offset(center.dx, baseY - coreRadius * _headingHeightRatio),
+    Offset(center.dx - halfBase, baseY),
+    Offset(center.dx + halfBase, baseY),
+  ];
+}
+
+/// 상용 지도 앱처럼 흰 테두리의 파란 현재 위치 점 가장자리에 진행 방향
+/// 삼각형이 붙은 하나의 심볼을 렌더링한다. MapLibre가 이 비트맵 전체를 회전하므로
+/// 확대/축소해도 점과 삼각형의 비율·간격이 흐트러지지 않는다.
+///
+/// [showHeading]이 true면 도트에 방향 삼각형이 붙고, false면 도트만 있는 이미지가
+/// 나온다. MapLibre SymbolLayer는 미리 addImage로 등록된 비트맵만 참조할 수 있어
+/// 이렇게 캔버스 렌더가 필요하다.
 Future<Uint8List> renderLocationMarkerIcon({required bool showHeading}) async {
   const canvasSize = kLocationMarkerIconDesignSize;
   const center = Offset(canvasSize / 2, canvasSize / 2);
@@ -77,27 +120,6 @@ Future<Uint8List> renderLocationMarkerIcon({required bool showHeading}) async {
     const Rect.fromLTWH(0, 0, pixelSize, pixelSize),
   );
   canvas.scale(kLocationMarkerIconPixelRatio);
-
-  if (showHeading) {
-    const coneRadius = 62.0;
-    const halfAngle = 31 * pi / 180;
-    final coneBounds = Rect.fromCircle(center: center, radius: coneRadius);
-    final headingCone = Path()
-      ..moveTo(center.dx, center.dy)
-      ..arcTo(coneBounds, -pi / 2 - halfAngle, halfAngle * 2, false)
-      ..close();
-    canvas.drawPath(
-      headingCone,
-      Paint()
-        ..shader = ui.Gradient.radial(
-          center,
-          coneRadius,
-          const [Color(0x8F1976D2), Color(0x451976D2), Color(0x001976D2)],
-          const [0, 0.58, 1],
-        )
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2.5),
-    );
-  }
 
   canvas.drawCircle(
     center + const Offset(0, 2),
@@ -125,6 +147,21 @@ Future<Uint8List> renderLocationMarkerIcon({required bool showHeading}) async {
     kLocationMarkerIconCoreRadius * 0.25,
     Paint()..color = const Color(0x66FFFFFF),
   );
+
+  if (showHeading) {
+    final vertices = locationMarkerHeadingTriangle(
+      center: center,
+      coreRadius: kLocationMarkerIconCoreRadius,
+    );
+    canvas.drawPath(
+      Path()
+        ..moveTo(vertices[0].dx, vertices[0].dy)
+        ..lineTo(vertices[1].dx, vertices[1].dy)
+        ..lineTo(vertices[2].dx, vertices[2].dy)
+        ..close(),
+      Paint()..color = kLocationMarkerColor,
+    );
+  }
 
   final image = await recorder.endRecording().toImage(
     pixelSize.toInt(),

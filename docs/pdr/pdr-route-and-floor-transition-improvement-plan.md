@@ -645,29 +645,34 @@ class RawMotionActivity {
 
 ### Phase 5 — 전환 UI와 z-order
 
-> **상태**: 완료. 배너는 `MapShellScreen`의 상단 Column 흐름에, 전체 화면 veil은 root Stack
-> 마지막 레이어에 있다. veil은 계획대로 도면 교체 구간만 덮되 길이가 약 3.2초로 늘었다.
-> 덮개 뒤에서 도면 크로스페이드와 마커 활강이 돌아, 걷힐 때 새 층과 하차 지점이 이미 자리를
-> 잡고 있다(임계값·문구·연출은
+> **상태**: 완료. **배너는 지도의 안내 자리(`GuidanceBanner`)가**, 전체 화면 veil은 셸
+> root Stack 마지막 레이어가 그린다. veil은 계획대로 도면 교체 구간만 덮되 길이가 약 3.2초로
+> 늘었다. 덮개 뒤에서 도면 크로스페이드와 마커 활강이 돌아, 걷힐 때 새 층과 하차 지점이 이미
+> 자리를 잡고 있다(임계값·문구·연출은
 > `client/lib/features/indoor_navigation/application/README.md`가 단일 출처).
 
 #### 상태 소유
 
 - detector/application이 `FloorTransitionUiState`를 만든다.
 - `IndoorMapBody`는 상태를 `MapShellScreen`에 전달한다.
-- 배너는 root Stack이 소유한다.
+- veil은 root Stack이, 배너는 지도의 안내 자리가 소유한다.
 - UI는 phase를 문구와 animation으로만 변환한다.
 
 #### 배너
 
-- `boardingDetected`: `에스컬레이터 탑승을 감지했습니다`
-- `verticalMotionDetected`: `에스컬레이터로 이동 중 · B1 → 1F`
-- `midpointReached`: `1F 지도로 전환하는 중`
-- `landed`: `1F로 이동했습니다`
+문구는 `FloorTransitionUiState`가 단일 출처다(`headline`·`detail`).
 
-배너는 고정 `top` 숫자로 배치하지 않는다. `MapTopBar` 다음 Column 흐름에 넣고 전환 중에는 카테고리
-행을 접어 공간을 보장한다. 검색이 활성화된 상태에서 탑승이 감지되면 검색을 닫고 길안내 상태를
-우선한다.
+**배너는 따로 띄우지 않는다.** 안내 배너와 **같은 자리·같은 표면**을 쓰고, 층 전환이 도는 동안
+그 자리를 가져간다(`GuidanceBanner`). 예전에는 셸이 상단 Column에 흰 알약으로 따로 띄워, 안내
+중에는 초록 배너 위에 알약이 한 겹 더 겹쳤다 — 한 사건이 두 개의 안내로 보였다.
+
+우선순위: 층 전환 → 도착 → 이탈 → 다음 행동. 층 전환이 맨 앞인 이유는 타는 동안 걸음이 멈춰 있어
+다음 행동의 남은거리가 갱신되지 않기 때문이다.
+
+**완료 단계는 없다.** 하차가 확정되면 배너가 그대로 사라진다. `N층으로 이동했습니다`를 몇 초 더
+띄워 봐야, 그때 화면은 이미 새 층 도면과 새 경로를 그리고 있어 방금 끝난 일을 한 번 더 말할 뿐이다.
+`도면을 갈아 끼우는 중`도 같은 이유로 없앴다 — 지도가 전환된다는 것은 앱의 사정이고, 그 사람에게
+일어나는 일은 층 이동 하나다.
 
 #### 층 지도 교체 veil
 

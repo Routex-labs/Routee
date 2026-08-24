@@ -112,10 +112,10 @@ void main() {
     expect(find.byKey(const Key('route-draft-origin')), findsNothing);
   });
 
-  // 이 자리가 앱 안 모든 검색창 지우기 X의 기준 패턴이다. 여기서 규칙이
-  // 흔들리면 길찾기 시트·카테고리 매장 목록도 따라 어긋나므로 함께 고정한다.
-  testWidgets('검색창 X는 글자가 있을 때만 나타나고 결과 상태까지 되돌린다', (tester) async {
+  // 이 자리가 앱 안 검색창 지우기 X의 기준 패턴이다.
+  testWidgets('검색창 X는 글자가 있을 때만 나타나고, 누르면 검색을 끝낸다', (tester) async {
     final changes = <String>[];
+    var cancels = 0;
     final controller = TextEditingController();
     final focusNode = FocusNode();
     addTearDown(controller.dispose);
@@ -132,7 +132,7 @@ void main() {
             onChanged: changes.add,
             onSubmitted: (_) {},
             searchActive: true,
-            onCancelSearch: () {},
+            onCancelSearch: () => cancels++,
             onDirectionsTap: () {},
           ),
         ),
@@ -151,10 +151,13 @@ void main() {
     await tester.tap(find.byTooltip('검색어 지우기'));
     await tester.pump();
 
-    expect(controller.text, '');
-    // 글자만 지우면 상위의 검색 결과가 그대로 남는다. 빈 문자열을 흘려 그
-    // 입력이 걸어 둔 결과까지 되돌리는 것이 이 X의 계약이다.
-    expect(changes.last, '');
-    expect(find.byTooltip('검색어 지우기'), findsNothing);
+    // **X는 ←(뒤로)와 같은 일을 한다.** 글자만 지우고 서 있으면 키보드와 결과
+    // 패널이 남은 채 아무 결과도 없는 화면이 된다 — 사용자는 그것을 "지웠는데
+    // 아무 일도 안 일어났다"로 읽는다.
+    expect(cancels, 1);
+    // 글자를 비우는 것도 되돌리는 쪽([onCancelSearch])이 함께 맡는다. 여기서
+    // 빈 문자열을 미리 흘리면 되돌리는 일이 두 곳으로 갈린다 — 마지막 변경은
+    // 사용자가 친 글자 그대로다(X가 뒤에 아무것도 안 얹었다).
+    expect(changes, ['다이슨']);
   });
 }

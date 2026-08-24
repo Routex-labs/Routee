@@ -118,7 +118,7 @@ flowchart TD
         PDR["features/indoor_navigation<br/>상세 흐름은 아래 그림"]
     end
 
-    BE[("백엔드 FastAPI")]
+    BE[("백엔드 Spring Boot")]
     EXT[("TMAP · VWorld")]
 
     REPO --> BE
@@ -233,11 +233,11 @@ API 주소는 `core/api_config.dart`가 플랫폼별 기본값을 고르고(`--d
 - **목적지 검색은 경량 `/query/destination`과 탐색 `/query/ai`를 함께 쓴다.** 매장 이름은
   경량 경로(`searchDestinations`)로 즉시 걸리고, 경량이 빈손이면 의미 검색
   (`searchDestinationsAi` → `/query/ai`, Discovery: direct/clarify/results/no_match/degraded)이
-  이어 붙는다 → [AI 질의 인수인계](../docs/backend/native/client-handoff.md).
+  이어 붙는다 → [AI 질의 인수인계](../docs/native/client-handoff.md).
 - **층 간 이동도 연동됐다.** `buildingRepository.getBuildingGraph`가 전 층 노드 + 수직 전이
   간선(엘리베이터·에스컬레이터)을 담은 건물 전체 그래프를 받고,
   `domain/multi_floor_router.dart`의 `computeMultiFloorRoute`가 이를 층별 세그먼트로 나눠
-  층 간 경로까지 온디바이스로 계산한다 → [층 간 라우팅 인수인계](../docs/backend/navigate/client-handoff.md).
+  층 간 경로까지 온디바이스로 계산한다 → [층 간 라우팅 인수인계](../docs/navigate/client-handoff.md).
 
 ## 자주 하는 작업
 

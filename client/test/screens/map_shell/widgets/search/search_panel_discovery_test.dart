@@ -55,7 +55,9 @@ void main() {
       query.value = '';
       submitTick.value = 0;
       return tester.pumpWidget(
-        MaterialApp(theme: AppTheme.light, home: Scaffold(
+        MaterialApp(
+          theme: AppTheme.light,
+          home: Scaffold(
             body: ListenableBuilder(
               listenable: Listenable.merge([query, submitTick]),
               builder: (_, _) => SearchPanel(
@@ -644,7 +646,9 @@ void main() {
         ),
       ]);
       await tester.pumpWidget(
-        MaterialApp(theme: AppTheme.light, home: Scaffold(
+        MaterialApp(
+          theme: AppTheme.light,
+          home: Scaffold(
             body: ListenableBuilder(
               listenable: Listenable.merge([query, submitTick]),
               builder: (_, _) => ConstrainedBox(
@@ -872,6 +876,10 @@ class _FakeBuildingRepository implements BuildingRepository {
 
   // 자동완성 원본. 이 테스트들은 후보를 보지 않으므로 빈 목록으로 둔다 —
   // 패널은 목록이 비면 후보를 그리지 않고 서버 검색만 돈다.
+  @override
+  Future<Map<String, dynamic>?> getBuildingEvents(String buildingId) async =>
+      null;
+
   @override
   Future<List<StoreIndexEntry>?> getStoreIndex(String buildingId) async =>
       const [];

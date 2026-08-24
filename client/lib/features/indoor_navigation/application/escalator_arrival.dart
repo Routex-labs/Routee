@@ -48,26 +48,47 @@ GraphNode? findEscalatorArrivalNode(
   return sameGroupFallback;
 }
 
+/// 이 층에서 [direction]으로 **실제로 데려다주는** 탑승 노드. 없으면 null.
+///
+/// 디버그 강제 전환이 "위층/아래층"을 정할 때 쓴다. **층 순위로 ±1을 계산하지
+/// 않는다** — 노드 이름이 갈 층을 직접 적고(`ES1-UP(TO3F)`), 한 번에 두 층을
+/// 건너뛰는 에스컬레이터가 실제로 있다(2026-08-13 실측). 순위로 이웃 층을 잡으면
+/// 그런 에스컬레이터는 강제 전환으로 영영 재현할 수 없다.
+///
+/// [knownFloorLabels]에 없는 층으로는 태우지 않는다. 도착 층 도면을 못 열면
+/// 시퀀스가 중간에 되돌아가서, 보려던 연출 대신 실패 경로를 보게 된다.
+({GraphNode node, EscalatorNodeName name})? findEscalatorBoardingNode({
+  required FloorGraph? graph,
+  required EscalatorDirection direction,
+  required List<String> knownFloorLabels,
+}) {
+  if (graph == null) return null;
+  for (final node in graph.nodes) {
+    if (node.type != 'escalator') continue;
+    final name = EscalatorNodeName.tryParse(node.name);
+    if (name == null) continue;
+    if (name.role != EscalatorNodeRole.boarding) continue;
+    if (name.direction != direction) continue;
+    if (!knownFloorLabels.contains(name.otherFloorLabel)) continue;
+    return (node: node, name: name);
+  }
+  return null;
+}
+
 /// 지금 화면이 그려야 하는 층 전환 배너 상태. 없으면 null.
 ///
 /// 판정 단계를 UI 문구로 **한 번만** 옮긴다. 화면은 여기서
 /// 나온 값만 보고 그린다 — 임계값이나 노드 근접을 다시 계산하지 않는다.
 ///
-/// 우선순위가 이 함수의 전부다. 도착 → 탑승 중 → 접근 순으로 보며, 앞의 것이
-/// 있으면 뒤는 보지 않는다. 뒤집으면 하차 직후에도 "이동 중"이 떠 있다.
+/// 우선순위가 이 함수의 전부다. 탑승 중 → 접근 순으로 보며, 앞의 것이 있으면
+/// 뒤는 보지 않는다. 뒤집으면 도면을 갈아 끼우는 동안 "접근 중"이 떠 있다.
+///
+/// **하차 뒤 단계는 없다.** 확정되는 순간 [ride]가 비고 배너도 사라진다
+/// ([FloorTransitionStage]).
 FloorTransitionUiState? floorTransitionUiState({
-  required EscalatorTransition? arrival,
   required EscalatorTransition? ride,
   required EscalatorPhaseChange? stage,
 }) {
-  if (arrival != null && ride == null) {
-    return FloorTransitionUiState(
-      stage: FloorTransitionStage.arrived,
-      fromFloorLabel: arrival.fromFloorLabel,
-      toFloorLabel: arrival.toFloorLabel,
-      goingUp: arrival.direction == EscalatorDirection.up,
-    );
-  }
   if (ride != null) {
     return FloorTransitionUiState(
       stage: FloorTransitionStage.swapping,

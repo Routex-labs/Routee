@@ -12,8 +12,6 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
-import 'package:routex_design_system/routex_design_system.dart';
-
 import 'category_icon.dart';
 import '../style/floor_facility_style.dart';
 
@@ -107,12 +105,19 @@ Future<Uint8List> renderStoreCategoryIconPng(
   // 흰 테두리는 도면(연회색)·강조된 매장(연파랑) 어느 배경 위에서도 원의 윤곽이
   // 살아 있게 한다. 배경색만 칠하면 밝은 카테고리 색이 도면에 묻힌다.
   canvas.drawCircle(center, canvasSize / 2, Paint()..color = Colors.white);
+  // 선택은 **다른 색이 아니라 같은 색의 진한 쪽**이다. 청록 하나로 칠하던
+  // 시절에는 어느 매장을 골라도 배지가 같은 초록이 되어, 고른 순간 그 매장이
+  // 무슨 대분류인지가 화면에서 사라졌다.
   canvas.drawCircle(
     center,
     canvasSize / 2 - 5,
     Paint()
       ..color = selected
-          ? RoutexColorTokens.light.actionPrimary
+          ? categoryColorDeepen(
+              category,
+              saturate: kCategorySelectedSaturate,
+              darken: kCategorySelectedDarken,
+            )
           : categoryColorFor(category),
   );
 

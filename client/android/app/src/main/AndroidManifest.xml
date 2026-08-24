@@ -9,7 +9,7 @@
          Android 네트워크 정책을 따르므로 이 설정이 없으면 실내 지도 타일만
          조용히 차단돼 지도가 비어 보인다. -->
     <application
-        android:label="navigation_client"
+        android:label="@string/app_name"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true">

@@ -463,11 +463,7 @@ void main() {
       fixture.ramp(fromM: 4.5, toM: 7.0, seconds: 11);
       fixture.hold(atM: 7.0, seconds: 6);
 
-      expect(
-        fixture.confirmed,
-        hasLength(1),
-        reason: '잔여 상승분은 층 이동이 아니다',
-      );
+      expect(fixture.confirmed, hasLength(1), reason: '잔여 상승분은 층 이동이 아니다');
       expect(
         fixture.started,
         hasLength(1),
@@ -625,11 +621,54 @@ void main() {
       );
     });
 
-    test('탑승점에서 다시 멀어지면 배너 단계를 되돌린다', () {
+    test('탑승점에서 분명히 멀어지면 배너 단계를 되돌린다', () {
       final fixture = _Fixture();
       fixture.hold(atM: 0, seconds: 5);
       fixture.approachBoarding(remainingM: const [12, 8, 4, 2]);
       fixture.approachBoarding(remainingM: const [6, 10]);
+
+      expect(fixture.phasesOf(), contains(EscalatorPhase.cancelled));
+    });
+
+    test('탑승점을 지나 올라서는 동안에는 배너를 접지 않는다', () {
+      // 실기기 증상: 에스컬레이터 노드 앞까지 가서 실제로 탔는데 배너가 풀리고
+      // 멈춰야 할 걸음이 다시 흘러 마커가 복도를 걸어갔다. 탑승점을 **통과**하는
+      // 순간부터 거리는 계속 늘어나므로, 그것을 이탈로 읽으면 안 된다.
+      final fixture = _Fixture();
+      fixture.hold(atM: 0, seconds: 5);
+      fixture.approachBoarding(remainingM: const [12, 8, 4, 2]);
+      expect(fixture.phasesOf(), contains(EscalatorPhase.boardingDetected));
+
+      fixture.approachBoarding(remainingM: const [1, 2, 3.5, 5]);
+
+      expect(
+        fixture.phasesOf(),
+        isNot(contains(EscalatorPhase.cancelled)),
+        reason: '올라선 만큼 멀어지는 것은 탑승의 증거지 이탈의 증거가 아니다',
+      );
+    });
+
+    test('탑승점을 지나 올라서면 그대로 층 전환까지 간다', () {
+      // 위 테스트의 결과가 실제로 무엇을 살리는지 — 배너가 유지되어야 걸음이
+      // 멈추고([verticalMotionDetected]) 도면 교체와 확정까지 이어진다.
+      final fixture = _Fixture();
+      fixture.hold(atM: 0, seconds: 5);
+      fixture.approachBoarding(remainingM: const [12, 8, 4, 2]);
+      fixture.approachBoarding(remainingM: const [1, 2, 3.5, 5]);
+      fixture.ramp(fromM: 0, toM: 4.5, seconds: 20);
+      fixture.hold(atM: 4.5, seconds: 5);
+
+      expect(fixture.confirmed, hasLength(1));
+      expect(fixture.confirmed.single.toFloorLabel, '3F');
+    });
+
+    test('허가 반경 밖으로 걸어가면 타임아웃을 기다리지 않고 접는다', () {
+      // 예전에는 이 경로가 _resetApproach만 하고 단계를 두어, 탑승점을 지나쳐
+      // 걸어간 사용자에게 배너가 40초 동안 남았다.
+      final fixture = _Fixture();
+      fixture.hold(atM: 0, seconds: 5);
+      fixture.approachBoarding(remainingM: const [12, 8, 4, 2]);
+      fixture.approachBoarding(remainingM: const [20]);
 
       expect(fixture.phasesOf(), contains(EscalatorPhase.cancelled));
     });

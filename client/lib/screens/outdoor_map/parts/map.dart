@@ -9,6 +9,7 @@ part of '../outdoor_map_screen.dart';
 extension OutdoorMapMap on OutdoorMapBodyState {
   /// 카메라를 [position]으로 옮긴다. [zoom]을 주면 그 값으로 확대하고, 없으면
   /// 지금 배율을 유지한다 — 따라가는 동안 사용자가 맞춘 배율을 빼앗지 않는다.
+  /// bearing·tilt는 [animateCameraToPoint]가 항상 정북·평면으로 되돌린다.
   Future<void> _moveCameraToUser(Position position, {double? zoom}) =>
       _moveCameraToPoint(
         ll.LatLng(position.latitude, position.longitude),
@@ -16,7 +17,7 @@ extension OutdoorMapMap on OutdoorMapBodyState {
       );
 
   /// [_moveCameraToUser]와 같은 동작을 좌표 하나로 부른다. GPS 좌표가 없는
-  /// 이탈 경로(걸어 나감)가 문 좌표로 화면을 되돌릴 때 쓴다.
+  /// 이탈 경로(문으로 걸어 나감)가 문 좌표로 화면을 되돌릴 때 쓴다.
   Future<void> _moveCameraToPoint(ll.LatLng point, {double? zoom}) async {
     final controller = _mapController;
     if (controller == null || !_styleReady) return;
@@ -131,6 +132,10 @@ extension OutdoorMapMap on OutdoorMapBodyState {
           LatLng(_position!.latitude, _position!.longitude),
         ),
       );
+      if (mounted && !_indoorEntered) {
+        _startupCameraPrepared = true;
+        _maybeNotifyOutdoorStartupReady();
+      }
     }
   }
 
@@ -279,6 +284,9 @@ extension OutdoorMapMap on OutdoorMapBodyState {
   }) async {
     final controller = _mapController;
     if (controller == null || !_styleReady) return false;
+    // 층 도면 fit과 경로 개요가 도는 동안은 팔로우가 쉰다. 여기 하나로 두 주인이
+    // 다 덮인다 — 각자 걸게 두면 새 fit이 생길 때마다 빠뜨린다.
+    _holdFollowCamera(duration);
     await animateCameraToFitBox(
       controller,
       box,

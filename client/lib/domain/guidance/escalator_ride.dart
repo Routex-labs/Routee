@@ -146,3 +146,47 @@ double? escalatorExitBearingDeg({
   final deg = math.atan2(eastM, northM) * 180 / math.pi;
   return deg < 0 ? deg + 360 : deg;
 }
+
+/// 활강 폴리라인. **축을 알면 탑승점도 축 위에서 고른다.**
+///
+/// [from](그래프 탑승 노드)과 [axis](도면 폴리곤 긴 축)는 별개 데이터라 서로
+/// 어긋난다 — 서버의 에스컬레이터 도형은 실제 탑승 노드가 아니라 주변 junction을
+/// 가리킨다(`domain/route/transfer_route_geometry.dart` 참고). 그 둘을 이어
+/// 그리면 첫 구간이 폴리곤 **밖에서 안으로** 들어오는 선분이 되고, 마커가 그
+/// 위를 지나며 위치가 한 번 튄다.
+///
+/// 그래서 축이 있으면 [from]은 폴리라인에 넣지 않는다. 축의 두 끝 중 [to]에서
+/// **먼** 쪽이 곧 탑승 지점이다. 축을 모르면 옮길 근거가 없으니 예전처럼 두
+/// 노드를 직선으로 잇는다.
+///
+/// [to]와 1m 안으로 겹치는 축 끝은 버린다 — 남기면 그 구간 진행률이 0으로 나뉜다.
+List<LatLng> escalatorGlidePoints({
+  required LatLng from,
+  required LatLng to,
+  (LatLng, LatLng)? axis,
+}) {
+  if (axis == null) return [from, to];
+  const distance = Distance();
+  final (a, b) = axis;
+  final (far, near) = distance(a, to) >= distance(b, to) ? (a, b) : (b, a);
+  // 축 전체가 하차 노드에 겹쳐 있으면(도형이 뭉개진 층) 축으로 옮길 것이 없다.
+  if (distance(far, to) < 1.0) return [from, to];
+  return [far, if (distance(near, to) >= 1.0) near, to];
+}
+
+/// 활강 폴리라인에서 뽑은 하차 방향.
+///
+/// 폴리라인이 이미 축에 정렬돼 있으므로 끝 구간이 곧 내리는 방향이다. 마지막
+/// 구간이 [escalatorExitBearingMinSeparationM]보다 짧으면(도면이 하차 노드를 축
+/// 끝에 거의 겹쳐 찍는다) 한 점씩 거슬러 올라가 축 전체를 본다. 그래도 못 채우면
+/// null — 호출부는 카메라를 안 돌린다.
+double? escalatorGlideExitBearingDeg(List<LatLng> points) {
+  for (var i = points.length - 2; i >= 0; i--) {
+    final bearing = escalatorExitBearingDeg(
+      boarding: points[i],
+      arrival: points.last,
+    );
+    if (bearing != null) return bearing;
+  }
+  return null;
+}

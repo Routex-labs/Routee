@@ -49,11 +49,15 @@ void main() {
   final originalPoiRepository = outdoorPoiRepository;
   late _FakeOutdoorPoiRepository fakePoiRepository;
 
-  setUp(() {
+  setUp(() async {
     buildingRepository = MockBuildingRepository();
     destinationRepository = MockDestinationRepository(buildingRepository);
     fakePoiRepository = _FakeOutdoorPoiRepository([_starbucks]);
     outdoorPoiRepository = fakePoiRepository;
+    // **에셋을 여기서 미리 읽어 둔다.** 목업 건물 저장소는 첫 호출에서
+    // `rootBundle`을 타는데, 그 I/O는 위젯 테스트의 가짜 시계 안에서 끝나지
+    // 않는다 — 미리 캐시를 채워 두면 테스트 본문에서는 메모리에서 답한다.
+    await buildingRepository.getAllBuildings();
   });
 
   tearDown(() {
@@ -66,6 +70,7 @@ void main() {
     WidgetTester tester, {
     required String query,
     LatLng? center,
+    bool indoorContextActive = false,
     ValueChanged<OutdoorPoi>? onPoiPicked,
   }) async {
     await tester.pumpWidget(
@@ -78,9 +83,9 @@ void main() {
             onBuildingPicked: (_) {},
             onQueryPicked: (_) {},
             onSuggestionPicked: (_) {},
-            // 바깥을 찾는 상황이므로 실내 컨텍스트는 꺼 둔다. 이 값이 참이면
-            // 온디바이스 자동완성이 목록을 대신 채운다(SearchPanel 주석).
-            indoorContextActive: false,
+            // **이 값 하나가 결과의 출처를 가른다.** 거짓이면 TMAP만, 참이면
+            // 우리 도면만 뒤진다(SearchPanel 주석).
+            indoorContextActive: indoorContextActive,
             outdoorSearchCenter: center,
             onOutdoorPoiPicked: onPoiPicked ?? (_) {},
           ),
@@ -89,23 +94,42 @@ void main() {
     );
     // 경량 검색 디바운스(300ms) + 의미 검색 대기(400ms)를 모두 지난다.
     await tester.pump(const Duration(milliseconds: 800));
-    await tester.pump();
+    // **한 번으로는 모자란다.** 실외 경로는 TMAP 응답과 건물 목록(에셋 로드)을
+    // 나란히 기다렸다가 한 번에 확정하므로, 그 사이에 마이크로태스크 몇 턴이
+    // 낀다. 프레임을 몇 번 더 돌려 두 응답이 다 도착한 뒤를 본다.
+    await tester.pumpAndSettle();
   }
 
-  testWidgets('건물 안에 없어도 밖에서 찾은 장소를 보여준다', (tester) async {
+  // 이 파일이 지키는 규칙 한 줄: **실외에서는 실외 결과만, 그것도 접지 않고.**
+  // 예전에는 밖에서 검색해도 우리 도면을 먼저 뒤지고, 정작 주변 장소는
+  // 「건물 밖 주변 N곳 보기」 버튼 뒤에 접혀 있었다 — 밖에 선 사람은 6층 매장
+  // 한 줄과 버튼 하나를 답으로 받았다. 근거는 `search-result-list-ux.md` Y절.
+  testWidgets('실외에서는 주변 장소를 접지 않고 바로 나열한다', (tester) async {
     await pumpPanel(
       tester,
       query: '스타벅스',
       center: const LatLng(37.5260, 126.9270),
     );
 
-    // 실내 검색이 빈손이어도 "찾지 못했어요"로 끝나지 않는다 — 바깥에 답이 있다.
-    expect(find.textContaining('찾지 못했어요'), findsNothing);
-    expect(find.text('건물 밖 주변 장소'), findsOneWidget);
     expect(find.textContaining('스타벅스 여의도점'), findsOneWidget);
     // 층 대신 거리·주소로 어느 지점인지 가른다.
     expect(find.textContaining('약 240m'), findsOneWidget);
     expect(find.textContaining('국제금융로 10'), findsOneWidget);
+    // 펼쳐 보라고 묻는 줄은 이제 없다.
+    expect(find.byKey(const Key('show-outdoor')), findsNothing);
+    expect(find.textContaining('보기'), findsNothing);
+    expect(find.textContaining('찾지 못했어요'), findsNothing);
+  });
+
+  testWidgets('실외 목록은 출처(TMAP)와 개수를 머리말에 밝힌다', (tester) async {
+    await pumpPanel(
+      tester,
+      query: '스타벅스',
+      center: const LatLng(37.5260, 126.9270),
+    );
+
+    expect(find.text('주변 장소 1곳'), findsOneWidget);
+    expect(find.text('TMAP'), findsOneWidget);
   });
 
   testWidgets('바깥 장소를 누르면 상위에 그 장소를 넘긴다', (tester) async {
@@ -123,11 +147,107 @@ void main() {
     expect(picked?.name, '스타벅스 여의도점');
   });
 
-  testWidgets('기준점이 없으면(실내 도면을 보는 중) 바깥 검색을 하지 않는다', (tester) async {
-    await pumpPanel(tester, query: '스타벅스', center: null);
+  // **스크린샷으로 들어온 문제 그 자체.** 여의도 한복판에서 "강의실"을 쳤는데
+  // 우리 도면의 `강의실 101 · 1F`가 첫 줄에 섰다 — 밖에 선 사람에게 건물 안
+  // 1층 강의실은 답이 아니다.
+  testWidgets('실외에서는 우리 도면 매장이 한 줄도 서지 않는다', (tester) async {
+    await pumpPanel(
+      tester,
+      query: '강의실',
+      center: const LatLng(37.5260, 126.9270),
+    );
+
+    expect(find.textContaining('강의실 101'), findsNothing);
+    expect(find.textContaining('강의실 201'), findsNothing);
+    // 대신 주변 장소가 그 자리에 선다.
+    expect(find.text('TMAP'), findsOneWidget);
+  });
+
+  testWidgets('실내에서는 우리 도면 매장이 선다', (tester) async {
+    await pumpPanel(
+      tester,
+      query: '강의실',
+      center: const LatLng(37.5260, 126.9270),
+      indoorContextActive: true,
+    );
+
+    expect(find.textContaining('강의실 101'), findsOneWidget);
+    expect(fakePoiRepository.callCount, 0);
+  });
+
+  // 짝이 되는 방향. 실내에서 TMAP을 부르면 "화장실"에 길 건너 편의점이 섞인다.
+  testWidgets('실내에서는 바깥 검색을 아예 하지 않는다', (tester) async {
+    await pumpPanel(
+      tester,
+      query: '스타벅스',
+      center: const LatLng(37.5260, 126.9270),
+      indoorContextActive: true,
+    );
 
     expect(fakePoiRepository.callCount, 0);
-    expect(find.text('건물 밖 주변 장소'), findsNothing);
+    expect(find.textContaining('스타벅스 여의도점'), findsNothing);
+    expect(find.text('TMAP'), findsNothing);
+  });
+
+  // **나갔다는 사실이 목록에 반영되는가.** GPS 판정·건물 밖 탭은 검색 패널이
+  // 열려 있는 동안에도 실내/실외를 뒤집는데, 그때 재검색을 안 하면 밖으로 나온
+  // 화면에 방금 전 실내 결과가 그대로 남는다 — "나간 걸 앱이 모른다"로 보인다.
+  testWidgets('검색 중 건물을 나가면 그 자리에서 실외 결과로 갈아탄다', (tester) async {
+    await pumpPanel(
+      tester,
+      query: '강의실',
+      center: const LatLng(37.5260, 126.9270),
+      indoorContextActive: true,
+    );
+    expect(
+      find.textContaining('강의실 101'),
+      findsOneWidget,
+      reason: '테스트 전제(실내에서 우리 매장이 뜸)가 성립하지 않았다',
+    );
+
+    // 같은 검색어 그대로 실외로 나간다.
+    await pumpPanel(
+      tester,
+      query: '강의실',
+      center: const LatLng(37.5260, 126.9270),
+    );
+
+    expect(find.textContaining('강의실 101'), findsNothing);
+    expect(find.text('TMAP'), findsOneWidget);
+    expect(fakePoiRepository.callCount, 1);
+  });
+
+  testWidgets('검색 중 건물에 들어가면 그 자리에서 실내 결과로 갈아탄다', (tester) async {
+    await pumpPanel(
+      tester,
+      query: '강의실',
+      center: const LatLng(37.5260, 126.9270),
+    );
+    expect(
+      find.text('TMAP'),
+      findsOneWidget,
+      reason: '테스트 전제(실외에서 주변 장소가 뜸)가 성립하지 않았다',
+    );
+
+    await pumpPanel(
+      tester,
+      query: '강의실',
+      center: const LatLng(37.5260, 126.9270),
+      indoorContextActive: true,
+    );
+
+    expect(find.textContaining('강의실 101'), findsOneWidget);
+    expect(find.text('TMAP'), findsNothing);
+  });
+
+  testWidgets('기준점이 없으면 바깥 검색을 하지 않고 결론까지 낸다', (tester) async {
+    await pumpPanel(tester, query: '없는말', center: null);
+
+    expect(fakePoiRepository.callCount, 0);
+    expect(find.text('TMAP'), findsNothing);
+    // **스피너로 끝나면 안 된다.** 실외에서는 TMAP이 유일한 출처라, 못 부른
+    // 것도 결론으로 옮겨 줘야 사용자가 다음 행동을 정할 수 있다.
+    expect(find.textContaining('찾지 못했어요'), findsOneWidget);
   });
 
   testWidgets('검색 기준점을 그대로 리포지토리에 넘긴다', (tester) async {

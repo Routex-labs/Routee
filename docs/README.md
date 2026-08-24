@@ -17,47 +17,18 @@
 | [로컬 개발 가이드](guide/local-development-guide.md) | 플랫폼별 실행, API 주소, 문제 해결 |
 | [GCP 배포](guide/gcp-instance.md) | Cloud Run 배포, `main` push 자동 배포 |
 
-## 백엔드 구조
+## 백엔드 — 이 저장소에 없다
 
-| 문서 | 내용 |
-|---|---|
-| [FastAPI 요청 흐름](backend/fastapi-request-flow.md) | Router → Query → SQLite 구조 |
-| [더현대 B2 현장 조사](backend/thehyundai-b2f-field-survey.md) | B2 층 실측 기록 |
+서버는 Spring Boot로 이식돼 [Routex-labs/backend](https://github.com/Routex-labs/backend)에 있고,
+엔드포인트 계약의 단일 출처는 그 저장소의 `docs/api/contract.md`다.
 
-## 검색·탐색 (native)
+걷어낸 FastAPI 서버와 그 문서 43건, **원본 도면 데이터와 시드·변환 파이프라인**은
+[Routex-labs/fastapi](https://github.com/Routex-labs/fastapi)에 히스토리째 남아 있다. B2 현장 실측,
+매장 상세 조사, facet 검수(P2 슈즈 · P3 패션) 같은 실측 기록도 그쪽 `docs/`에 있다 — 설명하는
+코드와 데이터 옆에 두는 편이 링크가 안 죽는다.
 
-| 문서 | 내용 |
-|---|---|
-| [대화형 매장 탐색·추천 설계](backend/native/conversational-discovery.md) | 검색 facet 원본, 복수 추천 계약, 질문·선택 흐름 |
-| [질의 파이프라인](backend/native/query.md) | `/query` 계약과 매칭 단계 |
-| [FAISS](backend/native/FAISS.md) | 임베딩 색인·의미 검색 |
-| [KIWI](backend/native/KIWI.md) | 형태소 분석·정규화 |
-| [facet LLM 태깅](backend/native/facet-llm-tagging.md) | 태깅 파이프라인과 판단 기준 |
-| [facet 리뷰 P2 — 신발](backend/native/facet-review-p2-shoes.md) | 사람 검수 기록 |
-| [facet 리뷰 P3 — 패션](backend/native/facet-review-p3-fashion.md) | 사람 검수 기록 |
-| [검색 평가셋](backend/native/search-eval-set.md) | 기준선과 평가 방법 |
-| [검색 QA 수정 라운드](backend/native/search-qa-fix-wave.md) | 결함 목록과 처리 |
-| [클라이언트 인계](backend/native/client-handoff.md) | 검색 계약의 클라이언트 쪽 접점 |
-
-## 길찾기 (navigate)
-
-| 문서 | 내용 |
-|---|---|
-| [수직 전이 경로](backend/navigate/vertical-transfer-routing.md) | 층간 이동 간선과 정책 |
-| [에스컬레이터 폴리곤 보정](backend/navigate/escalator-polygon-backfill.md) | 폴리곤 누락분 채우기 |
-| [클라이언트 인계](backend/navigate/client-handoff.md) | 그래프 계약의 클라이언트 쪽 접점 |
-
-## 매장 상세 (place-detail)
-
-| 문서 | 내용 |
-|---|---|
-| [매장 상세 인터페이스](backend/place-detail/place-detail-interface.md) | 계약·실패 조건·화면 명세 (설계 단일 출처) |
-| [Wave 실행 계획](backend/place-detail/wave-plan.md) | 작업 분해와 **진행 상태 표** |
-| [Wave 0 커버리지 조사](backend/place-detail/wave0-coverage.md) | 사전 조사와 당시 결정 |
-| [스타벅스 리저브 파일럿](backend/place-detail/starbucks-detail-pilot.md) | 파일럿 데이터·출처 |
-| [블루보틀 여의도](backend/place-detail/bluebottle-yeouido-detail.md) | 두 번째 매장 조사 |
-| [더현대 시그니처 공간](backend/place-detail/thehyundai-landmarks-detail.md) | 공간 단위 커버리지 |
-| [다음 작업 순서](backend/place-detail/next-steps.md) | 후속 항목과 참고 화면 |
+**이 저장소의 문서에서 `app/` · `scripts/` · `resources/` · `tests/`로 시작하는 경로는 그 저장소
+기준이다.** 경로마다 저장소 이름을 붙이지 않고 여기 한 줄로 적는다.
 
 ## 클라이언트 UI
 
@@ -83,19 +54,19 @@
 
 ## 리팩터 과제
 
-[개요와 순서는 refactor/README.md](backend/refactor/README.md)에 있다.
+[개요와 순서는 refactor/README.md](https://github.com/Routex-labs/fastapi/blob/main/docs/refactor/README.md)에 있다.
 
 | 문서 | 내용 |
 |---|---|
-| [01 백엔드 테스트 게이트](backend/refactor/01-backend-test-gate.md) | CI 게이트 |
-| [02 수직 전이 계약](backend/refactor/02-vertical-transfer-contract.md) | 층간 이동 계약 정리 |
-| [03 그래프 무결성 제약](backend/refactor/03-graph-integrity-constraints.md) | 시드 단계 검증 |
-| [04 수직 간선 생성 결정성](backend/refactor/04-vertical-edge-generation-determinism.md) | 재현 가능한 간선 생성 |
-| [05 매장 입구 스냅 한계](backend/refactor/05-store-entrance-snap-limit.md) | 스냅 거리 초과 처리 |
-| [06 타일 캐시 상한](backend/refactor/06-tile-cache-bounded.md) | 메모리 상한 |
-| [07 운영 — Docker·시드 정리](backend/refactor/07-ops-docker-seed-cleanup.md) | 배포 이미지·시드 절차 |
-| [08 의존성·모델 공급망](backend/refactor/08-dependency-model-supply-chain.md) | 모델 파일 공급 경로 |
-| [09 부하와 스케일링](backend/refactor/09-load-and-scaling.md) | 부하 특성 |
+| [01 백엔드 테스트 게이트](https://github.com/Routex-labs/fastapi/blob/main/docs/refactor/01-backend-test-gate.md) | CI 게이트 |
+| [02 수직 전이 계약](https://github.com/Routex-labs/fastapi/blob/main/docs/refactor/02-vertical-transfer-contract.md) | 층간 이동 계약 정리 |
+| [03 그래프 무결성 제약](https://github.com/Routex-labs/fastapi/blob/main/docs/refactor/03-graph-integrity-constraints.md) | 시드 단계 검증 |
+| [04 수직 간선 생성 결정성](https://github.com/Routex-labs/fastapi/blob/main/docs/refactor/04-vertical-edge-generation-determinism.md) | 재현 가능한 간선 생성 |
+| [05 매장 입구 스냅 한계](https://github.com/Routex-labs/fastapi/blob/main/docs/refactor/05-store-entrance-snap-limit.md) | 스냅 거리 초과 처리 |
+| [06 타일 캐시 상한](https://github.com/Routex-labs/fastapi/blob/main/docs/refactor/06-tile-cache-bounded.md) | 메모리 상한 |
+| [07 운영 — Docker·시드 정리](https://github.com/Routex-labs/fastapi/blob/main/docs/refactor/07-ops-docker-seed-cleanup.md) | 배포 이미지·시드 절차 |
+| [08 의존성·모델 공급망](https://github.com/Routex-labs/fastapi/blob/main/docs/refactor/08-dependency-model-supply-chain.md) | 모델 파일 공급 경로 |
+| [09 부하와 스케일링](https://github.com/Routex-labs/fastapi/blob/main/docs/refactor/09-load-and-scaling.md) | 부하 특성 |
 
 ## PDR (실내 측위)
 

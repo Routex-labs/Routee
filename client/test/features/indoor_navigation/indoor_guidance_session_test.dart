@@ -847,6 +847,45 @@ void main() {
       expect(session.displayProgress!.remainingM, frozen);
     });
 
+    test('층이 바뀌어 고정이 풀려도 탑승 중이면 재탐색을 걸지 않는다', () {
+      // 조기 층 전환이 `setContext`의 floorChanged 갈래에서 clearBoardingHold를
+      // 부르면 `isPositionHeld`가 먼저 false가 된다. 그 뒤 리셋된 트래커의
+      // 위치로 이탈 증거가 쌓여도, 탑승 중이면 재탐색이 나가면 안 된다.
+      bool askedWhileWalkingOffRoute({required bool onEscalator}) {
+        final session = newSession()
+          ..attach(buildingId: 'b1')
+          ..setContext(floorId: '1F', graph: _branchGraph)
+          ..setAnchor(_anchor(eastM: 0))
+          ..setRouteSegment(_branchRoute)
+          // 층 전환이 부르는 것과 같은 경로다.
+          ..clearBoardingHold();
+        expect(session.isPositionHeld, isFalse);
+
+        var asked = false;
+        for (var steps = 0; steps <= 30; steps += 1) {
+          final result = session.onSnapshot(
+            _walkedNorthTurn(steps),
+            timestampMs: steps * 500,
+          );
+          final update = session.updateProgress(
+            result,
+            previewSteps: steps,
+            nowMs: steps * 500,
+            onEscalator: onEscalator,
+          );
+          asked = asked || update.shouldReroute;
+        }
+        return asked;
+      }
+
+      expect(
+        askedWhileWalkingOffRoute(onEscalator: false),
+        isTrue,
+        reason: '탑승 중이 아니면 같은 걸음이 재탐색을 건다',
+      );
+      expect(askedWhileWalkingOffRoute(onEscalator: true), isFalse);
+    });
+
     test('경로 위를 정상적으로 걸으면 재탐색을 걸지 않는다', () {
       final session = routedSession();
 

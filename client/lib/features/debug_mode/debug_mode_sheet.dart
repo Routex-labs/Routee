@@ -153,7 +153,86 @@ class _AdvancedDebugOptions extends StatelessWidget {
           value: controller.showMapMatchedPdrPath,
           onChanged: controller.setShowMapMatchedPdrPath,
         ),
+        const Divider(height: 20),
+        _HeadingOffsetKnob(controller: controller),
       ],
+    );
+  }
+}
+
+/// 실기기 앞에서 heading을 몇 도 더 돌릴지 맞추는 노브.
+///
+/// 자편각은 이미 상수로 들어가 있다(features/indoor_navigation/contract/
+/// pdr_anchor.dart). 여기서 돌리는 값은 **그 위에 얹는 나머지**다. 값을 바꾸면
+/// 지금 서 있는 anchor의 회전각이 바로 따라 돌아, 지도를 보며 맞출 수 있다.
+class _HeadingOffsetKnob extends StatelessWidget {
+  const _HeadingOffsetKnob({required this.controller});
+
+  final DebugModeController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<double>(
+      valueListenable: controller.headingOffsetDeg,
+      builder: (context, offset, _) {
+        final label = '${offset > 0 ? '+' : ''}${offset.toStringAsFixed(0)}°';
+        return Padding(
+          padding: const EdgeInsets.only(left: 8, right: 8, bottom: 4),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'heading 보정 노브',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  IconButton(
+                    key: const ValueKey('debug-heading-offset-minus'),
+                    tooltip: '1도 반시계',
+                    icon: const Icon(Icons.remove_circle_outline),
+                    onPressed: () =>
+                        unawaited(controller.setHeadingOffsetDeg(offset - 1)),
+                  ),
+                  SizedBox(
+                    width: 56,
+                    child: Text(
+                      label,
+                      key: const ValueKey('debug-heading-offset-value'),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                  IconButton(
+                    key: const ValueKey('debug-heading-offset-plus'),
+                    tooltip: '1도 시계',
+                    icon: const Icon(Icons.add_circle_outline),
+                    onPressed: () =>
+                        unawaited(controller.setHeadingOffsetDeg(offset + 1)),
+                  ),
+                ],
+              ),
+              Text(
+                '자편각 위에 더 얹는 각도(시계방향 +). 세션 JSON에 함께 남는다.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              Slider(
+                key: const ValueKey('debug-heading-offset-slider'),
+                min: -DebugModeController.headingOffsetLimitDeg,
+                max: DebugModeController.headingOffsetLimitDeg,
+                divisions: (DebugModeController.headingOffsetLimitDeg * 2)
+                    .round(),
+                value: offset,
+                label: label,
+                onChanged: (next) =>
+                    unawaited(controller.setHeadingOffsetDeg(next)),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

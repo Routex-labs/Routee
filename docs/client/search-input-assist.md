@@ -9,8 +9,8 @@
 - **입력이 끝난 뒤 사용자가 고르는 목록**(후보 행의 거리·정렬·개수 표기)은
   [검색 결과 목록 UX](search-result-list-ux.md)가 **O~R**로 이어받는다. 이 문서가 만든
   후보 목록이 사실상 결과 화면으로도 쓰인다는 사실이 그 문서의 출발점이다.
-- 매칭 파이프라인의 설계 근거는 [query.md](../backend/native/query.md) ·
-  [FAISS.md](../backend/native/FAISS.md) · [KIWI.md](../backend/native/KIWI.md)가 단일
+- 매칭 파이프라인의 설계 근거는 [query.md](https://github.com/Routex-labs/fastapi/blob/main/docs/native/query.md) ·
+  [FAISS.md](https://github.com/Routex-labs/fastapi/blob/main/docs/native/FAISS.md) · [KIWI.md](https://github.com/Routex-labs/fastapi/blob/main/docs/native/KIWI.md)가 단일
   출처다. 이 문서는 그 위에 무엇을 얹을지만 적는다.
 - 정상 동작보다 **실패 조건을 먼저** 적고, **무엇이 충족되면 맞다고 볼지**를 함께 적는다
   (AGENTS.md 규칙).
@@ -28,7 +28,7 @@ FAISS 임계값·인덱스 문서를 세 번 재평가했는데 총점이 움직
 | W9 (2026-08-01) | intent 2개 → 7개, 태깅 368건으로 확대 | 23/29 → **23/29** |
 
 유효 최하단(ATM 0.464)과 무의미 질의(`asdfqwerzxcv` 0.458)의 **마진 0.006도 세 번 내내
-불변**이다([FAISS.md 11-1](../backend/native/FAISS.md)). 세 번 손대서 안 움직였다는 건
+불변**이다([FAISS.md 11-1](https://github.com/Routex-labs/fastapi/blob/main/docs/native/FAISS.md)). 세 번 손대서 안 움직였다는 건
 "모델·임계값을 네 번째로 만져도 안 오른다"는 신호로 읽는다.
 
 **네이버·카카오가 잘 하는 건 모델이 아니다.** 두 가지다.
@@ -143,7 +143,7 @@ FAISS 임계값·인덱스 문서를 세 번 재평가했는데 총점이 움직
 
 B2 매장 이름 앞 20건을 대상으로, 이름의 앞 1·2·3글자를 차례로 넣어 그 매장이 후보
 목록에서 몇 위에 오는지 쟀다. 원본은 시드 리소스
-(`backend/resources/studio/thehyundai-seoul-dabeeo/stores_*.json`, 12개 층 1640건)이며,
+(`resources/studio/thehyundai-seoul-dabeeo/stores_*.json`(Routex-labs/fastapi), 12개 층 1640건)이며,
 `suggestStores()`를 그대로 호출했다.
 
 **20/20 통과.** 눈여겨볼 점 둘.
@@ -207,7 +207,7 @@ B2 매장 이름 앞 20건을 대상으로, 이름의 앞 1·2·3글자를 차�
 ### 문제
 
 `샤낼` → 샤넬이 안 된다. 이건 **의미 문제가 아니라 표기 문제**라 임베딩이 원리적으로
-못 잡는다. [search-qa-fix-wave.md](../backend/native/search-qa-fix-wave.md) Wave 4에
+못 잡는다. [search-qa-fix-wave.md](https://github.com/Routex-labs/fastapi/blob/main/docs/native/search-qa-fix-wave.md) Wave 4에
 "`샤낼` 원인 추적 — Opus, 경유 지점 미확인 상태의 탐정 작업"으로 남아 있는데, 추적할
 것도 없다. **교정 기능이 아예 없다.**
 
@@ -351,7 +351,7 @@ Cloud Run에 아직 없어 배포 백엔드로는 자동완성이 뜨지 않는�
 
 서버 경량 매칭은 `name LIKE %apc%`라 구두점이 든 `A.P.C.`를 못 잡고 `no_match`를 준다.
 그러면 2차로 넘어가고, 임계값을 겨우 넘긴 결과가 자신 있게 오답을 낸다
-([FAISS.md 11-1](../backend/native/FAISS.md)의 "자신 있게 틀리는" 사례와 같은 종류다).
+([FAISS.md 11-1](https://github.com/Routex-labs/fastapi/blob/main/docs/native/FAISS.md)의 "자신 있게 틀리는" 사례와 같은 종류다).
 
 **온디바이스 이름 후보는 임베딩 결과에 덮이지 않는다.** FAISS.md 11절의 역할 분리
 ("정확한 이름은 1차가 확정하고 임베딩은 말로 푸는 질의만 담당")를 그대로 따르는
@@ -469,7 +469,7 @@ A.P.C. 불변("임베딩은 이름 후보를 덮지 못한다")은 글자 그대
 ### 문제
 
 의미 검색을 엔터에만 붙였더니 둘이 깨졌다
-([conversational-discovery.md](../backend/native/conversational-discovery.md) 1-2).
+([conversational-discovery.md](https://github.com/Routex-labs/fastapi/blob/main/docs/native/conversational-discovery.md) 1-2).
 
 - 한글 IME에서 첫 엔터가 조합 확정에 쓰이면 `onSubmitted`가 오지 않아 `submitTick`이
   오르지 않는다. 의미 검색이 시작조차 안 한다.
@@ -524,7 +524,7 @@ A.P.C. 불변("임베딩은 이름 후보를 덮지 못한다")은 글자 그대
 ### 문제
 
 FAISS 재현율이 안 오르는 근본 원인이다. ATM(0.464)·타임파리(0.453)가 임계값을 못 넘는
-이유가 [FAISS.md 11-1](../backend/native/FAISS.md)에 그대로 적혀 있다 — **facet도 설명도
+이유가 [FAISS.md 11-1](https://github.com/Routex-labs/fastapi/blob/main/docs/native/FAISS.md)에 그대로 적혀 있다 — **facet도 설명도
 없는 매장**이라 인덱스 문서가 상호 하나뿐이다.
 
 `store_details` 스키마에는 이미 `summary`(60자 소개)·`tags` 필드가 있는데,
@@ -546,8 +546,8 @@ FAISS 재현율이 안 오르는 근본 원인이다. ATM(0.464)·타임파리(0
 |---|---|
 | **J. 최근 검색어 / idle 화면 채우기** | [naver-map-ui-ux-analysis.md](naver-map-ui-ux-analysis.md) J |
 | 결과 행 정보 구조·거리 표시 (A) | 같은 문서 A (완료) |
-| clarify 흐름·facet 검수 | [conversational-discovery.md](../backend/native/conversational-discovery.md) |
-| 임계값·인덱스 문서 | [FAISS.md](../backend/native/FAISS.md) |
+| clarify 흐름·facet 검수 | [conversational-discovery.md](https://github.com/Routex-labs/fastapi/blob/main/docs/native/conversational-discovery.md) |
+| 임계값·인덱스 문서 | [FAISS.md](https://github.com/Routex-labs/fastapi/blob/main/docs/native/FAISS.md) |
 
 K는 J와 같은 자리(입력 중·idle)를 쓴다. **둘을 함께 넣어야 화면이 완성된다** — idle에는
 최근 검색어, 입력 중에는 자동완성.

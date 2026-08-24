@@ -7,11 +7,12 @@ import 'package:navigation_client/domain/category/category_taxonomy.dart';
 
 void main() {
   group('subcategoryOptionsFor', () {
-    test('경로 안내용 시설(주차·에스컬레이터·엘리베이터)은 pill에서 빠진다', () {
+    test('주차·교통과 시설 시트가 맡은 셋은 pill에서 빠진다', () {
       final options = subcategoryOptionsFor('편의시설', [
         store('편의시설', '주차'),
         store('편의시설', 'escalator'),
         store('편의시설', 'elevator'),
+        store('편의시설', 'restroom'),
         store('편의시설', '교통'),
         store('편의시설', '락커'),
       ]);
@@ -21,12 +22,12 @@ void main() {
 
     test('영어 원본값은 한글 label로 보여주되 value는 원본을 유지한다', () {
       final options = subcategoryOptionsFor('편의시설', [
-        store('편의시설', 'restroom'),
+        store('편의시설', 'facility'),
       ]);
 
       expect(options, hasLength(1));
-      expect(options.single.value, 'restroom');
-      expect(options.single.label, '화장실');
+      expect(options.single.value, 'facility');
+      expect(options.single.label, '생활편의');
     });
 
     test('다른 대분류의 소분류는 섞이지 않는다', () {
@@ -67,15 +68,15 @@ void main() {
     });
 
     test('정렬은 원본값이 아니라 표시 label 기준이다', () {
-      final options = subcategoryOptionsFor('편의시설', [
-        store('편의시설', 'restroom'), // 화장실
-        store('편의시설', 'facility'), // 생활편의
-        store('편의시설', '락커'),
+      final options = subcategoryOptionsFor('식음료', [
+        store('식음료', 'restaurant'), // 레스토랑
+        store('식음료', 'cafe'), // 카페·베이커리
+        store('식음료', '델리'),
       ]);
 
-      // 원본값 순이면 facility·restroom·락커지만, label 가나다 순은
-      // 락커 → 생활편의 → 화장실이다.
-      expect(options.map((o) => o.label), ['락커', '생활편의', '화장실']);
+      // 원본값 순이면 cafe·restaurant·델리지만, label 가나다 순은
+      // 델리 → 레스토랑 → 카페·베이커리다.
+      expect(options.map((o) => o.label), ['델리', '레스토랑', '카페·베이커리']);
     });
 
     test('전체 옵션은 붙이지 않는다', () {
@@ -121,20 +122,25 @@ void main() {
   });
 
   group('kHiddenSubcategoryValues', () {
-    test('경로 안내용 시설의 영어·한글 표기를 모두 담는다', () {
+    test('시설 시트가 맡은 셋의 영어·한글 표기를 모두 담는다', () {
+      // 한 표기만 넣으면 배포 시차로 다른 표기가 들어온 날 그 시설이 카테고리
+      // 목록에 되살아나, 같은 답에 이르는 길이 둘이 된다.
       expect(
         kHiddenSubcategoryValues,
-        containsAll(<String>['주차', 'escalator', 'elevator']),
+        containsAll(<String>['escalator', 'elevator', 'restroom']),
       );
       expect(
         kHiddenSubcategoryValues,
-        containsAll(<String>['에스컬레이터', '엘리베이터', '교통']),
+        containsAll(<String>['에스컬레이터', '엘리베이터', '화장실']),
       );
     });
 
-    test('둘러보기 가치가 있는 화장실·편의시설은 숨기지 않는다', () {
-      expect(kHiddenSubcategoryValues, isNot(contains('restroom')));
+    test('훑을 값이 있는 나머지는 그대로 둔다', () {
+      // 주차·교통은 훑을 값이 없어서, 화장실 셋은 문이 따로 생겨서 빠졌다.
+      // 그 두 기준 어느 쪽도 아닌 시설까지 쓸어 담으면 편의시설 칩이 빈다.
+      expect(kHiddenSubcategoryValues, containsAll(<String>['주차', '교통']));
       expect(kHiddenSubcategoryValues, isNot(contains('facility')));
+      expect(kHiddenSubcategoryValues, isNot(contains('락커')));
     });
   });
 }

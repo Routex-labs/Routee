@@ -8,6 +8,51 @@ import 'package:http/testing.dart';
 import 'package:navigation_client/repositories/building/http_building_repository.dart';
 
 void main() {
+  group('getBuildingEvents', () {
+    /// 서버가 주는 것은 **기간이라는 규칙뿐**이다. 오늘 열리는지는 화면이 기기
+    /// 로컬 날짜로 판정하므로, 저장소는 날짜로 좁히지 않은 통짜를 받아야 한다.
+    test('행사 경로를 그대로 부르고 응답을 통짜로 돌려준다', () async {
+      String? path;
+      final client = MockClient((request) async {
+        path = request.url.path;
+        return http.Response(
+          jsonEncode({
+            'captured_on': '2026-08-21',
+            'diaries': [
+              {'key': 'popup', 'title': 'WEEKLY POP-UP'},
+            ],
+            'events': [
+              {
+                'title': '이번 주 팝업',
+                'start': '2026-08-20',
+                'end': '2026-08-26',
+                'store_id': 'PO-icon',
+              },
+            ],
+          }),
+          200,
+          headers: {'content-type': 'application/json; charset=utf-8'},
+        );
+      });
+      final repository = HttpBuildingRepository(client: client);
+
+      final events = await repository.getBuildingEvents('thehyundai-seoul');
+
+      expect(path, endsWith('/buildings/thehyundai-seoul/events'));
+      expect(events?['captured_on'], '2026-08-21');
+      expect((events?['events'] as List).single['store_id'], 'PO-icon');
+    });
+
+    /// 빈 목록으로 떨어뜨리면 "행사가 없는 건물"과 "아직 안 모은 건물"이 같은
+    /// 화면이 된다. 그 구분은 null이 진다.
+    test('모아 둔 것이 없는 건물은 빈 목록이 아니라 null이다', () async {
+      final client = MockClient((request) async => http.Response('', 404));
+      final repository = HttpBuildingRepository(client: client);
+
+      expect(await repository.getBuildingEvents('no-such-building'), isNull);
+    });
+  });
+
   group('getBuilding', () {
     test('caches the response so a second call skips the network', () async {
       var requestCount = 0;

@@ -283,6 +283,16 @@ class EscalatorTransitionDetector {
   }) {
     final approachDistance = (positionM - routeEndM).distance;
     if (approachDistance > config.routeApproachArmRadiusM) {
+      // 허가 반경 밖이면 접근 근거를 버린다. 배너까지 떠 있었다면 함께 접는다 —
+      // 안 접으면 탑승점을 지나쳐 걸어간 사용자에게 배너가 타임아웃(40초)까지
+      // 남는다.
+      if (_phase == EscalatorPhase.boardingDetected) {
+        _setPhase(
+          EscalatorPhase.cancelled,
+          atMs: timestampMs,
+          reason: 'movedAwayFromBoarding',
+        );
+      }
       _resetApproach();
       return;
     }
@@ -332,20 +342,17 @@ class EscalatorTransitionDetector {
       if (previous != null && approachDistanceM < previous - 0.2) {
         _approachDecreaseUpdates++;
       } else if (previous != null && approachDistanceM > previous + 0.5) {
-        // 다시 멀어졌다. 근거를 처음부터 다시 모은다.
+        // 다시 멀어졌다. **배너를 띄울** 근거를 처음부터 다시 모은다. 이미 뜬
+        // 배너를 접는 것은 아래 [_foldBoardingIfAbandoned]가 따로 판단한다.
         _approachDecreaseUpdates = 0;
-        if (_phase == EscalatorPhase.boardingDetected) {
-          _setPhase(
-            EscalatorPhase.cancelled,
-            atMs: timestampMs,
-            reason: 'movedAwayFromBoarding',
-          );
-        }
       }
       _lastApproachDistanceM = approachDistanceM;
       _lastApproachSteps = steps;
     }
-    if (_phase == EscalatorPhase.boardingDetected) return;
+    if (_phase == EscalatorPhase.boardingDetected) {
+      _foldBoardingIfAbandoned(approachDistanceM, timestampMs);
+      return;
+    }
     if (approachDistanceM > config.boardingApproachRadiusM) return;
     if (_approachDecreaseUpdates < config.boardingApproachUpdates) return;
     final toFloor = boarding.name.otherFloorLabel;
@@ -359,6 +366,25 @@ class EscalatorTransitionDetector {
       direction: boarding.name.direction,
       boardingNodeId: boarding.id,
       expectedArrivalNodeId: expectedArrivalNodeId,
+    );
+  }
+
+  /// 탑승점에서 **분명히 떠났을 때만** 배너를 접는다.
+  ///
+  /// 예전에는 한 걸음 사이 거리가 0.5m만 늘어도 접었다. 그런데 **탑승점을 지나
+  /// 에스컬레이터에 올라서는 동작이 정확히 그 모양이다** — 노드를 통과하는 순간부터
+  /// 거리는 계속 늘어난다. 그래서 노드 앞까지 가서 실제로 탄 사람에게서 배너가
+  /// 풀렸고, 멈춰야 할 걸음이 다시 흘러 마커가 복도를 걸어갔다.
+  ///
+  /// 기압이 이미 수직 이동을 말하는 중이면 거리로는 접지 않는다 — 그때 거리가
+  /// 늘어나는 것은 탑승의 증거지 이탈의 증거가 아니다.
+  void _foldBoardingIfAbandoned(double approachDistanceM, int atMs) {
+    if (_verticalMotionObserved) return;
+    if (approachDistanceM <= config.boardingAbandonRadiusM) return;
+    _setPhase(
+      EscalatorPhase.cancelled,
+      atMs: atMs,
+      reason: 'movedAwayFromBoarding',
     );
   }
 

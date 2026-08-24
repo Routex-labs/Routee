@@ -1,0 +1,639 @@
+<title>더현대 실측 세 바퀴</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+<style>
+  :root {
+    --paper:      #F0F3F2;
+    --paper-2:    #FFFFFF;
+    --paper-3:    #E4E9E8;
+    --ink:        #12181C;
+    --ink-2:      #3A484F;
+    --muted:      #5E6C74;
+    --rule:       #CBD4D3;
+    --rule-soft:  #DDE4E3;
+    --accent:     #1976D2;
+    --accent-ink: #10508F;
+    --accent-wash:#E3EEF9;
+    --field:      #B0691C;
+    --field-wash: #F6EADA;
+    --alarm:      #A8382A;
+    --alarm-wash: #F7E5E2;
+    --shadow:     0 1px 2px rgba(18,24,28,.06), 0 8px 24px -16px rgba(18,24,28,.35);
+
+    --sans: "IBM Plex Sans KR", -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+
+    --measure: 68ch;
+    --gutter: 4.5rem;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:      #0E1417;
+      --paper-2:    #161E22;
+      --paper-3:    #1D272C;
+      --ink:        #E6ECEB;
+      --ink-2:      #B7C4C6;
+      --muted:      #8A9AA0;
+      --rule:       #2B383E;
+      --rule-soft:  #222E33;
+      --accent:     #59A5F0;
+      --accent-ink: #9CCBF7;
+      --accent-wash:#122536;
+      --field:      #DBA05A;
+      --field-wash: #2A2116;
+      --alarm:      #E8887A;
+      --alarm-wash: #2E1B18;
+      --shadow:     0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.8);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:      #0E1417;
+    --paper-2:    #161E22;
+    --paper-3:    #1D272C;
+    --ink:        #E6ECEB;
+    --ink-2:      #B7C4C6;
+    --muted:      #8A9AA0;
+    --rule:       #2B383E;
+    --rule-soft:  #222E33;
+    --accent:     #59A5F0;
+    --accent-ink: #9CCBF7;
+    --accent-wash:#122536;
+    --field:      #DBA05A;
+    --field-wash: #2A2116;
+    --alarm:      #E8887A;
+    --alarm-wash: #2E1B18;
+    --shadow:     0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.8);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.72;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: calc(var(--measure) + var(--gutter) + 4rem);
+    margin: 0 auto;
+    padding: 0 1.5rem 6rem;
+  }
+
+  /* ── 도면 격자: local_m 좌표계를 흉내 낸 배경. 히어로에만 쓴다 ── */
+  .hero {
+    position: relative;
+    margin: 0 -1.5rem 3.5rem;
+    padding: 4.5rem 1.5rem 2.75rem;
+    border-bottom: 1px solid var(--rule);
+    overflow: hidden;
+  }
+  .hero::before {
+    content: "";
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(to right, var(--rule-soft) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--rule-soft) 1px, transparent 1px);
+    background-size: 28px 28px;
+    -webkit-mask-image: radial-gradient(120% 90% at 78% 12%, #000 0%, transparent 70%);
+            mask-image: radial-gradient(120% 90% at 78% 12%, #000 0%, transparent 70%);
+    pointer-events: none;
+  }
+  .hero > * { position: relative; }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: .75rem;
+    font-weight: 500;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 1rem;
+  }
+
+  h1 {
+    font-family: var(--mono);
+    font-weight: 600;
+    font-size: clamp(2.1rem, 6.5vw, 3.1rem);
+    line-height: 1.12;
+    letter-spacing: -.03em;
+    text-wrap: balance;
+    margin: 0 0 1rem;
+  }
+  .lede {
+    max-width: var(--measure);
+    font-size: 1.075rem;
+    color: var(--ink-2);
+    margin: 0;
+  }
+
+  /* ── 계기판 ── */
+  .dials {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    margin: 2.5rem 0 0;
+  }
+  .dial { background: var(--paper); padding: .9rem 1rem 1rem; }
+  .dial b {
+    display: block;
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 1.5rem;
+    font-weight: 600;
+    letter-spacing: -.02em;
+    line-height: 1.2;
+  }
+  .dial span {
+    display: block;
+    font-size: .78rem;
+    color: var(--muted);
+    letter-spacing: .01em;
+  }
+
+  h2 {
+    font-family: var(--mono);
+    font-size: 1.3rem;
+    font-weight: 600;
+    letter-spacing: -.02em;
+    margin: 4rem 0 .4rem;
+    padding-bottom: .6rem;
+    border-bottom: 2px solid var(--ink);
+    text-wrap: balance;
+  }
+  h2 + .section-note {
+    margin: 0 0 2rem;
+    max-width: var(--measure);
+    color: var(--muted);
+    font-size: .93rem;
+  }
+
+  h3 {
+    font-size: 1.02rem;
+    font-weight: 700;
+    letter-spacing: -.01em;
+    margin: 0 0 .35rem;
+    text-wrap: balance;
+  }
+
+  p { max-width: var(--measure); margin: 0 0 1rem; }
+  a { color: var(--accent-ink); text-underline-offset: .2em; text-decoration-thickness: 1px; }
+  a:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+    border-radius: 2px;
+  }
+
+  code, .m {
+    font-family: var(--mono);
+    font-size: .875em;
+    font-variant-numeric: tabular-nums;
+  }
+  code { color: var(--ink-2); word-break: break-word; }
+
+  /* 실측값 칩 — 계기 판독처럼 읽히게 */
+  .v {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: .84em;
+    font-weight: 500;
+    white-space: nowrap;
+    padding: .1em .42em;
+    border-radius: 2px;
+    background: var(--field-wash);
+    color: var(--field);
+    border: 1px solid color-mix(in srgb, var(--field) 26%, transparent);
+  }
+
+  /* ── 라운드 ── */
+  .round { display: grid; grid-template-columns: var(--gutter) minmax(0, 1fr); }
+  .round-mark {
+    font-family: var(--mono);
+    font-size: .72rem;
+    font-weight: 600;
+    letter-spacing: .1em;
+    color: var(--muted);
+    padding-top: .35rem;
+    border-right: 1px solid var(--rule);
+    padding-right: 1rem;
+    text-align: right;
+  }
+  .round-body { padding-left: 1.75rem; }
+  @media (max-width: 640px) {
+    .round { grid-template-columns: 1fr; }
+    .round-mark {
+      border-right: 0;
+      border-left: 3px solid var(--accent);
+      text-align: left;
+      padding: 0 0 0 .75rem;
+      margin-bottom: .75rem;
+    }
+    .round-body { padding-left: 0; }
+  }
+
+  .issue {
+    padding: 1.4rem 0;
+    border-top: 1px solid var(--rule-soft);
+  }
+  .issue:first-child { border-top: 0; padding-top: 0; }
+
+  .tag {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: .68rem;
+    font-weight: 600;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    padding: .18em .5em;
+    border-radius: 2px;
+    vertical-align: .12em;
+    margin-left: .5rem;
+  }
+  .tag.fixed  { background: var(--accent-wash); color: var(--accent-ink); }
+  .tag.open   { background: var(--alarm-wash);  color: var(--alarm); }
+  .tag.data   { background: var(--field-wash);  color: var(--field); }
+
+  dl.fix { margin: .8rem 0 0; max-width: var(--measure); }
+  dl.fix > div {
+    display: grid;
+    grid-template-columns: 4.25rem minmax(0, 1fr);
+    gap: 0 1rem;
+    padding: .3rem 0;
+  }
+  dl.fix dt {
+    font-family: var(--mono);
+    font-size: .74rem;
+    font-weight: 600;
+    letter-spacing: .06em;
+    color: var(--muted);
+    padding-top: .38em;
+  }
+  dl.fix dd { margin: 0; color: var(--ink-2); }
+  dl.fix dd strong { color: var(--ink); font-weight: 600; }
+  @media (max-width: 520px) {
+    dl.fix > div { grid-template-columns: 1fr; gap: 0; }
+    dl.fix dt { padding-top: .5em; }
+  }
+
+  /* ── 실측이 뒤집은 것 ── */
+  .flip {
+    background: var(--paper-2);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--field);
+    box-shadow: var(--shadow);
+    padding: 1.1rem 1.25rem;
+    margin: 1.5rem 0;
+    max-width: var(--measure);
+  }
+  .flip p { margin: 0; font-size: .95rem; color: var(--ink-2); }
+  .flip p + p { margin-top: .6rem; }
+  .flip b { color: var(--ink); }
+
+  /* ── 표 ── */
+  .scroll { overflow-x: auto; margin: 1.25rem 0 2rem; border: 1px solid var(--rule); }
+  table { border-collapse: collapse; width: 100%; min-width: 34rem; font-size: .9rem; background: var(--paper-2); }
+  th, td { text-align: left; padding: .62rem .85rem; border-bottom: 1px solid var(--rule-soft); vertical-align: top; }
+  thead th {
+    font-family: var(--mono);
+    font-size: .72rem;
+    font-weight: 600;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+    color: var(--muted);
+    background: var(--paper-3);
+    border-bottom: 1px solid var(--rule);
+    white-space: nowrap;
+  }
+  tbody tr:last-child td { border-bottom: 0; }
+  td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.path code { font-size: .82em; }
+
+  ul.plain { max-width: var(--measure); padding-left: 1.15rem; margin: 0 0 1.25rem; }
+  ul.plain li { margin-bottom: .5rem; color: var(--ink-2); }
+  ul.plain li strong { color: var(--ink); }
+
+  footer {
+    margin-top: 4.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--rule);
+    font-size: .85rem;
+    color: var(--muted);
+    max-width: var(--measure);
+  }
+  footer p { margin: 0 0 .5rem; }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .hero > * { animation: rise .5s cubic-bezier(.2,.7,.3,1) both; }
+    .hero .eyebrow { animation-delay: .02s; }
+    .hero h1      { animation-delay: .06s; }
+    .hero .lede   { animation-delay: .12s; }
+    .hero .dials  { animation-delay: .18s; }
+    @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="hero">
+    <p class="eyebrow">현장 세션 로그 · 2026-08-20 → 08-21 · 더현대 서울</p>
+    <h1>실측 세 바퀴</h1>
+    <p class="lede">
+      실기기를 들고 백화점을 세 번 돌았다. 스크린샷과 세션 JSON에서 증상 18건이 나왔고,
+      그중 15건을 고쳤다. 이 문서는 <b>무엇을 고쳤는지</b>보다
+      <b>어떤 숫자가 어떤 판단을 뒤집었는지</b>를 남기려고 쓴다 —
+      상수를 왜 그 값으로 잡았는지 묻는 사람이 돌아올 자리다.
+    </p>
+
+    <div class="dials">
+      <div class="dial"><b>18</b><span>실측에서 나온 증상</span></div>
+      <div class="dial"><b>15</b><span>고친 것</span></div>
+      <div class="dial"><b>1893</b><span>통과한 테스트</span></div>
+      <div class="dial"><b>v14&nbsp;→&nbsp;20</b><span>디버그 스키마</span></div>
+      <div class="dial"><b>19</b><span>채택한 복도 지름길</span></div>
+      <div class="dial"><b>0</b><span>새로 만든 그래프 노드</span></div>
+    </div>
+  </header>
+
+  <h2>한 바퀴 요약</h2>
+  <p class="section-note">
+    세 라운드는 진짜 순서다. 앞 라운드의 수정이 다음 라운드의 증상을 만들었고,
+    특히 3라운드의 GPS 문제는 2라운드에서 실외 판정을 손댄 결과 드러난 것이다.
+  </p>
+
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr><th>라운드</th><th>무엇을 보고 왔나</th><th>남긴 것</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="num">1</td>
+          <td>스크린샷 7장 — 에스컬레이터 재탐색, 매장 탭 카메라 이동, 재진입 층 초기화</td>
+          <td>커밋 11개(브랜치에 올라감)</td>
+        </tr>
+        <tr>
+          <td class="num">2</td>
+          <td>사진 6장 — 탑승 중 마커가 복도에, 진입 층이 B2, 실외에서 길찾기 불가</td>
+          <td>출구 문 노드 · 진입 층 규칙 · 복도 지름길</td>
+        </tr>
+        <tr>
+          <td class="num">3</td>
+          <td>사진 5장 + 세션 JSON 1건 — 나가자마자 좌표가 튀고, 서 있는데 더 멀어짐</td>
+          <td>GPS 도약 거르기 · 마커 공백 메우기 · 스키마 v20</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>실측이 뒤집은 것</h2>
+  <p class="section-note">
+    이 절이 이 문서의 이유다. 코드를 읽어서는 알 수 없고, 걸어 봐야 나오는 숫자들이다.
+  </p>
+
+  <div class="flip">
+    <p><b>GPS가 보고하는 정확도 값 자체가 거짓말이었다.</b>
+      수신기는 <span class="v">13 m</span>·<span class="v">11 m</span>라고 보고했는데
+      실제로는 <span class="v">51.7 m</span>·<span class="v">77.3 m</span> 틀렸다.
+      가만히 서 있는데 좌표가 계속 멀어지기도 했다.</p>
+    <p>그래서 도약 거르기를 <b>정확도가 아니라 물리</b>로 짰다 — 사람은 5초에 50 m를 못 간다.
+      정확도 문턱을 조이는 쪽으로 갔다면 거짓말을 더 믿게 됐을 것이다.</p>
+  </div>
+
+  <div class="flip">
+    <p><b>에스컬레이터 기하 가설은 실측으로 확인됐다.</b>
+      그래프의 탑승 노드와 폴리곤 축의 시작점이
+      <span class="v">11.0 m</span>·<span class="v">13.0 m</span> 떨어져 있었다 —
+      정확히 에스컬레이터 한 대 길이다. 마커가 "돌아서 타는" 것처럼 보인 이유가 이것이다.</p>
+  </div>
+
+  <div class="flip">
+    <p><b>문 근거가 GPS를 12초 앞섰다.</b>
+      실외 이탈 판정이 <span class="v">accuracy 21.6 m</span>인 좌표로 발화했는데,
+      출구 문 노드 도달 근거는 그보다 12초 먼저 성립해 있었다.
+      문 반경 <span class="v">R = 15 m</span>는 실제로 <span class="v">14.63 m</span>·<span class="v">13.93 m</span>에서
+      발화했다 — 여유가 각각 0.37 m, 1.07 m뿐이라 이 값은 더 줄일 수 없다.</p>
+  </div>
+
+  <div class="flip">
+    <p><b>20초 hold는 미검증이 아니라 죽은 코드였다.</b>
+      "실외인지 불확실한 상태를 20초 버틴다"는 규칙이 있었는데,
+      앞단 조건 때문에 그 분기에 도달하는 경로가 없었다. 값을 조정할 문제가 아니라
+      배선이 없던 문제였다.</p>
+  </div>
+
+  <div class="flip">
+    <p><b>재진입에는 25초짜리 죽은 구간이 있다.</b>
+      건물로 다시 들어간 뒤 <span class="v">25 s</span> 동안
+      <code>position_source: null</code>이었다 — 실내 위치가 아직 없고 GPS는 이미 꺼진 구간이다.
+      화면에서는 "앱이 나를 잃었다"로 읽힌다. 마커 공백 메우기가 이걸 겨냥한다.</p>
+  </div>
+
+  <h2>고친 것</h2>
+  <p class="section-note">
+    증상 하나에 원인 한 줄, 고침 한 줄. 검증 기준은 모두 테스트 파일이다 —
+    이 문서에 표를 베끼지 않고 경로만 적는다.
+  </p>
+
+  <div class="round">
+    <div class="round-mark">R1</div>
+    <div class="round-body">
+
+      <div class="issue">
+        <h3>에스컬레이터 타는 중에 경로가 재탐색된다<span class="tag fixed">고침</span></h3>
+        <dl class="fix">
+          <div><dt>원인</dt><dd>조기 층 전환이 탑승점 고정을 먼저 풀어, <strong>리셋된 트래커 위치로 이탈 증거가 쌓였다.</strong></dd></div>
+          <div><dt>고침</dt><dd>안내 세션에 <code>onEscalator</code> 게이트를 넘겨 탑승 중에는 이탈 판정을 건너뛴다. 한 줄짜리 배선인데 이 라운드에서 가장 값이 컸다.</dd></div>
+        </dl>
+      </div>
+
+      <div class="issue">
+        <h3>길찾기 중에 매장을 누르면 카메라가 날아간다<span class="tag fixed">고침</span></h3>
+        <dl class="fix">
+          <div><dt>원인</dt><dd>카메라를 옮기는 입구가 <strong>두 곳</strong>이었다. 한쪽만 막아서는 안 됐다.</dd></div>
+          <div><dt>고침</dt><dd><code>_swapOpenPlaceDetail</code>과 <code>_openStoreFromMap</code> 양쪽에 <code>focusOnMap: false</code>를 흘려 보낸다.</dd></div>
+        </dl>
+      </div>
+
+      <div class="issue">
+        <h3>탑승 방향이 내리는 쪽으로 고정된다 / 마커가 돌아서 탄다<span class="tag fixed">고침</span></h3>
+        <dl class="fix">
+          <div><dt>원인</dt><dd>탑승 노드와 폴리곤 축이 <span class="v">11–13 m</span> 어긋나 있었다(위 실측).</dd></div>
+          <div><dt>고침</dt><dd>활강을 노드가 아니라 <strong>구조물 축 위에서</strong> 시작한다.</dd></div>
+        </dl>
+      </div>
+
+      <div class="issue">
+        <h3>다시 들어오면 층 선택이 다시 뜨고 B2부터 시작한다<span class="tag fixed">고침</span></h3>
+        <dl class="fix">
+          <div><dt>원인</dt><dd>진입 층을 기본값(B2)에서 골랐다. 사용자는 1층 출입구로 들어왔다.</dd></div>
+          <div><dt>고침</dt><dd>출입 판정을 두 단계로 나누고, 진입 층을 <strong>들어온 출입구</strong>에서 정한다(<code>gpsEntryAnchorFloor</code>). 목적지 층은 일부러 뺐다 — 들어온 곳과 무관하다.</dd></div>
+        </dl>
+      </div>
+
+      <div class="issue">
+        <h3>방향 표시가 흐려서 안 보인다<span class="tag fixed">고침</span></h3>
+        <dl class="fix">
+          <div><dt>고침</dt><dd>흐릿한 부채꼴 그라디언트를 <strong>도트 가장자리에 붙은 삼각형</strong>으로 바꾸고, 실기기 지적을 받아 1.5배 키웠다(높이 0.72 → 1.10). 자편각(서울 −9.0°)도 적용했다.</dd></div>
+        </dl>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="round">
+    <div class="round-mark">R2</div>
+    <div class="round-body">
+
+      <div class="issue">
+        <h3>출구와 경로가 이어지지 않는다<span class="tag fixed">고침</span></h3>
+        <dl class="fix">
+          <div><dt>원인</dt><dd>출구의 실외 좌표가 그래프에 없었다. 경로가 실내 앵커에서 끊겼다.</dd></div>
+          <div><dt>고침</dt><dd>출구마다 문 노드를 합성하고 실내 앵커와 양방향 간선을 잇는다. 간격이 <span class="v">3 m</span> 미만이거나 <span class="v">25 m</span> 초과면 건너뛴다. <code>lat</code>/<code>lng</code>는 일부러 비워 둬서 좌표 변환이 합성 노드를 세지 않게 했다.</dd></div>
+        </dl>
+      </div>
+
+      <div class="issue">
+        <h3>사람이 ㄱ·ㄴ자로 도는 경로가 나온다<span class="tag fixed">고침</span></h3>
+        <dl class="fix">
+          <div><dt>원인</dt><dd>복도 한가운데를 가로지르는 간선이 원본 그래프에 없다.</dd></div>
+          <div><dt>고침</dt><dd>여유폭·차수·우회비를 재서 지름길 <strong>19개를 채택</strong>, 18개는 검수 대기로 꺼 뒀다. <strong>새 노드는 0개다</strong> — 노드를 만들면 복도 추적 빔서치의 후보 공간이 커진다.</dd></div>
+          <div><dt>함정</dt><dd>경로 그래프에만 얹으면 <strong>경로선은 대각선인데 마커는 ㄱ자에 남는다.</strong> 화면 쪽 <code>FloorGraph</code>에도 같이 넣어야 했다.</dd></div>
+        </dl>
+      </div>
+
+      <div class="issue">
+        <h3>디버그 세션을 내보내면 그 뒤 걸음이 사라진다<span class="tag fixed">고침</span></h3>
+        <dl class="fix">
+          <div><dt>고침</dt><dd>내보내기가 세션을 닫고 <strong>즉시 새 세션을 연다</strong>. 공유가 실패하면 갈지 않는다 — 넘기지도 못한 주행을 버리게 된다. 경계 표시는 <code>buildJson</code> 앞에서 찍어야 파일 안에 남는다.</dd></div>
+        </dl>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="round">
+    <div class="round-mark">R3</div>
+    <div class="round-body">
+
+      <div class="issue">
+        <h3>출구를 나서자마자 좌표가 50 m 밖으로 튄다<span class="tag fixed">고침</span></h3>
+        <dl class="fix">
+          <div><dt>고침</dt><dd>보행 속도 상한 <span class="v">3.5 m/s</span>에 좌표별 오차 몫 <span class="v">15 m</span>를 더한 만큼만 허용한다. 연속 5건 또는 10초가 지나면 <strong>항복하고 받아들인다</strong> — 첫 좌표가 잘못 잡히면 이후 옳은 좌표가 전부 걸리는데, 항복이 그 상태의 유일한 출구다.</dd></div>
+          <div><dt>범위</dt><dd><strong>표시에서만 뺀다.</strong> 건물 안팎 판정에는 그대로 넣는다 — 이탈은 이제 문 근거가 주 경로라 GPS 오차와 무관하다.</dd></div>
+          <div><dt>한계</dt><dd>한 건 대 한 건 비교라 <strong>매끄럽게 흘러가는 표류는 못 잡는다</strong>(1 Hz에서 건당 18 m씩이면 전부 통과). 잡는 것은 한 번에 크게 튀는 것이고, 실측이 보인 모양이 그것이다.</dd></div>
+        </dl>
+      </div>
+
+      <div class="issue">
+        <h3>진입 판정은 됐는데 내 위치가 안 뜬다<span class="tag fixed">고침</span></h3>
+        <dl class="fix">
+          <div><dt>원인</dt><dd>실내 앵커가 생기기 전 <span class="v">25 s</span> 공백. GPS 마커는 이미 꺼졌고 실내 마커는 아직 없다.</dd></div>
+          <div><dt>고침</dt><dd>마커 자리를 <code>indoorMarkerAt</code> 하나가 정한다 — 실내 위치 → 다른 층 마지막 자리 → GPS 대체 순. 2·3순위는 <strong>흐리게</strong> 그리고 방향 삼각형을 안 붙인다. 지금 어디를 보는지 모르는데 삼각형을 그리면 모르는 것을 아는 척한다.</dd></div>
+        </dl>
+      </div>
+
+      <div class="issue">
+        <h3>탑승점 게이트가 열렸는지 화면에서 안 보인다<span class="tag data">진단</span></h3>
+        <dl class="fix">
+          <div><dt>고침</dt><dd>디버그 칩에 <code>탑승점2.1m·차단O고정O</code> 한 조각을 붙였다. 거리를 같이 적는 이유는, 게이트가 안 열린 게 <strong>멀어서인지 경로가 탑승점을 안 지목해서인지</strong>가 그것으로만 갈리기 때문이다.</dd></div>
+        </dl>
+      </div>
+
+      <div class="issue">
+        <h3>세션 JSON에 판단 근거가 안 남는다<span class="tag data">진단</span></h3>
+        <dl class="fix">
+          <div><dt>고침</dt><dd>표본 상한을 없애고(무한 기록) 스키마를 <strong>v20</strong>까지 올렸다. 새로 남기는 것: <code>indoor_exit_events</code> · <code>gps_position_deltas</code> · <code>paths_by_floor</code> · <code>indoor_state_changes</code> · <code>exit_door_closest_miss</code> · <code>gps_rejected_fixes</code> · <code>indoor_position_gaps</code>.</dd></div>
+          <div><dt>쓰임</dt><dd><code>gps_rejected_fixes</code>가 다음 실측에서 답할 질문: <strong>거른 좌표가 안팎 판정을 뒤집었을 값이었나.</strong> 답이 "그렇다"면 판정에서도 빼야 한다.</dd></div>
+        </dl>
+      </div>
+
+    </div>
+  </div>
+
+  <h2>코드로 남은 것</h2>
+  <p class="section-note">
+    브랜치에 커밋 11건이 올라가 있고, 나머지는 워킹 트리에 있다.
+    파일 17개 수정 · 12개 신규, <span class="m">+847 / −90</span>줄.
+  </p>
+
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr><th>새 파일</th><th>맡은 판단</th><th>검증</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="path"><code>domain/route/entrance_door_nodes.dart</code></td>
+          <td>출구 실외 좌표를 그래프에 잇는다</td>
+          <td class="num">3–25 m 게이트</td>
+        </tr>
+        <tr>
+          <td class="path"><code>domain/route/corridor_shortcuts.dart</code><br><code>…/corridor_shortcuts_data.dart</code></td>
+          <td>복도 지름길 19개(+대기 18)</td>
+          <td class="num">새 노드 0</td>
+        </tr>
+        <tr>
+          <td class="path"><code>outdoor_map/gps/gps_jump_filter.dart</code></td>
+          <td>말이 안 되는 좌표를 표시에서 뺀다</td>
+          <td class="num">3.5 m/s + 15 m</td>
+        </tr>
+        <tr>
+          <td class="path"><code>outdoor_map/entry/indoor_exit_evidence.dart</code></td>
+          <td>문 도달을 이탈의 주 근거로 쓴다</td>
+          <td class="num">R = 15 m</td>
+        </tr>
+        <tr>
+          <td class="path"><code>outdoor_map/entry/gps_entry_floor.dart</code></td>
+          <td>진입 층을 출입구에서 고른다</td>
+          <td class="num">목적지 층 제외</td>
+        </tr>
+        <tr>
+          <td class="path"><code>scripts/transform/build_corridor_shortcuts.py</code></td>
+          <td>지름길 후보를 재고 고른다(생성기)</td>
+          <td class="num">우회비 ≥ 2.0</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    문서 쪽 단일 출처: <code>docs/client/corridor-graph-detour.md</code>(신규),
+    <code>gps-stream-policy.md</code>, <code>indoor-entry-rules.md</code> §6,
+    <code>escalator-thresholds.md</code>, <code>pdr/pdr-dev-integration.md</code>(스키마 v20).
+    참조가 사라진 <code>widgets/location_marker.dart</code>는 지웠다.
+  </p>
+
+  <h2>아직 열려 있는 것</h2>
+  <p class="section-note">
+    고치다 만 것이 아니라 <strong>다음 실측이 있어야 답이 나오는</strong> 것들이다.
+    지금 값을 정하면 근거 없이 정하는 셈이 된다.
+  </p>
+
+  <ul class="plain">
+    <li><strong>heading 보정 부호</strong> — 자편각 −9.0°를 적용했는데 그 부호가 실기기에서 본 반시계 10–20° 증상과 반대다. 디버그 노브(<code>debug_heading_offset_deg</code>)에 손으로 넣어 본 값이 유일한 다음 증거다.</li>
+    <li><strong>1F 수직 링크 4개</strong> — 지름길 생성기가 찾았지만 사람 눈으로 봐야 한다(기본 꺼짐). local_m 좌표
+      <span class="m">(167.5,171.5)-(166.7,166.5)</span> ·
+      <span class="m">(156.4,151.8)-(144.5,150.6)</span> ·
+      <span class="m">(111.6,168.1)-(111.4,162.5)</span> ·
+      <span class="m">(104.8,130.9)-(108.1,135.8)</span>.</li>
+    <li><strong>거른 좌표가 판정을 뒤집었나</strong> — <code>gps_rejected_fixes</code>를 다음 주행에서 읽는다.</li>
+    <li><strong>원본 데이터 결함</strong> — B3에 고립된 섬 <span class="m">(140.3,192.5)</span>, 끊긴 stub 3개(B1·B5·B6). 지름길로는 못 메운다.</li>
+    <li><strong>백엔드 파이프라인</strong> — <code>studio_adapter.py:271</code>의 <code>if geometry:</code>가 빈 리스트를 falsy로 흘려 DB에 NULL을 넣고,
+      <code>building_queries.py:387</code>의 <code>or []</code>가 그걸 덮는다. 결과적으로 <strong>12개 층 전부 <code>geometry_local_m</code>이 비어 있다.</strong></li>
+    <li><strong>커밋·PR</strong> — 워킹 트리의 수정을 논리 단위로 나눠 커밋하고 PR을 연다(문서·삭제는 별도 커밋).</li>
+  </ul>
+
+  <footer>
+    <p>숫자의 출처는 <code>pdr-debug-session</code> JSON(schema v16–v20)이다. 파일 자체는 용량 때문에 저장소에 넣지 않는다.</p>
+    <p>같은 폴더의 앞선 두 리포트: <a href="2026-08-20-실측-6건-원인-분석.html">실측 6건 원인 분석</a> ·
+      <a href="2026-08-20-실내-실외-전환-해부.html">실내·실외 전환 해부</a></p>
+  </footer>
+
+</div>

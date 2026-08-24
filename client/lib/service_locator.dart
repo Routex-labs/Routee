@@ -49,8 +49,13 @@ final PdrMotionSource pdrMotionSource = createDefaultPdrMotionSource();
 ///
 /// final이다. 화면이 initState에서 스트림을 구독하므로 뒤에 인스턴스를 바꾸면
 /// 옛 것만 계속 바라본다. 테스트는 native 채널을 모킹해 진짜 드라이버를 쓴다.
+/// 현장 heading 보정 노브를 여기서만 연결한다 — 디버그 모드가 꺼져 있으면
+/// 값이 0이라, 일반 사용자에게는 자편각 상수만 적용된다.
 final IndoorNavigationController indoorNavigationDriver =
-    IndoorNavigationDriver(source: pdrMotionSource);
+    IndoorNavigationDriver(
+      source: pdrMotionSource,
+      headingOffsetDeg: debugModeController.headingOffsetDeg,
+    );
 final IndoorLocationEstimateController indoorLocationEstimateController =
     IndoorLocationEstimateController();
 

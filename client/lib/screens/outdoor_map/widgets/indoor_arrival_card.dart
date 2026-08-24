@@ -8,12 +8,17 @@ class IndoorArrivalCard extends StatelessWidget {
     required this.destinationName,
     required this.onConfirm,
     this.destinationFloor,
+    this.onShowDetail,
     this.onConfirmPointerDown,
   });
 
   final String destinationName;
   final String? destinationFloor;
   final VoidCallback onConfirm;
+
+  /// 매장 상세를 연다. null이면 상세가 없는 목적지(출구·복도 등)라 버튼이 빠진다.
+  final VoidCallback? onShowDetail;
+
   final ValueChanged<Offset>? onConfirmPointerDown;
 
   @override
@@ -23,6 +28,7 @@ class IndoorArrivalCard extends StatelessWidget {
       destination: destinationName,
       floor: destinationFloor,
       onClose: onConfirm,
+      onShowDetail: onShowDetail,
     ),
   );
 }

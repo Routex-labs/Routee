@@ -58,6 +58,9 @@ extension _MapShellRoutePlan on _MapShellScreenState {
     RoutePlanField? focusField,
   }) async {
     _closeSearch();
+    // 이 함수는 [_onRouteFieldFocused]를 거치지 않고 칸을 직접 연다. 시트를
+    // 걷는 일도 그래서 여기 한 번 더 있다([_closeSheetsUnderTopPanel]).
+    _closeSheetsUnderTopPanel();
     // 자동완성 원본은 여기서 한 번만 받아 둔다. 결과를 기다리지 않으므로
     // 목록은 먼저 뜨고, 도착하면 후보 줄만 뒤늦게 채워진다.
     unawaited(_loadRouteStoreIndex());
@@ -119,6 +122,9 @@ extension _MapShellRoutePlan on _MapShellScreenState {
     final nearest = nearestByWalkingDistance(
       stores: suggestion.stores,
       reachByNodeId: _reachByNodeId,
+      // 화면에 적힌 층과 실제로 가는 층이 어긋나지 않게 지금 층을 함께 넘긴다.
+      // 안 넘기면 거리를 모를 때 색인 첫 줄(B6)이 대표가 된다.
+      currentFloorId: _activeIndoorFloor,
     );
     final store = nearest.store;
     _routeFloorScopeOnce = store.floorId;
@@ -132,6 +138,8 @@ extension _MapShellRoutePlan on _MapShellScreenState {
 
   void _onRouteFieldFocused(RoutePlanField field, String query) {
     if (_routeEditingField == field) return;
+    // 후보 목록도 검색 패널과 **같은 자리**를 쓴다([_closeSheetsUnderTopPanel]).
+    _closeSheetsUnderTopPanel();
     setState(() => _routeEditingField = field);
     // 칸을 옮긴 것이지 글자를 친 것이 아니다 — 이미 들어 있던 글자의 답은
     // 기다릴 것 없이 바로 찾는다.

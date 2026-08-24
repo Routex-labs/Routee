@@ -162,6 +162,21 @@ class IndoorGuidanceSession {
   /// 걸음으로 세어져 마커가 앞 매장으로 흘러갔다.
   PdrLocalPoint? _rideHoldPointM;
 
+  /// 고도 근거가 오기 **전에** 탑승점 하나만으로 거는 고정 지점.
+  ///
+  /// 위 둘과 달리 단계 전이가 아니라 [_syncBoardingApproach]가 매 스냅샷 갱신한다.
+  /// 탑승 직후 몇 초는 판정기가 idle이라 단계가 아예 안 나오기 때문이다.
+  PdrLocalPoint? _approachHoldPointM;
+
+  /// 경로가 지목한 탑승점까지의 거리(m). 그런 탑승점이 없으면 null.
+  double? _boardingApproachDistanceM;
+
+  /// 넓은 반경 안에 처음 들어선 시각. 밖으로 나가야 다시 잡힌다(시간 탈출구).
+  int? _boardingApproachSinceMs;
+
+  /// 탑승점 근거만으로 재탐색을 막는 구간인지. [_syncBoardingApproach]가 정한다.
+  bool _boardingApproachGateOpen = false;
+
   bool get isAttached => _attached;
   String? get buildingId => _buildingId;
   String? get floorId => _floorId;
@@ -177,7 +192,19 @@ class IndoorGuidanceSession {
   /// 진행률 갱신을 멈출지 판단하는 자리가 이 값 하나를 보게 해서, 고정 지점이
   /// 늘어날 때마다 조건을 두 곳에서 맞추는 일이 없게 한다.
   bool get isPositionHeld =>
-      _boardingHoldPointM != null || _rideHoldPointM != null;
+      _boardingHoldPointM != null ||
+      _rideHoldPointM != null ||
+      _approachHoldPointM != null;
+
+  /// 경로가 지목한 탑승점까지의 거리(m). 디버그 칩이 읽는다 — 게이트가 안 열렸을 때
+  /// "거리가 멀어서"인지 "탑승점을 못 찾아서(null)"인지는 이 값으로만 갈린다.
+  double? get boardingApproachDistanceM => _boardingApproachDistanceM;
+
+  /// 탑승점 근거만으로 재탐색을 막는 구간인가.
+  ///
+  /// [isPositionHeld]보다 **넓은** 반경을 쓴다. 재탐색 차단은 틀려도 몇 초 늦을
+  /// 뿐이지만, 위치 고정은 틀리면 걸어가는 사용자의 마커가 안 따라간다.
+  bool get isNearRouteBoarding => _boardingApproachGateOpen;
 
   /// 복도 보정 결과 원본. 디버그 궤적과 경로 진행률이 함께 쓴다.
   CorridorTrackingResult? get trackingResult =>
@@ -214,6 +241,16 @@ class IndoorGuidanceSession {
   void clearBoardingHold() {
     _boardingHoldPointM = null;
     _rideHoldPointM = null;
+    _approachHoldPointM = null;
+  }
+
+  /// 접근 근거 자체를 버린다. [clearBoardingHold]와 나눈 이유는 **시간 상한** 때문이다 —
+  /// 고정을 푸는 자리마다 시각까지 지우면 탑승점 앞에 계속 서 있어도 상한이 매번
+  /// 처음부터 다시 세어져 탈출구가 사라진다.
+  void _clearBoardingApproach() {
+    _boardingApproachDistanceM = null;
+    _boardingApproachSinceMs = null;
+    _boardingApproachGateOpen = false;
   }
 
   /// 부착·층·경로는 그대로 두고 **보정만** 처음부터 다시 본다.
@@ -225,6 +262,7 @@ class IndoorGuidanceSession {
     _corridor.reset();
     _snapshot = null;
     clearBoardingHold();
+    _clearBoardingApproach();
   }
 
   void _resetTracking() {
@@ -235,6 +273,7 @@ class IndoorGuidanceSession {
     _graph = null;
     _multiFloorRoute = null;
     clearBoardingHold();
+    _clearBoardingApproach();
   }
 
   /// 지금 보고 있는 층과 그 층의 그래프를 알려 준다.
@@ -358,6 +397,66 @@ class IndoorGuidanceSession {
         immediateTransfer: route.distanceMeters <= consecutiveTransferRouteM,
       );
     }
+    _syncBoardingApproach(
+      boardingNodeId: segment?.transferFromNodeId,
+      currentM: result.previewPosition,
+      atMs: atMs,
+    );
+  }
+
+  /// 고도가 오기 **전** 구간을 탑승점 하나로 표현한다.
+  ///
+  /// 판정기는 Δ가 `minDeltaM`(1.2m)만큼 변해야 후보를 여는데, 탑승 직후 몇 초는
+  /// 계단이 아직 사람을 안 올려 Δ가 0이다. 그 사이 걸음이 계속 옆 복도로 스냅되고
+  /// 이탈 증거가 쌓여 재탐색이 돌았다(2026-08-20 실기기).
+  ///
+  /// 근거의 세기가 달라 문턱을 둘로 나눈다. 표는
+  /// `docs/client/escalator-thresholds.md`가 단일 출처다.
+  /// - **재탐색 차단**: `routeApproachArmRadiusM`(16m). 틀려도 몇 초 늦을 뿐이다.
+  /// - **위치 고정**: [boardingHoldSnapRadiusM](6m)에서 걸고
+  ///   `boardingAbandonRadiusM`(8m)에서 푼다. 탑승점을 지나 발판에 올라서는 동안
+  ///   거리가 늘어나는 것은 이탈이 아니라 탑승의 모양이라 넓게 푼다.
+  ///
+  /// 탈출구가 둘이다 — 탑승점에서 멀어지면 그 자리에서 풀리고, 반경 안에 머물러도
+  /// `boardingPhaseTimeoutMs`(40초)가 지나면 접는다. 판정기가 배너를 접는 규칙과
+  /// 같은 거리·시간을 쓴다.
+  void _syncBoardingApproach({
+    required String? boardingNodeId,
+    required PdrLocalPoint currentM,
+    required int atMs,
+  }) {
+    final holdPoint = routeBoardingHoldPoint(
+      boardingNodeId: boardingNodeId,
+      anchorFloorId: _anchor?.floorId,
+      displayedFloorId: _floorId,
+      multiFloorRoute: _multiFloorRoute,
+      graph: _graph,
+    );
+    final config = _escalator.config;
+    final distanceM = holdPoint == null
+        ? null
+        : (holdPoint - currentM).distance;
+    if (distanceM == null || distanceM > config.routeApproachArmRadiusM) {
+      _approachHoldPointM = null;
+      _clearBoardingApproach();
+      _boardingApproachDistanceM = distanceM;
+      return;
+    }
+    _boardingApproachDistanceM = distanceM;
+    final since = _boardingApproachSinceMs ??= atMs;
+    if (atMs - since >= config.boardingPhaseTimeoutMs) {
+      // 시간 상한. 거리로 한 번 나갔다 들어와야 다시 열린다 — 그래야 탑승점 앞에
+      // 계속 서 있는 사람에게 무한히 걸리지 않는다.
+      _boardingApproachGateOpen = false;
+      _approachHoldPointM = null;
+      return;
+    }
+    _boardingApproachGateOpen = true;
+    if (_approachHoldPointM == null) {
+      if (distanceM <= boardingHoldSnapRadiusM) _approachHoldPointM = holdPoint;
+    } else if (distanceM > config.boardingAbandonRadiusM) {
+      _approachHoldPointM = null;
+    }
   }
 
   /// 기압 샘플 한 건을 판정기에 넣는다.
@@ -466,6 +565,7 @@ class IndoorGuidanceSession {
           localM:
               _rideHoldPointM ??
               _boardingHoldPointM ??
+              _approachHoldPointM ??
               _displayTrackedPosition(result),
           source: GuidancePositionSource.tracked,
           headingDeg: _floorHeadingDeg(anchor),
@@ -682,6 +782,10 @@ class IndoorGuidanceSession {
     // 에스컬레이터 위나 탑승점 고정 구간에서는 진행 상태를 갱신하지 않는다.
     // 위치가 한 지점에 묶여 있어 그 투영은 "경로를 벗어났다"는 오판만 만들고,
     // 곧 층이 바뀔 자리에서 재탐색을 돌린다.
+    //
+    // 탑승점 **접근**은 여기서 막지 않는다 — 그 반경(16m)은 아직 걸어가는 중인
+    // 거리라 남은거리까지 얼려 버리면 ETA가 16m 전부터 멈춘다. 접근은 아래에서
+    // 재탐색만 막는다.
     if (onEscalator || isPositionHeld) {
       return GuidanceProgressUpdate(
         displayProgress: _displayProgress,
@@ -741,13 +845,18 @@ class IndoorGuidanceSession {
     // **순서가 중요하다.** 이탈 증거를 이번 프레임 값으로 올린 **뒤에** hold를
     // 판단해야 한다. 뒤집으면 이탈 첫 프레임의 표시값이 한 박자 늦게 붙들려,
     // 재탐색 직전에 마커가 경로 밖으로 한 번 튀었다 돌아온다.
-    final shouldReroute = _updateDeviationEvidence(
-      progress: progress,
-      result: result,
-      steps: responsiveSteps,
-      rerouteInFlight: rerouteInFlight,
-      nowMs: nowMs ?? _nowMs(),
-    );
+    // 증거는 그대로 쌓되 **걸지만 않는다**(`rerouteInFlight`와 같은 모양이다).
+    // 탑승점을 정말 지나쳐 걸어간 사람은 게이트가 닫히는 즉시 쌓인 증거로 재탐색이
+    // 나가고, 타고 있는 사람은 그 전에 수직 이동 근거가 이어받는다.
+    final shouldReroute =
+        _updateDeviationEvidence(
+          progress: progress,
+          result: result,
+          steps: responsiveSteps,
+          rerouteInFlight: rerouteInFlight,
+          nowMs: nowMs ?? _nowMs(),
+        ) &&
+        !isNearRouteBoarding;
     final holdReason = _holdReason(previous, progress, responsiveSteps);
     final display = holdReason == null ? progress : previous!;
 

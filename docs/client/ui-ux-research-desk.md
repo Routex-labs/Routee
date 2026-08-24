@@ -130,7 +130,7 @@ GitHub은 마크다운 안의 HTML을 sanitize하면서 `style`·`class`·`oncli
 <tbody>
 <tr><td><code>Floor selector</code> (5장)</td><td><code>floor_selector.dart</code></td><td>구현됨. <strong>네이버에 없어 베낄 대상이 없다고 v2가 적어 둔 바로 그 항목</strong> — 여기엔 있다</td></tr>
 <tr><td><code>Partial map</code> / <code>Full map</code> (2장)</td><td>v2 <strong>E</strong> — SearchPanel을 바텀시트로</td><td>미착수. 지도와 목록의 면적 배분 문제</td></tr>
-<tr><td><code>List and details</code> (6장)</td><td>v2 <strong>F·G</strong> — 결과 행 출발·도착, 목록↔핀 연동</td><td>미착수. E가 선행</td></tr>
+<tr><td><code>List and details</code> (6장)</td><td>v2 <strong>F·G</strong> — 결과 행 출발·도착, 목록↔핀 연동</td><td>F의 <code>도착</code>은 완료. G는 E가 선행</td></tr>
 <tr><td><code>Filters</code> (4장)</td><td>v2 <strong>H</strong> — 카테고리 필터 위치 <em>(팀 결정 대기)</em></td><td><strong>여기서 결정 근거를 얻을 수 있다</strong></td></tr>
 <tr><td><code>Cluster markers</code> (4장)</td><td>v2 G의 실패 조건 — 핀 30개가 한 층에 몰림</td><td>미해결</td></tr>
 <tr><td><code>Blue dot</code> · <code>Locate me</code> (5장)</td><td><code>location_marker.dart</code>, PDR 앵커</td><td>구현됨. 정확도 원 표현 재검토용</td></tr>
@@ -644,8 +644,11 @@ v2 문서의 네이버 절은 사람이 직접 조작하며 캡처한 1차 관�
 - **엄지 영역.** 화면 아래 1/3이 편하고, **위쪽 두 모서리가 가장 멀다.** 우리 검색창은
   상단이다 — 검색은 **입력하러 갈 때 한 번만 닿으면 되므로** 그대로 둔다. 반면 층
   선택기와 결과 목록은 **이동 중에 반복해서** 닿으므로 아래쪽·측면이 맞다.
-- **가장 큰 절감은 이미 문서에 있다.** v2 **F**(결과 행에서 바로 출발·도착)가
-  **3단계 → 0단계**다. 새 아이디어를 찾기 전에 이걸 먼저 한다.
+- **~~가장 큰 절감은 이미 문서에 있다.~~ 했다(2026-08-21).** v2 **F**의 `도착`이
+  결과 줄과 후보 줄에 붙어 검색 → 안내가 4탭에서 3탭이 됐다. `출발`은 Kit 제약으로
+  남았다(v2 F 항목).
+- **다음 절감 후보**는 카테고리 목록에서 **두 번째** 매장을 보는 길이다 — 상세를 닫아도
+  목록으로 안 돌아오고, 칩을 다시 누르면 먼저 해제돼서 매장 하나당 네 탭이 더 든다.
 
 ---
 

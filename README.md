@@ -1,6 +1,8 @@
 # Navigation
 
-> 실외에서 실내까지 이어지는 경로 안내를 위한 Flutter 클라이언트와 FastAPI 백엔드 데모입니다.
+> 실외에서 실내까지 이어지는 경로 안내를 위한 Flutter 클라이언트 데모입니다.
+
+**백엔드는 이 저장소에 없습니다.** Spring Boot로 이식돼 [Routex-labs/backend](https://github.com/Routex-labs/backend)에 있고, 앱이 붙는 Cloud Run 서비스가 그것을 서빙합니다. 걷어낸 FastAPI 백엔드와 **원본 도면 데이터·시드/변환 파이프라인**은 [Routex-labs/fastapi](https://github.com/Routex-labs/fastapi)에 히스토리째 남아 있습니다.
 
 처음 실행한다면 [로컬 개발 가이드](docs/guide/local-development-guide.md)부터 보세요. Windows, macOS, Android 에뮬레이터/실기기, iOS 시뮬레이터/실기기 실행 방법을 분리해서 정리해 두었습니다.
 
@@ -8,12 +10,11 @@
 
 ```text
 client/  Flutter 앱 (Android · iOS · macOS)
-backend/ FastAPI · SQLAlchemy · SQLite 백엔드
 docs/    실행, 구조, 조사 문서
 ```
 
 ```text
-Flutter 앱 ──HTTP──> FastAPI ──> SQLite
+Flutter 앱 ──HTTP──> Spring Boot ──> PostgreSQL   (별도 저장소: Routex-labs/backend)
                     │
                     └── 실내 지도 · 매장 · 그래프 API (경로 계산은 클라이언트 온디바이스)
 ```
@@ -40,35 +41,12 @@ flutter run --dart-define-from-file=config.local.json
 
 `config.local.json`은 `.gitignore`로 커밋되지 않으며, 형식은 커밋된 `client/config.example.json`을 따릅니다. 키를 비우면 각각 목업 경로 / OSM 배경지도로 자동 대체됩니다. 실기기·iOS·macOS 실행과 네트워크·HTTP 주의사항은 [로컬 개발 가이드](docs/guide/local-development-guide.md)를 따르세요.
 
-### 백엔드까지 수정 — 로컬 Python
+### 백엔드까지 수정 — 로컬 Spring
 
-백엔드 코드를 고칠 때만 로컬 서버를 띄웁니다. 이 경우 `config.local.json`의 `API_BASE_URL`을 `http://localhost:8001`로 두거나(안드로이드 에뮬레이터는 비워 두면 기본값 `http://10.0.2.2:8001` 사용), 아예 지정하지 않습니다.
-
-```powershell
-Set-Location backend
-[Console]::OutputEncoding = [Text.Encoding]::UTF8   # 콘솔을 UTF-8로 고정
-$OutputEncoding = [Text.Encoding]::UTF8
-$env:PYTHONUTF8 = '1'                               # python도 UTF-8로 출력(기본은 CP949) → 콘솔과 맞아 한글 로그가 안 깨진다
-py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-python -m scripts.seed.reset_and_seed
-python -m uvicorn app.main:app --reload --reload-dir app --host 0.0.0.0 --port 8001 2>&1 | ForEach-Object { $_; $_ | Out-File ..\backend-local.log -Append -Encoding utf8 }
-```
-
-서버 상태를 확인합니다.
-
-```powershell
-Invoke-RestMethod http://127.0.0.1:8001/health
-```
-
-**분석 노트북 (선택)** — `backend/notebooks/`의 평가 노트북을 돌릴 때만 필요합니다.
-
-```powershell
-python -m pip install -r requirements-dev.txt
-```
-
-Docker Compose는 배포 이미지·컨테이너 환경을 확인할 때만 사용합니다. 실제 Cloud Run 배포(및 `main` push 자동 배포)는 [GCP 배포 문서](docs/guide/gcp-instance.md)를 따릅니다.
+백엔드는 [Routex-labs/backend](https://github.com/Routex-labs/backend)에 있습니다. 그 저장소에서
+`./gradlew bootRun`(또는 IntelliJ Run)으로 띄우면 되고, 별도 WAS는 필요 없습니다 — 톰캣이 jar 안에
+들어 있습니다. `config.local.json`의 `API_BASE_URL`을 로컬 주소로 두거나, 안드로이드 에뮬레이터는
+비워 두면 기본값(`http://10.0.2.2:8001`)을 씁니다.
 
 ## 주요 API
 
@@ -81,19 +59,19 @@ Docker Compose는 배포 이미지·컨테이너 환경을 확인할 때만 사�
 | 건물 전체 그래프 | `GET /buildings/{building_id}/graph?vertical=auto\|elevator\|escalator` (전 층 + 수직 전이 간선, 층 간 경로용) |
 | 목적지 경량 검색 | `POST /query/destination` |
 | 위치·층 정보 검색 | `POST /query/info` |
-| AI 의미 검색 | `POST /query/ai` |
+| 탐색 질의(되묻기·패싯) | `POST /query/ai` |
 
 최단 경로는 서버가 계산하지 않습니다. 클라이언트가 그래프(nodes·edges)로 온디바이스 Dijkstra(`client/lib/domain/dijkstra.dart`)를 실행합니다. **한 층 안 경로는 층 지도 응답의 `navigation_graph`**로, **층 간 경로는 건물 전체 그래프**(`/{id}/graph`, 수직 전이 간선 포함)로 계산합니다.
 
-현재 앱의 기본 데모 건물은 `thehyundai-seoul`이며, 기본 시드는 Studio B6~6F 12개 층 데이터를 적재합니다. API 전체 계약은 서버 실행 뒤 [http://127.0.0.1:8001/docs](http://127.0.0.1:8001/docs)에서 확인할 수 있습니다.
+현재 앱의 기본 데모 건물은 `thehyundai-seoul`이며 Studio B6~6F 12개 층 데이터를 적재합니다. API 전체 계약은 백엔드 저장소의 `docs/api/contract.md`가 단일 출처입니다.
 
 ## 문서
 
 **전체 목록은 [문서 색인](docs/README.md)에 있습니다.** 자주 보는 것만 아래에 둡니다.
 
 - [로컬 개발 가이드](docs/guide/local-development-guide.md): 플랫폼별 실행, API 주소, 문제 해결
-- [FastAPI 요청 흐름](docs/backend/fastapi-request-flow.md): Router → Query → SQLite 구조
-- [대화형 매장 탐색·추천 설계](docs/backend/native/conversational-discovery.md): 검색 facet 원본, 복수 추천 계약, Flutter 질문·선택 흐름
+- [엔드포인트 계약](https://github.com/Routex-labs/backend/blob/main/docs/api/contract.md): 스프링 백엔드가 내는 응답의 단일 출처
+- [대화형 매장 탐색·추천 설계](https://github.com/Routex-labs/fastapi/blob/main/docs/native/conversational-discovery.md): 검색 facet 원본, 복수 추천 계약, Flutter 질문·선택 흐름
 
 ## 데이터셋 작업
 

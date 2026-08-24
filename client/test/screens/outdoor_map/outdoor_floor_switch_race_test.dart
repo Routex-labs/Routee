@@ -68,9 +68,9 @@ void main() {
   ) async {
     final key = GlobalKey<OutdoorMapBodyState>();
     await tester.pumpWidget(
-      MaterialApp(theme: AppTheme.light, home: Scaffold(
-          body: OutdoorMapBody(key: key),
-        ),
+      MaterialApp(
+        theme: AppTheme.light,
+        home: Scaffold(body: OutdoorMapBody(key: key)),
       ),
     );
     await drain(tester);
@@ -93,9 +93,7 @@ void main() {
         .onSelectFloor(floor);
   }
 
-  testWidgets('늦게 도착한 이전 층 도면이 지금 층 도면을 덮어쓰지 않는다', (
-    WidgetTester tester,
-  ) async {
+  testWidgets('늦게 도착한 이전 층 도면이 지금 층 도면을 덮어쓰지 않는다', (WidgetTester tester) async {
     final key = await openIndoorMap(tester);
 
     // B2는 처음 가는 층(응답 지연), B1은 곧바로 도착하는 층 — 연달아 누르면
@@ -119,11 +117,7 @@ void main() {
     final resolved = await key.currentState!.resolveIndexEntry(
       _entry(floor: 'B1'),
     );
-    expect(
-      resolved,
-      isNotNull,
-      reason: '늦게 도착한 이전 층 도면이 지금 층 도면을 덮어썼다',
-    );
+    expect(resolved, isNotNull, reason: '늦게 도착한 이전 층 도면이 지금 층 도면을 덮어썼다');
     expect(resolved!.floor, 'B1');
   });
 
@@ -260,6 +254,10 @@ class _RacingFloorRepository implements BuildingRepository {
   @override
   Future<List<CategoryCount>?> getCategoryCounts(String buildingId) async =>
       const [];
+
+  @override
+  Future<Map<String, dynamic>?> getBuildingEvents(String buildingId) async =>
+      null;
 
   @override
   Future<List<StoreIndexEntry>?> getStoreIndex(String buildingId) async =>

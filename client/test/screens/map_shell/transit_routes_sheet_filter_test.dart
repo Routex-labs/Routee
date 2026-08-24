@@ -45,7 +45,7 @@ void main() {
         home: Scaffold(
           body: TransitRoutesSheet(
             routes: routes,
-            destinationLabel: '목적지',
+            destinationLabel: '여의도공원',
             onCloseAll: () {},
             onPreview: (_) {},
           ),

@@ -121,22 +121,11 @@ void main() {
   });
 
   group('floorTransitionUiState — 배너 단계', () {
-    test('도착이 탑승보다 먼저다', () {
-      // 뒤집으면 하차 직후에도 "이동 중"이 떠 있다.
+    test('타는 중이면 단계 값이 있어도 swapping이다', () {
+      // 뒤집으면 도면을 갈아 끼우는 동안 "접근 중"이 떠 있다.
       final state = floorTransitionUiState(
-        arrival: _transition(),
-        ride: null,
-        stage: _stage(phase: EscalatorPhase.verticalMotionDetected),
-      );
-
-      expect(state?.stage, FloorTransitionStage.arrived);
-    });
-
-    test('아직 타는 중이면 도착 값이 있어도 swapping이다', () {
-      final state = floorTransitionUiState(
-        arrival: _transition(),
         ride: _transition(),
-        stage: null,
+        stage: _stage(phase: EscalatorPhase.boardingDetected),
       );
 
       expect(state?.stage, FloorTransitionStage.swapping);
@@ -145,7 +134,6 @@ void main() {
     test('수직 이동이 관측되면 moving, 접근만이면 boarding', () {
       expect(
         floorTransitionUiState(
-          arrival: null,
           ride: null,
           stage: _stage(phase: EscalatorPhase.verticalMotionDetected),
         )?.stage,
@@ -153,7 +141,6 @@ void main() {
       );
       expect(
         floorTransitionUiState(
-          arrival: null,
           ride: null,
           stage: _stage(phase: EscalatorPhase.boardingDetected),
         )?.stage,
@@ -164,7 +151,6 @@ void main() {
     test('도착 층을 모르면 배너를 띄우지 않는다', () {
       // `{출발}→{도착}`이 문구의 뼈대라, 한쪽이 없으면 쓸 문장이 없다.
       final state = floorTransitionUiState(
-        arrival: null,
         ride: null,
         stage: _stage(phase: EscalatorPhase.boardingDetected, to: null),
       );
@@ -173,16 +159,14 @@ void main() {
     });
 
     test('아무 단계도 없으면 null', () {
-      expect(
-        floorTransitionUiState(arrival: null, ride: null, stage: null),
-        isNull,
-      );
+      // 하차가 확정되면 ride·stage가 함께 비고, 그 순간 배너도 사라진다 —
+      // "N층으로 이동했습니다"를 몇 초 더 띄우는 완료 단계는 없다.
+      expect(floorTransitionUiState(ride: null, stage: null), isNull);
     });
 
     test('상행·하행이 배너 화살표 방향으로 이어진다', () {
       expect(
         floorTransitionUiState(
-          arrival: null,
           ride: _transition(direction: EscalatorDirection.up),
           stage: null,
         )?.goingUp,
@@ -190,12 +174,136 @@ void main() {
       );
       expect(
         floorTransitionUiState(
-          arrival: null,
           ride: _transition(direction: EscalatorDirection.down),
           stage: null,
         )?.goingUp,
         isFalse,
       );
+    });
+  });
+
+  group('FloorTransitionUiState — 배너 문구', () {
+    FloorTransitionUiState state(FloorTransitionStage stage) =>
+        FloorTransitionUiState(
+          stage: stage,
+          fromFloorLabel: 'B2',
+          toFloorLabel: 'B1',
+          goingUp: true,
+        );
+
+    test('큰 줄은 가는 곳, 작은 줄은 지금 일어나는 일이다', () {
+      expect(state(FloorTransitionStage.moving).headline, 'B2 → B1');
+      expect(state(FloorTransitionStage.moving).detail, '에스컬레이터로 이동 중');
+    });
+
+    test('도면을 갈아 끼우는 동안도 "에스컬레이터로 이동 중"이다', () {
+      // 지도가 전환된다는 것은 앱의 사정이다. 그 사람에게 일어나는 일은
+      // 층 이동 하나뿐이라, 두 단계가 다른 말을 하면 안 된다.
+      expect(
+        state(FloorTransitionStage.swapping).detail,
+        state(FloorTransitionStage.moving).detail,
+      );
+    });
+
+    test('탑승 전에는 감지 사실을 말한다', () {
+      expect(state(FloorTransitionStage.boarding).detail, '에스컬레이터 탑승을 감지했습니다');
+    });
+  });
+
+  group('findEscalatorBoardingNode — 디버그 강제 전환이 고를 탑승 노드', () {
+    // 3F 랜딩: 위로는 5F까지 한 번에 가는 에스컬레이터가, 아래로는 2F로 가는
+    // 것이 붙어 있다. 도착 노드(FR)는 탑승 후보가 아니다.
+    final graph = FloorGraph(
+      nodes: [
+        _escalator('n-up-fr2f', 'ES1-UP(FR2F)', 0, 0),
+        _escalator('n-up-to5f', 'ES1-UP(TO5F)', 1.5, 0),
+        _escalator('n-dn-to2f', 'ES1-DN(TO2F)', 3.0, 0),
+        const GraphNode(id: 'n-hall', type: 'corridor', xM: 20, yM: 20),
+      ],
+      edges: const [],
+    );
+    const floors = ['B1', '1F', '2F', '3F', '4F', '5F'];
+
+    test('가는 층은 순위가 아니라 노드 이름이 정한다', () {
+      // 한 번에 두 층을 건너뛰는 에스컬레이터가 실제로 있다. 이웃 층으로
+      // 계산하면 4F가 나오고, 그 경로는 강제 전환으로 영영 재현되지 않는다.
+      final up = findEscalatorBoardingNode(
+        graph: graph,
+        direction: EscalatorDirection.up,
+        knownFloorLabels: floors,
+      );
+      expect(up?.name.otherFloorLabel, '5F');
+      expect(up?.node.id, 'n-up-to5f');
+    });
+
+    test('도착 노드는 탑승 후보가 아니다', () {
+      final down = findEscalatorBoardingNode(
+        graph: graph,
+        direction: EscalatorDirection.down,
+        knownFloorLabels: floors,
+      );
+      expect(down?.node.id, 'n-dn-to2f');
+    });
+
+    test('도면이 없는 층으로는 태우지 않는다', () {
+      // 도착 층 도면을 못 열면 시퀀스가 되돌아가, 보려던 연출 대신 실패
+      // 경로를 보게 된다.
+      expect(
+        findEscalatorBoardingNode(
+          graph: graph,
+          direction: EscalatorDirection.up,
+          knownFloorLabels: const ['3F'],
+        ),
+        isNull,
+      );
+    });
+
+    test('그래프가 없거나 이름 규칙이 깨졌으면 null이다', () {
+      expect(
+        findEscalatorBoardingNode(
+          graph: null,
+          direction: EscalatorDirection.up,
+          knownFloorLabels: floors,
+        ),
+        isNull,
+      );
+      final unnamed = FloorGraph(
+        nodes: [_escalator('n-x', null, 0, 0)],
+        edges: const [],
+      );
+      expect(
+        findEscalatorBoardingNode(
+          graph: unnamed,
+          direction: EscalatorDirection.up,
+          knownFloorLabels: floors,
+        ),
+        isNull,
+      );
+    });
+  });
+
+  group('floorTransitionScrimHold — 덮개를 붙잡는 시간', () {
+    test('사진이 없거나 한 장이면 교체를 가리는 최소치만 쓴다', () {
+      // 볼 것이 없는데 화면만 붙잡고 있으면 전환이 느리게만 느껴진다.
+      expect(floorTransitionScrimHold(0), const Duration(milliseconds: 3500));
+      expect(floorTransitionScrimHold(1), const Duration(milliseconds: 3500));
+    });
+
+    test('한 장 늘 때마다 그 장이 머무는 만큼 늘어난다', () {
+      expect(
+        floorTransitionScrimHold(2) - floorTransitionScrimHold(1),
+        floorPhotoDwell,
+      );
+      expect(
+        floorTransitionScrimHold(3) - floorTransitionScrimHold(2),
+        floorPhotoDwell,
+      );
+    });
+
+    test('상한에서 멈춘다', () {
+      // 하차까지 덮으면 내리기 전에 새 층 도면과 다음 경로를 볼 시간이 없다.
+      expect(floorTransitionScrimHold(5), const Duration(milliseconds: 9000));
+      expect(floorTransitionScrimHold(50), const Duration(milliseconds: 9000));
     });
   });
 }

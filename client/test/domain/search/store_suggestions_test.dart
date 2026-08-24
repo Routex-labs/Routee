@@ -4,7 +4,7 @@ import 'package:navigation_client/models/place/store_index_entry.dart';
 
 /// 실제 매장 이름으로만 fixture를 만든다.
 ///
-/// 출처는 `backend/resources/studio/thehyundai-seoul-dabeeo/stores_*.json`
+/// 출처는 `resources/studio/thehyundai-seoul-dabeeo/stores_*.json`(Routex-labs/fastapi)
 /// (더현대 서울, 상호 659종). 가짜 이름으로 테스트하면 `A.P.C.`의 마침표나
 /// `프라다`·`프라다 뷰티`·`프라다(남)` 같은 실제 접두 충돌을 못 만난다.
 const _fixtureNames = <(String, String)>[

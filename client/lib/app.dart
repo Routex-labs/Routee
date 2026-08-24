@@ -9,6 +9,7 @@ import 'routing/app_routes.dart';
 import 'routing/place_link.dart';
 import 'theme/app_theme.dart';
 import 'screens/map_shell/map_shell_screen.dart';
+import 'widgets/sheet_stack_guard.dart';
 
 void defaultPdrBackgrounded() {
   unawaited(indoorNavigationDriver.onAppBackgrounded());
@@ -123,6 +124,9 @@ class _NavigationAppState extends State<NavigationApp>
     return MaterialApp(
       title: 'Navigation Client',
       theme: AppTheme.light,
+      // 시트가 두 겹으로 쌓이면 걷어낸다. 시트를 여는 자리가 열둘이라 입구마다
+      // 세는 것으로는 끝나지 않아, 불변식을 Navigator에 건다([SheetStackGuard]).
+      navigatorObservers: [sheetStackGuard],
       // 로케일을 안 주면 MaterialLocalizations가 영어로 떨어져 시각이
       // '1:45 PM'으로 찍힌다. 한국어 앱에서 그 표기는 낯설고, 시각을 쓰는 곳이
       // 계획 카드·진행 바·대중교통 카드 셋이라 카드마다 문자열을 만들면

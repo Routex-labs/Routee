@@ -1,7 +1,7 @@
 import 'dart:ui' as ui;
 
+import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:routex_design_system/routex_design_system.dart';
 
 import 'package:navigation_client/map/icon/category_icon.dart';
 import 'package:navigation_client/map/icon/category_map_icon.dart';
@@ -196,7 +196,7 @@ void main() {
     expect(bytes.sublist(0, 4), [0x89, 0x50, 0x4E, 0x47]);
   });
 
-  testWidgets('선택 아이콘은 디자인시스템 포인트 색 비트맵을 갖는다', (tester) async {
+  testWidgets('선택 아이콘은 같은 대분류 색의 진한 쪽이다', (tester) async {
     final centerColor = await tester.runAsync(() async {
       final bytes = await renderStoreCategoryIconPng('카페', selected: true);
       final codec = await ui.instantiateImageCodec(bytes);
@@ -213,11 +213,31 @@ void main() {
         rgba.getUint8(offset + 2),
       );
     });
-    expect(centerColor, RoutexColorTokens.light.actionPrimary);
-    expect(
-      RoutexColorTokens.light.actionPrimary,
-      isNot(categoryColorFor('카페')),
+    // 청록 하나로 칠하던 자리다. 어느 매장을 골라도 배지가 같은 색이 되면
+    // "골랐다"는 보이지만 그 매장이 무슨 대분류인지가 사라진다.
+    final base = categoryColorFor('카페');
+    final selected = categoryColorDeepen(
+      '카페',
+      saturate: kCategorySelectedSaturate,
+      darken: kCategorySelectedDarken,
     );
+    expect(centerColor, isSameColorAs(selected));
+    // 같은 색 계열에서 **진해진** 것이다 — 색상각은 그대로, 채도는 올라가고
+    // 명도는 조금만 내려간다. 명도만 끌어내리면 색을 잃고 탁해진다.
+    expect(
+      HSLColor.fromColor(selected).hue,
+      closeTo(HSLColor.fromColor(base).hue, 1.0),
+    );
+    expect(
+      HSLColor.fromColor(selected).saturation,
+      greaterThan(HSLColor.fromColor(base).saturation),
+    );
+    expect(selected.computeLuminance(), lessThan(base.computeLuminance()));
+    // 흰 글리프는 안 고른 배지에서도 같은 조건이다. 절대 기준(4.5:1)을 여기서
+    // 요구하면 명도를 더 내려야 해 "어둡다"로 되돌아간다 — 안 고른 쪽보다
+    // 대비가 높다는 것만 지킨다.
+    double onWhiteGlyph(Color c) => 1.05 / (c.computeLuminance() + 0.05);
+    expect(onWhiteGlyph(selected), greaterThan(onWhiteGlyph(base)));
     expect(
       selectedStoreCategoryIconImageName('카페'),
       isNot(storeCategoryIconImageName('카페')),

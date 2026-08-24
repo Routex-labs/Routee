@@ -22,69 +22,20 @@ Widget _host(Widget child, {double textScale = 1.0, Size? size}) => MediaQuery(
     textScaler: TextScaler.linear(textScale),
     size: size ?? const Size(390, 844),
   ),
-  child: MaterialApp(theme: AppTheme.light, home: Scaffold(body: Center(child: child)),
+  child: MaterialApp(
+    theme: AppTheme.light,
+    home: Scaffold(body: Center(child: child)),
   ),
 );
 
 void main() {
-  group('FloorTransitionBanner', () {
-    testWidgets('단계마다 다른 문구를 그린다', (tester) async {
-      for (final (stage, expected) in [
-        (FloorTransitionStage.boarding, '에스컬레이터 탑승을 감지했습니다'),
-        (FloorTransitionStage.moving, '에스컬레이터로 이동 중 · B1 → 1F'),
-        (FloorTransitionStage.swapping, '1F 지도로 전환하는 중'),
-        (FloorTransitionStage.arrived, '1F로 이동했습니다'),
-      ]) {
-        await tester.pumpWidget(
-          _host(FloorTransitionBanner(state: _state(stage))),
-        );
-        expect(find.text(expected), findsOneWidget);
-      }
-    });
-
-    testWidgets('되돌리기 같은 조작을 두지 않는다', (tester) async {
-      // 층 전환은 "맞나요?"라고 되묻지 않는다. 기압이 일상적으로 몇 미터씩
-      // 움직이는 일이 없어서, 되묻는 비용이 판정을 의심하게 만드는 값보다 크다.
-      await tester.pumpWidget(
-        _host(
-          FloorTransitionBanner(state: _state(FloorTransitionStage.arrived)),
-        ),
-      );
-
-      expect(find.byType(TextButton), findsNothing);
-    });
-
-    testWidgets('작은 화면 + 큰 글자 배율에서도 넘치지 않는다', (tester) async {
-      tester.view.physicalSize = const Size(320, 568);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.reset);
-
-      await tester.pumpWidget(
-        _host(
-          SizedBox(
-            width: 288,
-            child: FloorTransitionBanner(
-              state: _state(
-                FloorTransitionStage.moving,
-                from: 'B2',
-                to: '지하 1층 식품관',
-              ),
-            ),
-          ),
-          textScale: 2,
-          size: const Size(320, 568),
-        ),
-      );
-
-      expect(tester.takeException(), isNull);
-    });
-  });
-
   group('FloorTransitionScrim', () {
     testWidgets('전환 중에는 뒤쪽 입력을 막는다', (tester) async {
       var tapped = false;
       await tester.pumpWidget(
-        MaterialApp(theme: AppTheme.light, home: Scaffold(
+        MaterialApp(
+          theme: AppTheme.light,
+          home: Scaffold(
             body: Stack(
               children: [
                 Positioned.fill(
@@ -117,7 +68,9 @@ void main() {
     testWidgets('덮개가 옅어지는 동안에는 입력이 통과한다', (tester) async {
       var tapped = false;
       await tester.pumpWidget(
-        MaterialApp(theme: AppTheme.light, home: Scaffold(
+        MaterialApp(
+          theme: AppTheme.light,
+          home: Scaffold(
             body: Stack(
               children: [
                 Positioned.fill(
@@ -144,16 +97,18 @@ void main() {
       await tester.pump();
       expect(tapped, isTrue, reason: '절반쯤 걷힌 화면을 계속 막아 두면 전환이 끝나도 먹통으로 느껴진다');
       expect(
-        find.text('지도를 전환하는 중'),
+        find.text('에스컬레이터로 이동 중'),
         findsOneWidget,
-        reason: '층 라벨 옆에 지금 무슨 일이 일어나는지 한 줄이 있어야 한다',
+        reason: '도면을 갈아 끼우는 것은 앱의 사정이다 — 그 사람은 층을 이동하는 중이다',
       );
     });
 
     testWidgets('스크림이 걷히면 뒤쪽 입력이 다시 통과한다', (tester) async {
       var tapped = false;
       await tester.pumpWidget(
-        MaterialApp(theme: AppTheme.light, home: Scaffold(
+        MaterialApp(
+          theme: AppTheme.light,
+          home: Scaffold(
             body: Stack(
               children: [
                 Positioned.fill(
@@ -296,11 +251,7 @@ void main() {
 
       await tester.pump(escalatorGlideDuration ~/ 2);
       final midY = tester.getCenter(dot).dy;
-      expect(
-        midY,
-        greaterThan(startY),
-        reason: '내려가는 전환이면 점도 아래로 내려가야 한다',
-      );
+      expect(midY, greaterThan(startY), reason: '내려가는 전환이면 점도 아래로 내려가야 한다');
 
       await tester.pumpAndSettle();
       final endY = tester.getCenter(dot).dy;
@@ -371,6 +322,314 @@ void main() {
       await tester.pump(const Duration(seconds: 1));
       // 애니메이션이 계속 돌면 pumpAndSettle이 타임아웃으로 실패한다.
       await tester.pumpAndSettle();
+    });
+  });
+
+  group('도착 층 사진', () {
+    // 사진은 도착 층 라벨 쪽에 붙는다. 지금 가는 곳과 그곳의 사진이 화면 반대편에
+    // 있으면 둘이 한 사건으로 안 읽힌다.
+    const photo = ['assets/floors/b2.webp'];
+
+    Finder photoFinder() => find.byType(Image);
+
+    testWidgets('내려갈 때는 도착 층 라벨 아래에 붙는다', (tester) async {
+      await tester.pumpWidget(
+        _host(
+          FloorTransitionScrim(
+            opacity: 1,
+            fadeIn: Duration.zero,
+            fadeOut: Duration.zero,
+            photoAssets: photo,
+            state: _state(
+              FloorTransitionStage.moving,
+              from: 'B1',
+              to: 'B2',
+              goingUp: false,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.getCenter(photoFinder()).dy,
+        greaterThan(tester.getCenter(find.text('B2')).dy),
+      );
+    });
+
+    testWidgets('올라갈 때는 도착 층 라벨 위에 붙는다', (tester) async {
+      await tester.pumpWidget(
+        _host(
+          FloorTransitionScrim(
+            opacity: 1,
+            fadeIn: Duration.zero,
+            fadeOut: Duration.zero,
+            photoAssets: photo,
+            state: _state(
+              FloorTransitionStage.moving,
+              from: 'B1',
+              to: '1F',
+              goingUp: true,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.getCenter(photoFinder()).dy,
+        lessThan(tester.getCenter(find.text('1F')).dy),
+      );
+    });
+
+    testWidgets('사진이 없는 층이면 액자도 없다', (tester) async {
+      // 주차층에는 원본이 키비주얼을 주지 않는다. 회색 상자를 채워 넣으면
+      // "불러오지 못했다"로 읽힌다.
+      await tester.pumpWidget(
+        _host(
+          FloorTransitionScrim(
+            opacity: 1,
+            fadeIn: Duration.zero,
+            fadeOut: Duration.zero,
+            state: _state(FloorTransitionStage.moving, goingUp: false),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(photoFinder(), findsNothing);
+      expect(find.text('B1'), findsOneWidget, reason: '나머지 연출은 그대로다');
+    });
+
+    testWidgets('덮개가 짙어진 뒤에 들어온다', (tester) async {
+      // 페이드 밑에서 미끄러지면 두 연출이 겹쳐 둘 다 뭉갠다.
+      await tester.pumpWidget(
+        _host(
+          FloorTransitionScrim(
+            opacity: 1,
+            fadeIn: Duration.zero,
+            fadeOut: Duration.zero,
+            photoAssets: photo,
+            state: _state(
+              FloorTransitionStage.moving,
+              from: 'B1',
+              to: 'B2',
+              goingUp: false,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      double opacityNow() => tester
+          .widget<Opacity>(
+            find.ancestor(of: photoFinder(), matching: find.byType(Opacity)),
+          )
+          .opacity;
+
+      expect(opacityNow(), 0, reason: '덮개가 짙어지는 동안에는 아직 없다');
+
+      await tester.pump(floorTransitionScrimFadeIn ~/ 2);
+      expect(opacityNow(), 0);
+
+      await tester.pumpAndSettle();
+      expect(opacityNow(), 1);
+    });
+  });
+
+  group('사진이 여러 장인 층', () {
+    const photos = [
+      'assets/floors/6f.webp',
+      'assets/floors/6f-2.webp',
+      'assets/floors/6f-3.webp',
+    ];
+
+    Widget host(WidgetTester tester) => _host(
+      const FloorTransitionScrim(
+        opacity: 1,
+        fadeIn: Duration.zero,
+        fadeOut: Duration.zero,
+        photoAssets: photos,
+        state: FloorTransitionUiState(
+          stage: FloorTransitionStage.swapping,
+          fromFloorLabel: '5F',
+          toFloorLabel: '6F',
+          goingUp: true,
+        ),
+      ),
+    );
+
+    /// 지금 몇 번째 장인지. 강조된 점의 자리로 읽는다 — 화면이 실제로 그리는
+    /// 값이라, 컨트롤러만 움직이고 표시가 안 따라오는 반쪽 성공을 잡아낸다.
+    int shownIndex(WidgetTester tester) {
+      for (var i = 0; i < photos.length; i++) {
+        final dot = tester.widget<Container>(
+          find.byKey(Key('floor-photo-dot-$i')),
+        );
+        final color = (dot.decoration! as BoxDecoration).color;
+        if (color == AppColors.primary) return i;
+      }
+      return -1;
+    }
+
+    testWidgets('장수만큼 점이 서고 첫 장이 강조된다', (tester) async {
+      await tester.pumpWidget(host(tester));
+      await tester.pump();
+      expect(find.byKey(const Key('floor-photo-dot-2')), findsOneWidget);
+      expect(find.byKey(const Key('floor-photo-dot-3')), findsNothing);
+      expect(shownIndex(tester), 0);
+    });
+
+    testWidgets('첫 장도 다른 장과 같은 시간을 받는다', (tester) async {
+      // 덮개가 짙어지고 사진이 미끄러져 들어오는 동안은 아직 보고 있는 시간이
+      // 아니다. 그만큼을 안 빼면 첫 장만 1.3초 만에 지나가, 실기기에서 "첫 장을
+      // 아예 안 보여 준다"로 보였다(2026-08-22).
+      await tester.pumpWidget(host(tester));
+      await tester.pump();
+      await tester.pump(floorPhotoDwellFor(photos.length));
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(shownIndex(tester), 0, reason: '등장이 끝나기 전부터 세면 안 된다');
+
+      await tester.pump(floorPhotoSettled);
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(shownIndex(tester), 1);
+    });
+
+    testWidgets('가만히 둬도 다음 장으로 넘어간다', (tester) async {
+      await tester.pumpWidget(host(tester));
+      await tester.pump();
+      await tester.pump(floorPhotoSettled + floorPhotoDwellFor(photos.length));
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(shownIndex(tester), 1);
+    });
+
+    testWidgets('마지막 장에서 처음으로 되감지 않는다', (tester) async {
+      // 되감으면 덮개가 걷히기 직전에 같은 사진이 두 번 지나가, 몇 장이었는지가
+      // 흐려진다.
+      await tester.pumpWidget(host(tester));
+      await tester.pump();
+      await tester.pump(floorPhotoSettled);
+      for (var i = 0; i < 5; i++) {
+        await tester.pump(floorPhotoDwellFor(photos.length));
+        await tester.pump(const Duration(milliseconds: 600));
+      }
+      expect(shownIndex(tester), photos.length - 1);
+    });
+
+    testWidgets('사람이 넘기면 자동 넘김을 놓는다', (tester) async {
+      // 보고 있는 사진을 앱이 뺏어 가면 돌아오는 방법이 없다.
+      await tester.pumpWidget(host(tester));
+      await tester.pump();
+      await tester.drag(find.byType(PageView), const Offset(-400, 0));
+      await tester.pumpAndSettle();
+      expect(shownIndex(tester), 1);
+
+      await tester.pump(const Duration(seconds: 6));
+      await tester.pumpAndSettle();
+      expect(shownIndex(tester), 1, reason: '손으로 넘긴 뒤에는 앱이 더 넘기지 않는다');
+    });
+
+    testWidgets('사진이 한 장이면 점을 그리지 않는다', (tester) async {
+      await tester.pumpWidget(
+        _host(
+          const FloorTransitionScrim(
+            opacity: 1,
+            fadeIn: Duration.zero,
+            fadeOut: Duration.zero,
+            photoAssets: ['assets/floors/b2.webp'],
+            state: FloorTransitionUiState(
+              stage: FloorTransitionStage.swapping,
+              fromFloorLabel: 'B1',
+              toFloorLabel: 'B2',
+              goingUp: false,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.byKey(const Key('floor-photo-dot-0')), findsNothing);
+    });
+
+    testWidgets('마지막 장까지 저절로 닿는다', (tester) async {
+      // 상한에 걸린 층에서 고정 주기를 쓰면 마지막 장이 뜨기 전에 덮개가 걷힌다.
+      const five = [
+        'assets/floors/6f.webp',
+        'assets/floors/6f-2.webp',
+        'assets/floors/6f-3.webp',
+        'assets/floors/6f-4.webp',
+        'assets/floors/6f-5.webp',
+      ];
+      await tester.pumpWidget(
+        _host(
+          const FloorTransitionScrim(
+            opacity: 1,
+            fadeIn: Duration.zero,
+            fadeOut: Duration.zero,
+            photoAssets: five,
+            state: FloorTransitionUiState(
+              stage: FloorTransitionStage.swapping,
+              fromFloorLabel: '5F',
+              toFloorLabel: '6F',
+              goingUp: true,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      // 덮개가 걷히기 시작하는 시각까지 한 장 몫씩 흘린다. 한 번에 뛰면
+      // 주기 타이머가 그 안에서 여러 번 돌지 않는다(테스트 시계의 사정이다).
+      await tester.pump(floorPhotoSettled);
+      var elapsed = floorPhotoSettled;
+      final dwell = floorPhotoDwellFor(five.length);
+      while (elapsed < floorTransitionScrimHold(five.length)) {
+        await tester.pump(dwell);
+        await tester.pump(const Duration(milliseconds: 500));
+        elapsed += dwell + const Duration(milliseconds: 500);
+      }
+      // 마지막 넘김의 슬라이드가 끝나야 점이 따라온다.
+      await tester.pumpAndSettle();
+
+      final last = tester.widget<Container>(
+        find.byKey(const Key('floor-photo-dot-4')),
+      );
+      expect(
+        (last.decoration! as BoxDecoration).color,
+        AppColors.primary,
+        reason: '덮개가 걷히기 전에 마지막 장까지 닿아야 한다',
+      );
+    });
+
+    testWidgets('새 전환이면 첫 장으로 되돌아간다', (tester) async {
+      // 이 위젯은 층 전환 사이에 살아남는다. 앞 전환에서 넘어간 자리에 남아
+      // 있으면 다음 전환이 두 번째 장부터 시작한다.
+      await tester.pumpWidget(host(tester));
+      await tester.pump();
+      await tester.drag(find.byType(PageView), const Offset(-400, 0));
+      await tester.pumpAndSettle();
+      expect(shownIndex(tester), 1, reason: '테스트 전제(넘김)가 성립하지 않았다');
+
+      // 덮개가 걷혔다가 다시 올라온다 = 새 전환.
+      await tester.pumpWidget(
+        _host(
+          const FloorTransitionScrim(
+            opacity: 0,
+            fadeIn: Duration.zero,
+            fadeOut: Duration.zero,
+            photoAssets: photos,
+            state: FloorTransitionUiState(
+              stage: FloorTransitionStage.swapping,
+              fromFloorLabel: '5F',
+              toFloorLabel: '6F',
+              goingUp: true,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pumpWidget(host(tester));
+      await tester.pumpAndSettle();
+
+      expect(shownIndex(tester), 0);
     });
   });
 }

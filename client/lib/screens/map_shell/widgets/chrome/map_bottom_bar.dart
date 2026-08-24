@@ -23,6 +23,7 @@ class MapBottomBar extends StatelessWidget {
     this.placingLocation = false,
     this.showPlaceLocation = true,
     this.attentionOnPlaceLocation = false,
+    this.bottomInset = true,
   });
 
   final VoidCallback onCalibrate;
@@ -57,10 +58,16 @@ class MapBottomBar extends StatelessWidget {
   /// 하는 것이 짧다.
   final bool attentionOnPlaceLocation;
 
+  /// 화면 아래 안전영역만큼 띄울지. **아래에 판이 붙어 있으면 끈다** — 그 판이
+  /// 이미 안전영역을 먹고 있어서, 여기서 한 번 더 띄우면 버튼과 판 사이에 쓰지도
+  /// 않는 빈 띠가 생긴다.
+  final bool bottomInset;
+
   @override
   Widget build(BuildContext context) {
     return SafeArea(
       top: false,
+      bottom: bottomInset,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
         child: Column(
@@ -208,7 +215,8 @@ class _AttentionPulseState extends State<_AttentionPulse>
 
   @override
   Widget build(BuildContext context) {
-    final reduceMotion = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    final reduceMotion =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
     // **트리 모양은 켜고 꺼도 그대로다.** 자식을 감쌌다 풀면 그 자식 element가
     // 한 번 죽었다 살아나는데, 안에 든 Tooltip이 그때 ticker를 두 번 만들며
     // 터진다(위젯 테스트에서 잡혔다).

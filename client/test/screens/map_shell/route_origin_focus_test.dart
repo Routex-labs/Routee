@@ -57,18 +57,16 @@ void main() {
   testWidgets('다른 층 매장을 출발지로 잡으면 실내 지도도 그 층으로 옮긴다', (
     WidgetTester tester,
   ) async {
-    await tester.pumpWidget(MaterialApp(theme: AppTheme.light, home: const MapShellScreen()));
+    await tester.pumpWidget(
+      MaterialApp(theme: AppTheme.light, home: const MapShellScreen()),
+    );
     await drain(tester);
 
     final map = tester.state<OutdoorMapBodyState>(find.byType(OutdoorMapBody));
     // ignore: invalid_use_of_visible_for_testing_member
     map.enterIndoorForTest();
     await drain(tester);
-    expect(
-      map.currentFloor,
-      '1F',
-      reason: '테스트 전제(진입 직후에는 기본 층)가 성립하지 않았다',
-    );
+    expect(map.currentFloor, '1F', reason: '테스트 전제(진입 직후에는 기본 층)가 성립하지 않았다');
 
     // 길찾기 출발 칸으로 고른다. 상단 검색과 달리 이쪽은 층으로 좁히지 않아
     // ("길찾기는 항상 건물 전체") 1층을 보는 중에도 2층 매장을 고를 수 있다.
@@ -94,11 +92,7 @@ void main() {
     await drain(tester);
 
     final result = find.text('올리브영');
-    expect(
-      result,
-      findsWidgets,
-      reason: '테스트 전제(길찾기 후보에 2층 매장이 나옴)가 성립하지 않았다',
-    );
+    expect(result, findsWidgets, reason: '테스트 전제(길찾기 후보에 2층 매장이 나옴)가 성립하지 않았다');
     await tester.tap(result.first);
     await drain(tester);
 
@@ -154,6 +148,10 @@ class _TwoFloorStoreRepository implements BuildingRepository {
   @override
   Future<List<CategoryCount>?> getCategoryCounts(String buildingId) async =>
       const [];
+
+  @override
+  Future<Map<String, dynamic>?> getBuildingEvents(String buildingId) async =>
+      null;
 
   @override
   Future<List<StoreIndexEntry>?> getStoreIndex(String buildingId) async =>

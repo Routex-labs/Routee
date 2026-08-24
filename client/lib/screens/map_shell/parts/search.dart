@@ -35,16 +35,27 @@ extension _MapShellSearch on _MapShellScreenState {
     setState(() => _reachByNodeId = reach);
   }
 
+  /// 상단 패널(검색 결과·길찾기 후보)이 켜지기 직전에 **떠 있는 시트를 걷는다.**
+  ///
+  /// 그 패널은 라우트가 아니라 화면 위쪽 표면이라 [SheetStackGuard]가 세지
+  /// 못한다. 시트는 아래쪽에 그대로 남아 **두 장이 한 화면에 겹친다** — 매장
+  /// 상세를 열어 둔 채 검색창을 눌러 치면 결과 목록과 상세가 함께 떴다(실기기
+  /// 확인). 시트를 여는 쪽은 이미 반대 방향을 지키고 있다([_closeSearch]).
+  ///
+  /// **입구마다 막지 않는다.** 시트를 걷는 일은 관찰자 한 곳이 맡고
+  /// ([SheetStackGuard.closeOpenSheets]), 여기서는 "패널이 켜진다"만 알린다 —
+  /// 시트가 늘어도 이 줄은 그대로다.
+  void _closeSheetsUnderTopPanel() => sheetStackGuard.closeOpenSheets();
+
   void _activateSearch() {
     if (_searchActive) return;
+    _closeSheetsUnderTopPanel();
     setState(() {
       _searchActive = true;
-      // **실내 도면을 보는 중에도 바깥을 함께 찾는다.** 실내일 때 껐더니 기능이
-      // 통째로 죽었다 — 폰에서는 진입 임계 zoom이 16.8까지 내려가고 초기 zoom이
-      // 17이라 건물 근처에서는 첫 프레임부터 오버레이가 켜져 있다.
-      //
-      // 원래 걱정은 **순서**가 이미 해결한다. 바깥 결과는 항상 실내 아래에 별도
-      // 헤더로 붙으므로, 바깥이 첫 줄이 되는 건 실내가 빈손일 때뿐이다.
+      // 바깥 검색의 기준점만 지금 떠 둔다. **실내/실외를 가르는 값이 아니다** —
+      // 그건 패널이 `indoorContextActive` 하나로 정한다(SearchPanel 주석).
+      // 검색이 열려 있는 동안은 지도가 잠기므로([_lockMaps]) 이 시점에 한 번
+      // 찍어 둔 값과 실제 화면이 어긋나지 않는다.
       _outdoorSearchCenter = _outdoorKey.currentState?.outdoorSearchCenter;
     });
     // 결과에 붙일 거리는 여기서 한 번만 준비한다. 결과가 나오기 전에 시작하므로
@@ -60,6 +71,11 @@ extension _MapShellSearch on _MapShellScreenState {
   /// 남아 겹치면 안 된다.
   void _closeSearch() {
     _searchFocus.unfocus();
+    // **노드 하나로는 모자란다.** 지우기 X는 IconButton이라 눌리는 순간 자기가
+    // 포커스를 가져간다 — 그러면 위 한 줄은 이미 포커스를 잃은 노드에 대고 하는
+    // no-op이고, 키보드는 뜬 채로 남는다. 실기기에서는 "포커스만 풀리고 키보드는
+    // 그대로"로 보였다. scope에서 떼면 누가 들고 있든 함께 내려간다.
+    FocusScope.of(context).unfocus();
     _searchController.clear();
     // 잠금 해제는 조기 반환보다 먼저 한다. 잡고 있지 않은 이유를 푸는 것은
     // no-op이므로, 상태가 어긋나도 잠금이 남아 지도가 굳는 일이 없다.
@@ -122,6 +138,34 @@ extension _MapShellSearch on _MapShellScreenState {
     await _runSheetChain(() => _showStoreInfo(resolved, focusOnMap: true));
   }
 
+  /// 결과 줄 끝의 `도착`. **상세 시트를 열지 않는다** — 그게 이 버튼의 요점이다
+  /// (검색 → 결과 → 상세 → 도착이 네 걸음이었다).
+  ///
+  /// 검색을 먼저 닫는다. 패널은 상단 Column 전체를 차지해서, 안 닫으면 경로가
+  /// 그려져도 화면은 검색 결과에 덮여 있다.
+  void _onSearchStoreDestination(PoiSearchResult store) {
+    _closeSearch();
+    unawaited(_setRouteDestination(candidateForPlace(store)));
+  }
+
+  /// 후보 줄 끝의 `도착`. 후보는 좌표를 안 싣고 오므로 층 도면에서 찾아 붙인다
+  /// ([_onSearchSuggestionPicked]와 **같은 해석 경로**다).
+  Future<void> _onSearchSuggestionDestination(StoreIndexEntry entry) async {
+    _closeSearch();
+    final resolved = await _outdoorKey.currentState?.resolveIndexEntry(entry);
+    if (!mounted) return;
+    if (resolved == null) {
+      // 도면에서 못 찾았다. 상세를 여는 쪽은 이름으로 검색을 다시 돌려 되살리지만
+      // (`_onSearchSuggestionPicked`), 여기서 그러면 방금 닫은 검색이 되살아나
+      // "도착을 눌렀는데 검색으로 돌아왔다"가 된다.
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('이 매장의 위치를 찾지 못했습니다')));
+      return;
+    }
+    await _setRouteDestination(candidateForPlace(resolved));
+  }
+
   void _onSearchBuildingPicked(Building building) {
     _closeSearch();
     // 카드만 띄우고 지도를 그대로 두면 사용자는 자기가 고른 건물이 화면 어디에
@@ -141,8 +185,11 @@ extension _MapShellSearch on _MapShellScreenState {
 
   /// 길찾기 두 칸에 보여 줄 후보. 매장·건물·건물 밖 장소를 한 목록으로 합친다.
   ///
-  /// 상단 검색과 **같은 재료**를 쓴다. 진입점마다 규칙이 갈리면 같은 검색어가
-  /// 어디에 치느냐에 따라 다른 곳을 찾아 주고, 실제로 그런 시기가 있었다.
+  /// 상단 검색과 **같은 재료**를 쓰되, 실내/실외를 가르지는 않는다. 상단 검색은
+  /// "지금 여기서 뭐가 있나"라 서 있는 쪽만 보여주지만(SearchPanel 주석), 목적지
+  /// 칸은 **밖에 서서 안을 고르는 것이 본업**이다 — 여기까지 가르면 야외에서
+  /// 건물 안 매장으로 가는 길을 아예 못 찍는다(walk_route_kind.dart의 「야외 →
+  /// 실내」).
   // 후보 목록 조립(경량·의미 검색, 실내/건물/바깥 섞기)은
   // directions_candidates.dart가 소유한다. 화면은 야외 지도에서 읽을 세 가지만
   // [OutdoorSearchContext]로 묶어 넘긴다.
