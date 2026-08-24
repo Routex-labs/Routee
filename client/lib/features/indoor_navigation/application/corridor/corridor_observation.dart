@@ -64,8 +64,9 @@ class CorridorObservation {
 
   /// [rawPreviewTailPositions]와 **같은 인덱스**의 accepted peak 시각.
   ///
-  /// 비어 있거나 길이가 다르면 세션 안에서만 유효한 합성 식별자로 폴백한다
-  /// ([CorridorTrackingResult.previewPeakIdsSynthetic]가 true가 된다).
+  /// 발생 시각이며 식별자가 아니다. 옛 로그처럼 [rawPreviewTailPeakIds]가 없으면
+  /// 누적 preview 걸음 번호를 합성 식별자로 쓴다. 확정 시간창이 시각 ID를
+  /// 지운 뒤 같은 tail을 다시 받으면 한 걸음을 두 번 적용하기 때문이다.
   final List<int?> rawPreviewTailPeakTimesMs;
 
   /// 확정 배치가 소비한 시간창의 끝. 이 시각 이하의 preview peak는 이미
@@ -82,9 +83,9 @@ class CorridorObservation {
 
   /// tail을 식별자가 붙은 걸음 목록으로 편다.
   ///
-  /// 시각이 없으면 누적 preview 걸음 번호로 합성한다. 누적값이라 단조 증가하고
-  /// 배치 구성과 무관하므로, 시각이 없는 Android·옛 fixture에서도 같은 걸음이
-  /// 두 번 적용되지 않는다. 실제 시각과 섞이지 않게 음수로 만든다.
+  /// 명시 ID가 없으면 누적 preview 걸음 번호로 합성한다. 누적값이라 단조 증가하고
+  /// 배치 구성과 무관하므로, 옛 fixture에서도 같은 걸음이 두 번 적용되지 않는다.
+  /// 실제 ID와 섞이지 않게 음수로 만든다.
   List<TimedPreviewStep> get timedPreviewSteps {
     final points = rawPreviewTailPositions;
     if (points.length < 2) return const [];
@@ -100,8 +101,7 @@ class CorridorObservation {
         TimedPreviewStep(
           peakId:
               (ids.isEmpty ? null : ids[index]) ??
-              (times.isEmpty ? null : times[index]) ??
-              -(previewSteps - (movementCount - index) + 1),
+              -(previewSteps - movementCount + index),
           rawPoint: points[index],
           occurredAtMs: times.isEmpty ? null : times[index],
         ),
@@ -112,15 +112,9 @@ class CorridorObservation {
   bool get hasSyntheticPreviewPeakIds {
     final points = rawPreviewTailPositions;
     if (points.length < 2) return false;
-    if (rawPreviewTailPeakIds.length == points.length) {
-      for (var index = 1; index < points.length; index += 1) {
-        if (rawPreviewTailPeakIds[index] == null) return true;
-      }
-      return false;
-    }
-    if (rawPreviewTailPeakTimesMs.length != points.length) return true;
+    if (rawPreviewTailPeakIds.length != points.length) return true;
     for (var index = 1; index < points.length; index += 1) {
-      if (rawPreviewTailPeakTimesMs[index] == null) return true;
+      if (rawPreviewTailPeakIds[index] == null) return true;
     }
     return false;
   }

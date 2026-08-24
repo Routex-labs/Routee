@@ -453,7 +453,7 @@ void main() {
       expect(result.optimisticLeadM, closeTo(0, 1e-9));
     });
 
-    test('같은 tail이 다시 들어와도 같은 peak를 두 번 태우지 않는다', () {
+    test('옛 로그의 같은 시각 tail도 누적 걸음 ID로 한 번만 태운다', () {
       final tracker = straightTracker();
       const tail = [PdrLocalPoint(1, 0), PdrLocalPoint(1.7, 0)];
       const times = <int?>[null, 1000];
@@ -481,7 +481,61 @@ void main() {
       );
 
       expect(result.previewPosition.eastM, closeTo(1.7, 1e-9));
-      expect(result.previewPeakIdsSynthetic, isFalse);
+      expect(result.previewPeakIdsSynthetic, isTrue);
+    });
+
+    test('옛 로그에서 확정 시간창이 pending peak 시각을 지나도 다시 태우지 않는다', () {
+      final tracker = straightTracker();
+      tracker.update(
+        _observation(
+          atMs: 1600,
+          confirmedSteps: 0,
+          confirmedDistanceM: 0,
+          previewSteps: 2,
+          headingDeg: 90,
+          rawPreviewTailPositions: _eastPoints(1, 2),
+          rawPreviewTailPeakTimesMs: const [null, 1000, 1500],
+        ),
+      );
+      tracker.update(
+        _observation(
+          atMs: 2000,
+          confirmedSteps: 1,
+          confirmedDistanceM: 0.7,
+          previewSteps: 2,
+          headingDeg: 90,
+          raw: const PdrLocalPoint(1.7, 0),
+          rawConfirmedStepPositions: const [PdrLocalPoint(1.7, 0)],
+          rawPreviewTailPositions: const [
+            PdrLocalPoint(1.7, 0),
+            PdrLocalPoint(2.4, 0),
+          ],
+          rawPreviewTailPeakTimesMs: const [1000, 1500],
+          // 구형 로그에는 실제 소비 개수가 없어 시간창이 pending 시각까지 덮는다.
+          confirmedThroughMs: 2000,
+        ),
+      );
+
+      final heartbeat = tracker.update(
+        _observation(
+          atMs: 2100,
+          confirmedSteps: 1,
+          confirmedDistanceM: 0.7,
+          previewSteps: 2,
+          headingDeg: 90,
+          raw: const PdrLocalPoint(1.7, 0),
+          rawPreviewTailPositions: const [
+            PdrLocalPoint(1.7, 0),
+            PdrLocalPoint(2.4, 0),
+          ],
+          rawPreviewTailPeakTimesMs: const [1000, 1500],
+          confirmedThroughMs: 2000,
+        ),
+      );
+
+      expect(heartbeat.previewPosition.eastM, closeTo(2.4, 1e-9));
+      expect(heartbeat.optimisticLeadM, closeTo(0.7, 1e-9));
+      expect(heartbeat.optimisticStepAdvances, isEmpty);
     });
 
     test('peak 시각이 없어도 걸음 번호로 중복을 거른다', () {

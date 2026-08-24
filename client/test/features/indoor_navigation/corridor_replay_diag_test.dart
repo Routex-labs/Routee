@@ -67,12 +67,15 @@ void _dumpRun(CorridorReplayRun run, {String label = 'external'}) {
   var frozen = 0;
   var prevPv = run.samples.first.result.previewPosition;
   var maxLead = 0.0;
+  CorridorReplaySample? maxLeadSample;
   for (final sample in run.samples.skip(1)) {
     final pv = sample.result.previewPosition;
     if ((pv - prevPv).distance < 1e-6) frozen += 1;
-    maxLead = maxLead > (pv - sample.result.correctedPosition).distance
-        ? maxLead
-        : (pv - sample.result.correctedPosition).distance;
+    final lead = (pv - sample.result.correctedPosition).distance;
+    if (lead > maxLead) {
+      maxLead = lead;
+      maxLeadSample = sample;
+    }
     prevPv = pv;
   }
   // ignore: avoid_print
@@ -80,6 +83,22 @@ void _dumpRun(CorridorReplayRun run, {String label = 'external'}) {
     'preview 3m 초과 점프 ${jumps.length}건 | 정지 프레임 $frozen/${run.samples.length} '
     '| 확정과의 최대 거리 ${maxLead.toStringAsFixed(1)}m',
   );
+  final leadSample = maxLeadSample;
+  if (leadSample != null) {
+    final result = leadSample.result;
+    // ignore: avoid_print
+    print(
+      '최대 거리 시점 t=${leadSample.event.timestampMs} '
+      '누적 선행=${result.optimisticLeadM.toStringAsFixed(1)}m '
+      'step 선행=${(leadSample.event.previewSteps ?? 0) - (leadSample.event.confirmedSteps ?? 0)} '
+      '확정=(${result.correctedPosition.eastM.toStringAsFixed(1)},'
+      '${result.correctedPosition.northM.toStringAsFixed(1)}) '
+      'preview=(${result.previewPosition.eastM.toStringAsFixed(1)},'
+      '${result.previewPosition.northM.toStringAsFixed(1)}) '
+      'edge=${_short(result.currentEdgeId)}→${_short(result.optimisticEdgeId)} '
+      'synthetic=${result.previewPeakIdsSynthetic}',
+    );
+  }
   // ignore: avoid_print
   print(jumps.take(15).join('\n'));
 
