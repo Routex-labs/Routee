@@ -1,8 +1,15 @@
-# 위치 마커 보간 — 왜 지수 평활이고, 상수는 어디서 나왔나
+# 프레임 보간 — 위치 마커와 팔로우 카메라
 
-`LocationMarkerGlide`([`location_marker_glide.dart`](../../client/lib/domain/guidance/location_marker_glide.dart))
-가 왜 그렇게 생겼는지의 **단일 출처**다. 코드에는 각 상수의 한 줄 요약만 둔다.
-검증 기준은 [`location_marker_glide_test.dart`](../../client/test/domain/guidance/location_marker_glide_test.dart).
+안내 중 화면에서 **움직이는 것 둘**(내 위치 점, 따라가는 카메라)이 왜 지수
+평활로 흐르는지의 **단일 출처**다. 코드에는 각 상수의 한 줄 요약만 둔다.
+
+| 무엇 | 코드 | 검증 |
+|---|---|---|
+| 마커 위치·방향 | [`location_marker_glide.dart`](../../client/lib/domain/guidance/location_marker_glide.dart) | [`location_marker_glide_test.dart`](../../client/test/domain/guidance/location_marker_glide_test.dart) |
+| 카메라 각 | [`follow_camera.dart`](../../client/lib/map/camera/follow_camera.dart) | [`follow_camera_test.dart`](../../client/test/map/camera/follow_camera_test.dart) |
+
+둘은 **같은 계수**(`glideFollowFactor`)와 **같은 틱**을 쓴다. 따로 돌리면 점과
+화면이 서로 다른 프레임에서 움직여, 각각은 부드러운데 겹쳐 놓으면 어긋난다.
 
 ## 무엇이 끊겨 보였나
 
@@ -46,6 +53,35 @@
 에스컬레이터 활강도 잇지 않는다. 활강은 자기 진행률로 이미 프레임마다 흐르고
 있어서([escalator-thresholds.md](escalator-thresholds.md)), 여기서 한 번 더 이으면
 두 겹이 되어 도면은 새 층인데 점은 아직 오는 중이 된다.
+
+## 카메라가 돌 때 끊기던 이유는 따로였다
+
+마커를 이은 뒤에도 **회전은 여전히 뚝뚝 끊겼다.** 원인이 다르다.
+
+예전 팔로우는 `400ms`마다 `320ms`짜리 `animateCamera`를 걸었다. 애니메이션마다
+가속·감속이 붙어 있어서, 이어 붙이면 **돌다 서다**가 반복된다. 여기에 데드밴드
+8°가 겹쳐 회전이 8° 계단으로 쪼개졌다.
+
+지금은 **명령을 띄엄띄엄 보내지 않는다.** 목표 각(`nextFollowCameraBearingDeg`)
+과 그리는 각을 가르고, 마커와 같은 틱에서 `moveCamera`로 매 프레임 놓는다.
+
+| 상수 | 값 | 근거 |
+|---|---|---|
+| 카메라 각 시정수 | 240ms | 90° 코너를 도는 데 약 0.7초. 더 키우면 몸을 다 튼 뒤에도 화면이 따라오고, 더 줄이면 데드밴드가 낸 계단이 그대로 보인다. |
+| 수렴 각 | 0.1° | 이만큼 붙으면 프레임 루프를 멈춘다. 서 있는 동안 초당 서른 번 카메라를 부르지 않기 위한 끝. |
+| 재개 간격 | 200ms | 이보다 오래 카메라를 안 잡고 있었으면 **지금 카메라 각을 다시 읽어** 이어 간다. |
+
+마지막 줄이 중요하다. 층 fit·에스컬레이터 하차 조준처럼 카메라의 주인이 잠시
+바뀌는 구간이 있고([`_holdFollowCamera`]), 그동안 화면은 우리가 마지막으로 그린
+각과 다른 데를 보고 있다. 그 각에서 그냥 이으면 팔로우가 돌아오는 순간 화면이
+한 번 튄다.
+
+데드밴드(8°)와 유예 시각은 그대로 남았다. 흔들림을 거르는 일과 부드럽게 잇는
+일은 **다른 문제**다 — 보간만으로 흔들림을 지우려면 시정수를 사람이 못 견딜
+만큼 키워야 한다.
+
+카메라 목표점도 **마커가 그려지는 자리**를 쓴다. 보간 전 좌표를 쓰면 화면은
+걸음마다 튀는데 그 위의 점만 부드럽게 흘러 둘이 어긋난다.
 
 ## 야외 GPS 마커는 아직 그대로다
 
