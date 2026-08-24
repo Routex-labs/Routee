@@ -405,25 +405,38 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
         .toList(growable: false);
   }
 
-  /// confirmed 경로를 통행 간선에 스냅한 결과. 단순 스냅 점을 직선으로 잇지
-  /// 않고 간선이 바뀌는 구간은 그래프 경로로 펼친다(matchRoutedPath).
-  List<PdrLocalPoint> get _pdrMatchedFloorPath {
-    final graph = _floorGraph;
-    final confirmed = _pdrConfirmedFloorPath;
-    if (graph == null || confirmed.isEmpty) return const [];
-    return FloorMapMatcher(graph).matchRoutedPath(confirmed);
+  /// 실제 마커가 쓴 복도 tracker의 확정 궤적. 대표 가설 교체로 끊긴 구간은
+  /// 서로 직선으로 잇지 않고 별도 선분으로 유지한다.
+  List<List<PdrLocalPoint>> get _pdrCorrectedFloorPaths {
+    final floor = _activeFloor;
+    final result = _guidance.trackingResult;
+    if (floor == null || _guidance.floorId != floor || result == null) {
+      return const [];
+    }
+    final recorded = _guidanceTrailSession.segmentsForFloor(floor);
+    if (recorded.isNotEmpty) return recorded;
+    return [result.correctedPath];
+  }
+
+  /// 확정 전 주황 걸음을 복도 tracker가 해석한 임시 꼬리.
+  List<PdrLocalPoint> get _pdrCorrectedPreviewFloorPath {
+    final result = _guidance.trackingResult;
+    if (_guidance.floorId != _activeFloor || result == null) return const [];
+    return result.previewPath;
   }
 
   /// PDR이 올라타 있다고 판정된 간선들. 세션 시작 직후 원점 하나만 투영돼
   /// 아직 걷지도 않은 간선이 강조되는 것을 막으려고 실제 이동이 생긴 뒤에만
   /// 채운다.
   Set<String> get _pdrMatchedEdgeIds {
-    final graph = _floorGraph;
-    final confirmed = _pdrConfirmedFloorPath;
-    if (graph == null || !_hasMeaningfulPdrMovement(confirmed)) return const {};
-    return FloorMapMatcher(
-      graph,
-    ).matchPath(confirmed).map((point) => point.edgeId).toSet();
+    if (!_hasMeaningfulPdrMovement(_pdrRawFloorPath)) return const {};
+    final result = _guidance.trackingResult;
+    if (result == null) return const {};
+    return {
+      ?result.currentEdgeId,
+      ?result.optimisticEdgeId,
+      ...result.previewCandidateEdgeIds,
+    };
   }
 
   /// 세션 시작 직후에는 원점 한 개만 가장 가까운 간선에 투영되면서, 아직 걷지도
@@ -472,8 +485,14 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
       confirmedPath: on && debug.showConfirmedPdrPath
           ? _floorPathToWgs84(_pdrConfirmedFloorPath)
           : const [],
-      matchedPath: on && debug.showMapMatchedPdrPath
-          ? _floorPathToWgs84(_pdrMatchedFloorPath)
+      correctedPaths: on && debug.showMapMatchedPdrPath
+          ? [
+              for (final path in _pdrCorrectedFloorPaths)
+                _floorPathToWgs84(path),
+            ]
+          : const [],
+      correctedPreviewPath: on && debug.showMapMatchedPdrPath
+          ? _floorPathToWgs84(_pdrCorrectedPreviewFloorPath)
           : const [],
     );
   }
@@ -483,7 +502,8 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
   /// 전)에는 null을 돌려주고, 이 경우 마커도 방향 삼각형 없이 도트만 뜬다.
   /// 계산식은 실내와 동일하며 walkOffset·복도 bias를 섞지 않는다.
   double? get _pdrCurrentHeadingDeg => _mapBearingOf(
-    _liveHeading?.orientationDeg ?? _pdrTrailState.snapshot?.orientationHeadingDeg,
+    _liveHeading?.orientationDeg ??
+        _pdrTrailState.snapshot?.orientationHeadingDeg,
   );
 
   /// 실제로 걸어가고 있는 방향(true north 기준). [_pdrCurrentHeadingDeg]와 **같은
@@ -748,6 +768,7 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
         observation: _guidance.lastObservation,
         wasReset: _guidance.lastWasReset,
         result: result,
+        actualMarkerPosition: _guidance.position?.localM,
         snapshot: snapshot,
         previewTailPeakTimesMs: _guidance.corridor.previewTailPeakTimesMs(
           snapshot,
