@@ -386,6 +386,14 @@ extension OutdoorMapMap on OutdoorMapBodyState {
     if (!_indoorEntered) return;
     if (_placingPdrAnchor) _setPlacingAnchor(false);
     _setIndoorEntered(false);
+    // 이 길도 카메라를 축소 자체 말고는 만지지 않는다 — 실내에서 건물 축에
+    // 맞춰 돌아간 방위가 그대로 남으면, 이 축소로 야외로 돌아온 사용자가
+    // 그 회전된 지도 위에서 걷게 된다([resetCameraToNorthUp]과 같은 이유로
+    // 다른 이탈 경로에 붙인 `fe35e4cf`가 이 길은 놓쳤다).
+    final controller = _mapController;
+    if (controller != null && _styleReady) {
+      unawaited(resetCameraToNorthUp(controller));
+    }
   }
 
   /// GPS 현재 위치 마커. 실내에서는 [_outdoorGpsVisible]이 false라 항상 빈
