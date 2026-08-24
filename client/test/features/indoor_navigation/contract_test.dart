@@ -12,6 +12,7 @@ class FakeIndoorNavigation implements IndoorNavigationController {
   final _runtimeStatuses = StreamController<PdrRuntimeStatus>.broadcast();
   final _altitudes = StreamController<AltitudeSample>.broadcast();
   final _rawMotion = StreamController<RawMotionActivity>.broadcast();
+  final _headings = StreamController<PdrHeadingSample>.broadcast();
 
   PdrSnapshot? _current;
   CalibrationStatus _calib = const CalibrationStatus.uncalibrated();
@@ -35,6 +36,9 @@ class FakeIndoorNavigation implements IndoorNavigationController {
 
   @override
   Stream<RawMotionActivity> get rawMotion => _rawMotion.stream;
+
+  @override
+  Stream<PdrHeadingSample> get headings => _headings.stream;
 
   @override
   PdrRuntimeStatus get currentRuntimeStatus => _runtimeStatus;

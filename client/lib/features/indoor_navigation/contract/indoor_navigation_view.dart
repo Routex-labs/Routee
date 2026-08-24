@@ -2,6 +2,7 @@ import 'package:indoor_pdr_core/indoor_pdr_core.dart';
 
 import 'altitude_sample.dart';
 import 'calibration_state.dart';
+import 'pdr_heading_sample.dart';
 import 'pdr_runtime_status.dart';
 import 'raw_motion_activity.dart';
 
@@ -41,6 +42,11 @@ abstract interface class IndoorNavigationView {
 
   /// 기압계 가용 상태. native snapshot이 오기 전에는 `unavailable`이다.
   AltimeterStatus get altimeterStatus;
+
+  /// 화면 회전용 방향만 흐르는 스트림. native motion 주기(≈33Hz)라
+  /// [snapshots]보다 열 배 이상 촘촘하다 — 카메라·마커 삼각형 **전용**이고,
+  /// 위치·층 판정에 쓰면 안 된다([PdrHeadingSample]).
+  Stream<PdrHeadingSample> get headings;
 
   /// 위치 적용과 **무관한** 원시 움직임. 걸음 적용을 멈춘 동안에도 흐른다 —
   /// 층 전이 판정기가 "하차해서 걷기 시작했다"를 아는 유일한 근거다.
