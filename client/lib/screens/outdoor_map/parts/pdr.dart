@@ -620,6 +620,7 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
       target: target,
       elapsed: elapsed,
       timeConstant: followCameraBearingTimeConstant,
+      maxRateDegPerSec: followCameraBearingMaxRateDegPerSec,
     );
 
     final moved = _followCameraShownPoint != here;

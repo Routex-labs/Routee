@@ -19,9 +19,16 @@ import 'package:latlong2/latlong.dart';
 /// "내가 멈춘 걸 앱이 모른다"로 읽히고, 더 줄이면 걸음의 각짐이 그대로 보인다.
 const locationMarkerGlideTimeConstant = Duration(milliseconds: 260);
 
-/// 방향(삼각형)이 목표를 따라잡는 시정수. 위치보다 짧다 — 방향은 몸을 트는
-/// 순간 바로 따라와야 하고, 각도는 뒤처져도 화면에서 미끄러져 보이지 않는다.
-const locationMarkerGlideHeadingTimeConstant = Duration(milliseconds: 160);
+/// 방향(삼각형)이 목표를 따라잡는 시정수와 최대 각속도(도/초).
+///
+/// **팔로우 카메라와 같은 값이라야 한다**(`outdoor_map_tuning.dart`의
+/// `followCameraBearing*`). 팔로우 중 화면 위 삼각형이 가리키는 쪽은 두 각의
+/// 차라서, 한쪽만 빨리 돌면 코너마다 삼각형이 앞질렀다 되돌아온다.
+///
+/// 속도를 자르는 이유는 카메라와 같다 — 방향 신호가 초당 두어 번, 한 번에
+/// 수십 도씩 뛰어서 온다. 근거는 `docs/client/location-marker-glide.md`.
+const locationMarkerGlideHeadingTimeConstant = Duration(milliseconds: 120);
+const locationMarkerGlideHeadingMaxRateDegPerSec = 90.0;
 
 /// 이 거리를 넘게 뛰면 보간하지 않고 그 자리로 옮긴다(m).
 ///
@@ -171,7 +178,13 @@ class LocationMarkerGlide {
       return true;
     }
     final k = glideFollowFactor(elapsed, locationMarkerGlideHeadingTimeConstant);
-    _shownHeadingDeg = _normalizeDeg(shown + delta * k);
+    final eased = delta * k;
+    final cap =
+        locationMarkerGlideHeadingMaxRateDegPerSec *
+        elapsed.inMicroseconds /
+        1000000;
+    final step = eased.abs() <= cap ? eased : (eased.isNegative ? -cap : cap);
+    _shownHeadingDeg = _normalizeDeg(shown + step);
     return true;
   }
 

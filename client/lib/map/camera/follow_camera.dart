@@ -78,20 +78,33 @@ double? nextFollowCameraBearingDeg({
 }
 
 /// 화면이 지금 그리고 있는 각([shown])을 목표([target]) 쪽으로 [elapsed]만큼
-/// 당긴 값.
+/// 당긴 값. **명령을 띄엄띄엄 보내는 대신 매 프레임 이 값으로 카메라를 놓는다.**
 ///
-/// **명령을 띄엄띄엄 보내는 대신 매 프레임 이 값으로 카메라를 놓는다.** 예전에는
-/// 목표가 바뀔 때마다 animateCamera를 걸었는데, 애니메이션마다 가속·감속이
-/// 붙어 있어 이어 붙이면 화면이 돌다 서다를 반복했다. 지수 평활은 목표가 언제
-/// 바뀌어도 이어지고, 감속 없이 남은 각만 계속 좁힌다.
+/// 두 규칙을 겹친다.
 ///
-/// [timeConstant]가 0 이하면 보간하지 않고 목표를 그대로 돌려준다.
+/// 1. 남은 각에 비례해 다가간다(지수 평활, [timeConstant]). 작은 보정이
+///    부드럽게 **멈추는** 것은 이쪽 몫이다.
+/// 2. 각속도를 [maxRateDegPerSec]로 **자른다**. 목표각은 초당 두어 번, 한 번에
+///    수십 도씩 뛰어서 오므로(PDR 스냅샷 주기) 1번만 두면 도착 직후 300°/s로
+///    후려치고 다음 목표까지 멈춰 선다 — 그것이 "뚝뚝 끊겨 돈다"의 정체다.
+///    잘라 두면 그 도약이 등속 램프가 되어 다음 목표가 올 때까지 이어진다.
+///
+/// 그래서 큰 도약은 등속으로, 마지막 몇 도는 지수로 잦아들며 멈춘다. 목표보다
+/// 늦게 도착하는 것은 **의도한 교환**이다 — 근거는
+/// `docs/client/location-marker-glide.md`.
 double glidedFollowBearingDeg({
   required double shown,
   required double target,
   required Duration elapsed,
   required Duration timeConstant,
-}) => lerpBearingDeg(shown, target, glideFollowFactor(elapsed, timeConstant));
+  required double maxRateDegPerSec,
+}) {
+  final eased = shortestDeltaDegrees(target - shown) *
+      glideFollowFactor(elapsed, timeConstant);
+  final cap = maxRateDegPerSec * elapsed.inMicroseconds / 1000000;
+  final step = eased.abs() <= cap ? eased : (eased.isNegative ? -cap : cap);
+  return normalizeDegrees(shown + step);
+}
 
 /// 두 각의 최단 차(도, 절댓값). 데드밴드와 수렴 판정이 **같은 산수**를 보게
 /// 한다 — 한쪽만 360을 못 넘으면 경계에서 서로 다른 답을 낸다.

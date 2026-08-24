@@ -142,6 +142,29 @@ void main() {
       expect(glide.isSettled, isTrue);
     });
 
+    test('큰 도약은 각속도 상한에 걸려 등속으로 돈다', () {
+      // 방향 신호도 초당 두어 번 수십 도씩 뛰어서 온다. 지수만 쓰면 첫 프레임이
+      // 가장 크고 계속 줄어들어, 삼각형이 확 돌고 멈춘다.
+      final glide = LocationMarkerGlide()..aimAt(_origin, headingDeg: 0);
+      glide.aimAt(_origin, headingDeg: 90);
+      final perFrame =
+          locationMarkerGlideHeadingMaxRateDegPerSec *
+          _frame.inMilliseconds /
+          1000;
+
+      var previous = 0.0;
+      final steps = <double>[];
+      for (var i = 0; i < 10; i++) {
+        glide.advance(_frame);
+        steps.add(glide.headingDeg! - previous);
+        previous = glide.headingDeg!;
+      }
+      for (final step in steps) {
+        expect(step, lessThanOrEqualTo(perFrame + 1e-9));
+        expect(step, closeTo(steps.first, 1e-9));
+      }
+    });
+
     test('위치가 붙어도 방향이 남았으면 아직 끝나지 않았다', () {
       final glide = LocationMarkerGlide()..aimAt(_origin, headingDeg: 0);
       glide.aimAt(_origin, headingDeg: 40);

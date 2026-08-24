@@ -141,6 +141,17 @@ const indoorFollowZoom = 19.0;
 /// 길게 잡아 두 겹으로 늦출 이유가 없었다. 90° 코너가 약 0.35초다.
 const followCameraBearingTimeConstant = Duration(milliseconds: 120);
 
+/// 팔로우 카메라가 도는 **최대 각속도**(도/초).
+///
+/// 목표각은 초당 두어 번, 한 번에 수십 도씩 뛰어서 온다(PDR 스냅샷 주기 —
+/// `pdr_session.dart`의 heading emit 조건). 속도를 안 자르면 도착 직후 300°/s로
+/// 후려치고 다음 목표까지 멈춰 서서, 초당 두세 번 "확 돌고 멈춤"이 반복된다.
+///
+/// 90°/s는 그 도약을 **다음 목표가 올 때까지 이어지는 등속 램프**로 만드는
+/// 값이다: 400ms 간격에 36°(=90°/s로 도는 코너)가 딱 맞물린다. 빨리 돌면 화면이
+/// 그만큼 뒤에 남지만, 끊기지 않는 쪽을 골랐다(2026-08-24 실기기 요청).
+const followCameraBearingMaxRateDegPerSec = 90.0;
+
 /// 표시 각이 목표에 이만큼 붙으면 더 명령하지 않는다(도). 지수 평활은 영원히
 /// 도착하지 않으므로 끝을 정해 줘야 프레임 루프가 멈춘다.
 const followCameraBearingSettleDeg = 0.1;
