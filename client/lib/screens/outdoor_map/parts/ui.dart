@@ -516,18 +516,12 @@ extension OutdoorMapUi on OutdoorMapBodyState {
                       child: Builder(
                         builder: (context) {
                           final boarding = _debugEscalatorBoarding(up: up);
-                          return RoutexMapControl(
+                          return DebugFloorTransitionControl(
                             key: Key(
                               'debug-force-floor-transition-${up ? 'up' : 'down'}',
                             ),
-                            label: up ? '위층으로 층 전환' : '아래층으로 층 전환',
-                            // 방향 화살표는 디자인 시스템에 없다. 층 이동은
-                            // 접기/펼치기가 아니라 위아래 이동이라 그쪽 아이콘을
-                            // 빌려 쓰지 않는다.
-                            icon: up
-                                ? Icons.arrow_upward_rounded
-                                : Icons.arrow_downward_rounded,
-                            text: boarding?.name.otherFloorLabel,
+                            up: up,
+                            targetFloorLabel: boarding?.name.otherFloorLabel,
                             onPressed: boarding == null
                                 ? null
                                 : () => _debugForceFloorTransition(up: up),

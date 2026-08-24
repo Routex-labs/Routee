@@ -79,6 +79,7 @@ import '../../map/icon/category_map_icon.dart';
 import '../../map/style/floor_facility_style.dart';
 import '../../domain/store/nearest_around_me.dart';
 import '../../map/camera/scale_bar.dart';
+import 'widgets/debug_floor_transition_control.dart';
 import 'widgets/floor_selector.dart';
 import 'widgets/map_scale_bar.dart';
 import 'widgets/nearby_store_sheet.dart';
