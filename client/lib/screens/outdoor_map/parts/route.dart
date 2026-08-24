@@ -71,15 +71,15 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
     final goingUp = up;
     // 몇 층을 건너뛰는지가 곧 기압 변화다. 활강 진행률이 이 값으로 정규화되므로
     // 두 층 점프를 1층치 높이로 적으면 점이 절반에서 상한에 붙는다.
-    final crossedFloors =
-        (floorLabelRank(toFloor) - floorLabelRank(floor)).abs().clamp(1, 6);
+    final crossedFloors = (floorLabelRank(toFloor) - floorLabelRank(floor))
+        .abs()
+        .clamp(1, 6);
     final transition = EscalatorTransition(
       group: boardingName.group,
       direction: goingUp ? EscalatorDirection.up : EscalatorDirection.down,
       fromFloorLabel: floor,
       toFloorLabel: toFloor,
-      deltaM:
-          (goingUp ? 1 : -1) * escalatorDefaultFloorHeightM * crossedFloors,
+      deltaM: (goingUp ? 1 : -1) * escalatorDefaultFloorHeightM * crossedFloors,
       durationMs: 0,
       stepsDuring: 0,
       boardingNodeId: routed?.transferFromNodeId ?? boardingNode.id,
@@ -315,6 +315,9 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
     // 도착점과 실내 구간의 시작점을 함께 갈아 끼운다 — 한쪽만 바꾸면 도보 경로는
     // 새 문으로 가는데 실내 경로는 옛 문에서 시작하는 화면이 된다.
     if (_pendingIndoorDestination != null) _retargetJourneyEntrance();
+
+    // 방금 나온 문에 못박아 둔 야외 구간이면, 먼저 넘겨줄 때가 됐는지 본다.
+    _maybeHandOffOutdoorLegToGps(position);
 
     // 길찾기가 그린 **계획 경로**는 출발점이 못박혀 있다. GPS가 갱신될 때마다
     // 다시 계산하면 사용자가 비교하려고 보고 있는 선이 걸음마다 흔들린다.
@@ -671,19 +674,61 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
     _beginRouteRecordingSession();
   }
 
-  /// 건물을 나간 순간, 예약해 둔 야외 구간을 실제 안내로 올린다.
+  /// 건물을 나간 순간, 예약해 둔 야외 구간을 **나온 문에서부터** 다시 그린다.
   ///
-  /// 출발지를 못박지 않는 이유는 **현재 위치에서 출발해야 하기 때문**이다.
-  /// 출구 좌표를 출발지로 주면 [showRouteTo]가 그 값을 [_fixedRouteOrigin]에
-  /// 넣어 경로를 고정하고, 그러면 걸어가는 동안 경로가 사용자를 따라오지 않는다.
+  /// 출발지를 [_exitDoorPoint]로 못박는다. 안내를 걸 때 미리 그려 둔 선은
+  /// *경로가 향하던* 문 기준인데([showIndoorToOutdoorRouteTo]) 사용자는 다른
+  /// 문으로 나갈 수 있고, 그때 두 점은 건물 폭만큼 벌어진다.
+  ///
+  /// **GPS로 출발하지 않는 이유.** 문을 막 나선 순간의 좌표는 건물이 하늘을 가려
+  /// 오차가 가장 크다. 그 좌표로 그리면 경로가 건물 안이나 반대편 도로에서
+  /// 시작한 것처럼 보인다 — 사용자가 "내가 나온 자리에서 안 시작한다"고 말한
+  /// 화면이 이것이다.
+  ///
+  /// 못박은 것은 [outdoorLegHandoffMeters]만큼 멀어지면 풀린다
+  /// ([_maybeHandOffOutdoorLegToGps]). 안 풀면 걷는 내내 선이 문에 붙어 있다.
+  ///
+  /// 문을 모르면(앵커가 없어 마커에서 문을 못 고른 경우) 예전처럼 현재 위치에서
+  /// 출발한다 — 틀린 자리에 못박느니 따라오는 편이 낫다.
   Future<void> _activatePendingOutdoorRoute() async {
     final destination = _pendingOutdoorDestination;
     final label = _pendingOutdoorLabel;
     if (destination == null || label == null) return;
     _clearPendingOutdoorRoute();
+    final door = _exitDoorPoint;
+    _exitDoorPoint = null;
     // 완료 이력은 들고 간다. 이 호출은 같은 여정의 다음 구간이라, 거울상인
     // [_activatePendingIndoorRoute]가 야외 회색선을 남겨 두는 것과 대칭이다.
-    await showRouteTo(destination, label: label, keepCompletedHistory: true);
+    await showRouteTo(
+      destination,
+      label: label,
+      origin: door,
+      keepCompletedHistory: true,
+    );
+    if (!mounted || door == null) return;
+    // **[showRouteTo] 뒤에 세운다.** 그쪽이 새 안내마다 이 래치를 내리므로
+    // (계획 경로의 못박기와 구분이 안 되면 걷는 안내가 영영 안 따라온다),
+    // 먼저 세우면 그 자리에서 바로 지워진다.
+    _outdoorLegPinnedToExitDoor = true;
+  }
+
+  /// 문에 못박아 둔 야외 구간을 GPS에 넘겨줄 때가 됐는지 본다.
+  ///
+  /// 넘겨주면 [_fixedRouteOrigin]이 비어 [_updateRoute]가 다시 돌기 시작한다.
+  /// 판정은 **문에서 얼마나 멀어졌는가** 하나뿐이다 — 시간으로 재면 문 앞에 서서
+  /// 기다리는 사람의 경로가 오차 큰 좌표로 갈아 끼워진다.
+  void _maybeHandOffOutdoorLegToGps(Position position) {
+    if (!_outdoorLegPinnedToExitDoor) return;
+    if (!shouldHandOffOutdoorLegToGps(
+      doorPoint: _fixedRouteOrigin,
+      here: ll.LatLng(position.latitude, position.longitude),
+    )) {
+      return;
+    }
+    setState(() {
+      _outdoorLegPinnedToExitDoor = false;
+      _fixedRouteOrigin = null;
+    });
   }
 
   /// 실내→야외 예약을 접는다. 그 안내가 더는 유효하지 않은 모든 자리에서 부른다.

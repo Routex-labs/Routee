@@ -449,7 +449,62 @@ quantize 오차뿐인데, extent 4096 기준 z17에서 6 cm 남짓이라 어떤 
 출구가 없다.
 
 다른 문으로 나가도 비용은 걷는 거리뿐이다 — 야외 구간을 올리는
-`_activatePendingOutdoorRoute`가 출발지를 못 박지 않고 **나간 자리에서** 다시 그린다.
+`_activatePendingOutdoorRoute`가 **나온 문에서** 다시 그린다(아래 「야외 구간은…」).
+
+### 나가는 여정인지는 도착 노드로 가른다 — 노드가 둘이다
+
+문 하나에 그래프 노드가 **둘**이다. 안쪽 노드(`BuildingEntrance.nodeId`)와, 실내
+선을 문까지 닿게 하려고 꿰맨 바깥 문 노드(`entranceDoorNodeId`)다. 경로는
+`entranceRouteNodeId`가 고른 쪽을 목적지로 잡고, 꿰매기가 성공하면 **바깥 것**이다.
+
+안쪽 것만 비교하던 동안 정상 케이스가 통째로 안 걸렸다. 그 결과가 실기기에서 이렇게
+보였다 — 실내에서 야외 목적지로 안내를 걸고 출구에 닿으면, 하단 카드가
+`밖으로 나가기` 대신 **`안내 종료` 하나로 바뀌었다.** 실내 구간의 목적지가 출구라
+거기 닿는 것이 `arrived`인데, 나가는 여정임을 못 알아봐 그대로 도착으로 말한 것이다.
+
+판정의 단일 출처는 `domain/route/entrance_door_nodes.dart`의
+`exitEntranceForRouteNodeId`이고, 검증 기준은
+`client/test/domain/route/entrance_door_nodes_test.dart`. 그 값이 참인 동안:
+
+- **도착을 말하지 않는다**(`_syncArrival`). 이 여정의 도착지는 바깥 목적지다.
+- **출구에 도착 핀을 찍지 않는다**(`_indoorDestinationPinForActiveFloor`). 출구는
+  경유지고, 도착 핀은 바깥 목적지에 찍힌 것 하나뿐이다.
+- `밖으로 나가기` 버튼이 카드에 선다.
+
+### 야외 구간은 **나온 문에서** 다시 그린다
+
+안내를 걸 때도 야외 구간을 함께 그린다(`showIndoorToOutdoorRouteTo`) — 자동차·대중
+교통·도보 중 무엇을 고를지가 지금 사용자의 관심사라, 실내 구간만 보여 주면 나머지가
+사라진 것으로 보인다. 그때 출발점은 **경로가 향하던 문**이다.
+
+그런데 사용자는 다른 문으로 나갈 수 있고(위 「이탈은 경로가 정한 문만…」) 두 점은
+건물 폭만큼 벌어진다. 그래서 나가는 순간 **실제로 나온 문**을 기준으로 한 번 더
+그린다. 문은 `밖으로 나가기`를 누른 시점의 실내 마커에서 가장 가까운 것이다 —
+게이트가 이미 "어느 문에서 15 m 안"을 확인했으므로 그 문이 방금 지난 문이다.
+
+**GPS로 출발하지 않는 이유.** 문을 막 나선 순간의 좌표는 건물이 하늘을 가려 오차가
+가장 크다. 그 좌표로 그리면 경로가 건물 안이나 반대편 도로에서 시작한 것처럼 보인다.
+문 좌표는 도면이 아는 값이라 그 순간 가장 정확하다.
+
+못박은 것은 문에서 `outdoorLegHandoffMeters`만큼 멀어지면 GPS에 넘어간다
+(`shouldHandOffOutdoorLegToGps`). 두 실패가 서로 반대다 — 안 넘기면 걷는 내내 선이
+문에 붙어 사용자를 따라오지 않고, 너무 일찍 넘기면 아직 오차가 큰 첫 좌표가 방금
+문에 맞춰 놓은 선을 뒤엎는다. 검증 기준은
+`client/test/screens/outdoor_map/entry/manual_transition_gate_test.dart`.
+
+### 전환 연출은 셸 chrome보다 위다 — 덮는 대신 그리지 않는다
+
+연출 덮개는 **지도 안에서** 그리는데 셸 chrome(검색창·길찾기 바·카테고리 줄·하단
+바·탭 줄)은 그 지도의 형제다. z축으로는 이길 수 없어서, 실기기에서 `밖으로 나가기`를
+누르면 덮개 위에 출발지/도착지 칸이 그대로 떠 있었다.
+
+그래서 지도가 덮개 불투명도를 셸에 알리고(`onIndoorTransitionVeilChanged`) 셸이 그동안
+chrome을 **트리에서 뺀다**. 층 전환 스크림과 같은 구조다(`_floorTransitionCovers`).
+
+**진행률이 아니라 불투명도를 넘긴다.** 덮개는 구간 앞뒤로 투명해서
+(`indoorTransitionVeilIn`), 진행률로 가르면 아직 아무것도 안 가린 프레임에서도 chrome이
+걷혀 검색창이 이유 없이 깜빡인다. 검증 기준은
+`client/test/screens/map_shell/transition_veil_hides_chrome_test.dart`.
 
 ### 진입 앵커는 GPS 스냅이 아니라 문 노드다
 
@@ -465,6 +520,7 @@ quantize 오차뿐인데, extent 4096 기준 z17에서 6 cm 남짓이라 어떤 
   접는 것(`_exitIndoorByOutsideTap`·`returnToOutdoorView`)은 화면 조작이지 전환이
   아니다. 그래서 `leftBuilding`을 세우지 않고 실내 위치도 버리지 않는다.
 - 층 전환(에스컬레이터)은 건물 안에서 일어나는 일이라 이 문서의 범위 밖이다.
+
 ---
 
 ## 7. 배율이 도면을 켜므로, 활성 층은 실외에서도 사실이어야 한다

@@ -135,6 +135,16 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
   void _syncArrival() {
     if (!mounted) return;
 
+    // **문에 닿은 것은 도착이 아니다.** 나가는 여정의 실내 구간은 목적지가
+    // 출구라([_guidanceLeavesBuilding]) 여기까지 걸으면 `arrived`가 뜬다. 그대로
+    // 도착으로 말하면 하단 카드가 `안내 종료` 하나로 바뀌어, 정작 눌러야 할
+    // "밖으로 나가기"가 사라진다(실기기 증상). 이 여정의 도착은 바깥 목적지다.
+    if (_guidanceLeavesBuilding) {
+      _arrivalRouteClearTimer?.cancel();
+      _arrivalRouteClearTimer = null;
+      return;
+    }
+
     final destination = _indoorRouteDestination;
     if (_arrivedDestination == null &&
         shouldAnnounceArrival(

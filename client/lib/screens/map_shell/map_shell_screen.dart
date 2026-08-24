@@ -257,14 +257,31 @@ class _MapShellScreenState extends State<MapShellScreen> {
   /// 없지만, **미리 굽는 시점**을 알려면 바뀌는 순간을 잡아야 한다.
   List<String> _floorTransitionPhotos = const [];
 
-  /// 층 전환 연출이 화면을 덮고 있는지. 참이면 셸 chrome(검색창·카테고리 줄·
-  /// 하단 바·탭 줄)을 트리에서 뺀다.
+  /// 실내↔야외 전환 덮개의 불투명도. 지도가 알려 온다
+  /// ([OutdoorMapBody.onIndoorTransitionVeilChanged]).
+  double _indoorVeilOpacity = 0;
+
+  /// 전환 연출이 화면을 덮고 있는지. 참이면 셸 chrome(검색창·길찾기 바·카테고리
+  /// 줄·하단 바·탭 줄)을 트리에서 뺀다.
   ///
-  /// **스크림을 맨 위에 두는 것만으로는 부족하다.** 페이드가 오르내리는 동안
-  /// 스크림은 반투명이라 그 구간 내내 chrome이 비쳐 보인다 — 연출이 "덮었다"고
-  /// 말하는 동안 화면은 아직 덮이지 않은 셈이다. 0보다 크면 곧 덮이거나 덮여
-  /// 있는 것이므로, 그 순간부터 아예 그리지 않는다.
-  bool get _floorTransitionCovers => _floorScrimOpacity > 0;
+  /// 덮개가 둘이다 — 층 전환 스크림과 실내↔야외 전환 덮개. **둘 다 지도 안에서
+  /// 그린다.** 셸 chrome은 그 지도의 형제라 z축으로는 이길 수 없어서, 덮는
+  /// 동안에는 아예 그리지 않는 것으로 가린다.
+  ///
+  /// **맨 위에 두는 것만으로는 부족하다.** 페이드가 오르내리는 동안 덮개는
+  /// 반투명이라 그 구간 내내 chrome이 비쳐 보인다 — 연출이 "덮었다"고 말하는
+  /// 동안 화면은 아직 덮이지 않은 셈이다. 0보다 크면 곧 덮이거나 덮여 있는
+  /// 것이므로, 그 순간부터 아예 그리지 않는다.
+  bool get _floorTransitionCovers =>
+      _floorScrimOpacity > 0 || _indoorVeilOpacity > 0;
+
+  void _onIndoorTransitionVeilChanged(double opacity) {
+    if (!mounted || _indoorVeilOpacity == opacity) return;
+    // 덮개가 오르기 시작하면 검색은 접는다. 패널은 상단을 통째로 차지해, 트리에
+    // 남겨 두면 덮개가 걷힌 뒤에도 키보드가 올라온 채로 돌아온다.
+    if (opacity > 0 && _searchActive) _closeSearch();
+    setState(() => _indoorVeilOpacity = opacity);
+  }
 
   // 지도 위에 얹은 공용 오버레이(검색창·카테고리 줄·하단 바)의 영역을
   // IndoorMapBody가 map click 처리에서 제외할 수 있게 넘겨줄 key들.
@@ -865,6 +882,7 @@ class _MapShellScreenState extends State<MapShellScreen> {
       categorySelection: _categorySelection,
       onFloorChanged: _onActiveFloorChanged,
       onFloorTransitionChanged: _onFloorTransitionChanged,
+      onIndoorTransitionVeilChanged: _onIndoorTransitionVeilChanged,
       onStartupReady: _finishStartupLoading,
       // 실내 화면과 같은 목록을 넘긴다. 야외 지도도 실내 진입
       // 오버레이가 켜지면 층 선택기·위치 지정을 함께 쓰므로, 상단

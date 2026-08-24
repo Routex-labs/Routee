@@ -61,10 +61,7 @@ void main() {
     test('오차는 보지 않는다 — 켜져 있어도 누르지 않으면 아무 일도 없다', () {
       // 게이트는 GpsFix가 아니라 좌표만 받는다. 오차를 넘길 자리 자체가 없다는
       // 것이 이 계약이고, 이 테스트가 그 서명을 붙들어 둔다.
-      final gate = manualIndoorEntryGate(
-        fix: northOf(5),
-        footprint: footprint,
-      );
+      final gate = manualIndoorEntryGate(fix: northOf(5), footprint: footprint);
       expect(gate.enabled, isTrue);
     });
 
@@ -164,6 +161,63 @@ void main() {
           radiusMeters: 15,
         ),
         '나가기 근거없음',
+      );
+    });
+  });
+
+  /// 나온 문에 못박아 둔 야외 구간을 GPS에 넘겨주는 판정.
+  ///
+  /// 두 실패가 서로 반대다 — 너무 일찍 넘기면 건물이 가려 오차가 큰 첫 좌표가
+  /// 방금 문에 맞춰 놓은 선을 뒤엎고, 안 넘기면 걷는 내내 선이 문에 붙어 있다.
+  group('shouldHandOffOutdoorLegToGps', () {
+    const door = ll.LatLng(37.5667, 126.9780);
+
+    ll.LatLng northOf(double meters) =>
+        ll.LatLng(door.latitude + meters / metersPerDegreeLat, door.longitude);
+
+    test('문 앞에 서 있는 동안은 안 넘긴다', () {
+      // 나가기 게이트가 15 m를 보므로, 그 안에서 떠는 좌표로 넘어가면 못박는
+      // 일 자체가 헛돈다.
+      expect(
+        shouldHandOffOutdoorLegToGps(doorPoint: door, here: northOf(14)),
+        isFalse,
+      );
+    });
+
+    test('문턱만큼 멀어지면 넘긴다', () {
+      expect(
+        shouldHandOffOutdoorLegToGps(
+          doorPoint: door,
+          here: northOf(outdoorLegHandoffMeters + 1),
+        ),
+        isTrue,
+      );
+    });
+
+    test('경계에서 넘긴다 — 같으면 이미 파사드를 벗어났다', () {
+      expect(
+        shouldHandOffOutdoorLegToGps(
+          doorPoint: door,
+          here: northOf(outdoorLegHandoffMeters),
+        ),
+        isTrue,
+      );
+    });
+
+    test('못박은 적이 없으면 넘길 것도 없다', () {
+      // 앵커가 없어 나온 문을 못 고른 경우다. 부르는 쪽이 래치를 내리고 평소대로
+      // 현재 위치에서 다시 그린다.
+      expect(
+        shouldHandOffOutdoorLegToGps(doorPoint: null, here: northOf(1)),
+        isTrue,
+      );
+    });
+
+    test('문턱은 나가기 반경보다 넉넉하다', () {
+      // 두 상수가 뒤집히면 위 첫 테스트가 침묵하며 통과한다.
+      expect(
+        outdoorLegHandoffMeters,
+        greaterThan(manualOutdoorExitRadiusMeters),
       );
     });
   });

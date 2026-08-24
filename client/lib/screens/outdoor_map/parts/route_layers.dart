@@ -64,6 +64,11 @@ extension OutdoorMapRouteLayers on OutdoorMapBodyState {
   ll.LatLng? _indoorDestinationPinForActiveFloor() {
     final destination = _indoorRouteDestination;
     if (destination == null) return null;
+    // **출구는 도착지가 아니라 경유지다.** 나가는 여정의 실내 구간은 목적지가
+    // 지상 출입구라([_exitEntranceOfIndoorRoute]) 그대로 두면 문 위에 도착 핀이
+    // 서서, 사용자가 "여기가 목적지"로 읽는다. 이 여정의 도착 핀은 바깥 목적지에
+    // 찍힌 것 하나뿐이다([_syncDestinationLayer]).
+    if (_exitEntranceOfIndoorRoute != null) return null;
     final multi = _indoorMultiFloorRoute;
     if (multi != null) {
       if (multi.destinationSegment.floorName != _activeFloor) return null;

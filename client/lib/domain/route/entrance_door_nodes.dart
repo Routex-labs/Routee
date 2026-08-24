@@ -53,6 +53,28 @@ String entranceRouteNodeId(
   return entrance.nodeId;
 }
 
+/// [routeNodeId]로 끝나는 실내 구간이 **나가는 여정**인지 가려, 그 출구를
+/// 돌려준다. 나가는 여정이 아니면 null.
+///
+/// **문 하나에 노드가 둘이라는 것이 이 함수의 존재 이유다.** 안쪽
+/// 노드([BuildingEntrance.nodeId])와 꿰맨 문 노드([entranceDoorNodeId])가 있고,
+/// 경로는 [entranceRouteNodeId]가 고른 쪽을 목적지로 잡는다. 부르는 쪽이 안쪽
+/// 것만 비교하면 꿰매기가 성공한 정상 케이스가 통째로 안 걸린다 — 그러면
+/// "밖으로 나가기" 버튼이 안 뜨고, 문에 닿는 순간이 그냥 도착으로 읽힌다.
+BuildingEntrance? exitEntranceForRouteNodeId(
+  Iterable<BuildingEntrance> groundEntrances,
+  String? routeNodeId,
+) {
+  if (routeNodeId == null) return null;
+  for (final entrance in groundEntrances) {
+    if (entrance.nodeId == routeNodeId ||
+        entranceDoorNodeId(entrance.id) == routeNodeId) {
+      return entrance;
+    }
+  }
+  return null;
+}
+
 /// 층 그래프에 문 노드를 꿰맨 새 그래프. 꿰맬 것이 없으면 [graph] 그대로.
 FloorGraph floorGraphWithEntranceDoors(FloorGraph graph, FloorPlan plan) {
   final patch = _entranceDoorPatch(graph.nodes, plan);

@@ -7,6 +7,7 @@ library;
 import 'package:latlong2/latlong.dart' as ll;
 
 import '../../../features/indoor_navigation/contract/indoor_navigation_contract.dart';
+import '../../../models/building/floor_plan.dart' show wgs84DistanceMeters;
 import 'indoor_entry_proximity.dart';
 
 /// GPS 좌표가 건물 외곽선에서 이 거리 안이면 "진입" 버튼을 켠다(m).
@@ -31,6 +32,32 @@ const manualIndoorEntryRadiusMeters = 30.0;
 ///
 /// 15 m는 PDR 누적 오차(수 m)와 문 앞 홀의 폭을 함께 덮는다.
 const manualOutdoorExitRadiusMeters = 15.0;
+
+/// 나온 문에 못박아 둔 야외 구간을 **GPS에 넘겨주는** 거리(m).
+///
+/// 문을 막 나선 순간의 좌표는 건물이 하늘을 가려 오차가 가장 크다 — 그 좌표로
+/// 곧장 다시 그리면 방금 문에 맞춰 놓은 선이 엉뚱한 데로 튄다. 이만큼 실제로
+/// 멀어졌다는 것은 파사드에서 벗어났다는 뜻이라, 그때부터 GPS를 믿는다.
+///
+/// [manualOutdoorExitRadiusMeters](15)보다 커야 한다. 같거나 작으면 문 앞에
+/// 서 있는 동안의 좌표 떨림만으로 넘어가, 못박는 일 자체가 헛돈다.
+const outdoorLegHandoffMeters = 25.0;
+
+/// 문에 못박아 둔 야외 구간을 지금 GPS에 넘겨줘야 하는지.
+///
+/// [doorPoint]가 null이면 못박은 적이 없다는 뜻이라 참이다 — 부르는 쪽이 래치를
+/// 내리고 평소대로 돌아간다.
+///
+/// **거리 하나로만 판정한다.** 시간으로 재면 문 앞에 서서 기다리는 사람의 경로가
+/// 아직 오차 큰 좌표로 갈아 끼워진다.
+bool shouldHandOffOutdoorLegToGps({
+  required ll.LatLng? doorPoint,
+  required ll.LatLng here,
+  double handoffMeters = outdoorLegHandoffMeters,
+}) {
+  if (doorPoint == null) return true;
+  return wgs84DistanceMeters(doorPoint, here) >= handoffMeters;
+}
 
 /// 게이트 한 건과, 그 게이트를 만든 거리.
 ///
@@ -88,10 +115,7 @@ ManualTransitionGate manualOutdoorExitGate({
     final distance = (node - positionM).distance;
     if (distance < best) best = distance;
   }
-  return ManualTransitionGate(
-    enabled: best <= radiusMeters,
-    distanceM: best,
-  );
+  return ManualTransitionGate(enabled: best <= radiusMeters, distanceM: best);
 }
 
 /// 게이트 한 건을 실기기 진단 칩의 한 줄로 만든다.

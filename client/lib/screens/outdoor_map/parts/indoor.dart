@@ -244,7 +244,10 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
   /// **여기에 진입·이탈 전환은 없다.** 그것은 안내 카드의 버튼이 한다
   /// (`docs/client/indoor-entry-rules.md` 6절). 좌표가 바꾸는 것은 버튼의 활성
   /// 여부와 진단 기록뿐이고, 유일한 예외가 2)의 실내 콜드스타트다.
-  void _applyPositionToIndoorGates(Position position, {Duration? sinceLastFix}) {
+  void _applyPositionToIndoorGates(
+    Position position, {
+    Duration? sinceLastFix,
+  }) {
     final judgement = judgeBuildingFromGps(
       fix: GpsFix(
         point: ll.LatLng(position.latitude, position.longitude),
@@ -296,7 +299,8 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
       final seconds = (sinceLastFix.inMilliseconds / 1000).toStringAsFixed(1);
       line = '$line · +${seconds}s';
     }
-    line = '$line · ${_gps.lastFixFromStream ? '스트림' : '직접'}'
+    line =
+        '$line · ${_gps.lastFixFromStream ? '스트림' : '직접'}'
         ' · 재시작${_gps.restartCount}';
     _gpsVerdictDebugText.value = line;
   }
@@ -320,12 +324,18 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
   ///
   /// [_pendingOutdoorDestination]으로 가르지 않는 이유가 그것이다 — 대중교통 쪽은
   /// 야외 구간을 예약하지 않고 처음부터 통째로 그린다(사진의 그 화면이다).
-  bool get _guidanceLeavesBuilding {
-    if (!_guidanceStarted || !_indoorEntered) return false;
-    final nodeId = _indoorRouteDestination?.nodeId;
-    if (nodeId == null) return false;
-    return _groundEntrances.any((entrance) => entrance.nodeId == nodeId);
-  }
+  bool get _guidanceLeavesBuilding =>
+      _guidanceStarted && _indoorEntered && _exitEntranceOfIndoorRoute != null;
+
+  /// 실내 구간이 목적지로 삼은 지상 출입구. 나가는 여정이 아니면 null.
+  ///
+  /// 문 하나에 노드가 둘이라는 것과 그 판정은 [exitEntranceForRouteNodeId]가
+  /// 단일 출처다.
+  BuildingEntrance? get _exitEntranceOfIndoorRoute =>
+      exitEntranceForRouteNodeId(
+        _groundEntrances,
+        _indoorRouteDestination?.nodeId,
+      );
 
   /// **앱을 건물 안에서 켠 사용자**를 실내로 데려간다.
   ///
@@ -377,6 +387,24 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     positionM: _guidance.trackingResult?.previewPosition,
     entranceNodesM: _groundEntranceNodesM,
   );
+
+  /// 지금 덮개의 불투명도를 셸에 흘려보낸다
+  /// ([OutdoorMapBody.onIndoorTransitionVeilChanged]).
+  ///
+  /// **진행률이 아니라 불투명도다.** 덮개는 구간 앞뒤로 투명해서
+  /// ([indoorTransitionFrameAt]), 진행률만 넘기면 아직 아무것도 안 가린
+  /// 프레임에서도 셸이 chrome을 걷는다 — 검색창이 이유 없이 한 번 깜빡인다.
+  ///
+  /// 같은 값은 두 번 보내지 않는다. 셸의 setState를 부르는 콜백이라, 값이
+  /// 같은데 부르면 애니메이션 프레임마다 셸 전체가 다시 그려진다.
+  void _publishIndoorTransitionVeil() {
+    final veil = indoorTransitionFrameAt(
+      _indoorTransition.value,
+    ).veilOpacity.clamp(0.0, 1.0);
+    if (veil == _lastPublishedIndoorVeil) return;
+    _lastPublishedIndoorVeil = veil;
+    widget.onIndoorTransitionVeilChanged?.call(veil);
+  }
 
   /// 전환 연출을 덮고, **덮개 뒤에서** [apply]를 실행한 뒤 걷어낸다.
   ///
@@ -486,15 +514,23 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
   ///
   /// GPS 좌표가 없으면 방금 지난 문 좌표로 옮긴다. 건물을 나선 사람이 서 있는
   /// 자리에 가장 가까운 값이고, 아무 데도 안 옮기는 것보다 낫다.
+  ///
+  /// **나온 문을 들고 나간다**([_exitDoorPoint]). 야외 구간은 그 문에서 다시
+  /// 그려져야 한다 — 안내를 걸 때 그려 둔 것은 *경로가 향하던* 문 기준이고,
+  /// 사용자는 다른 문으로 나갈 수 있다.
   void exitIndoorFromGuidance() {
     if (!_indoorEntered) return;
     if (_placingPdrAnchor) _setPlacingAnchor(false);
+    // **문을 먼저 고른다.** [_setIndoorEntered]가 실내 위치를 버리므로
+    // ([_dropIndoorPosition]) 그 뒤에는 마커에서 가장 가까운 문을 물을 수 없다.
+    final door = _nearestEntranceToIndoorMarker() ?? _exitEntranceOfIndoorRoute;
     final position = _position;
     final target = position != null
         ? ll.LatLng(position.latitude, position.longitude)
-        : _nearestEntranceToIndoorMarker()?.point;
+        : door?.point;
     unawaited(
       _runIndoorTransition(IndoorTransitionDirection.exit, () {
+        _exitDoorPoint = door?.point;
         _setIndoorEntered(false, leftBuilding: true);
         if (target != null) unawaited(_moveCameraToPoint(target));
       }),

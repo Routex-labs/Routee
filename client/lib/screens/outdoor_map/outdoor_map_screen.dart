@@ -255,6 +255,7 @@ class OutdoorMapBody extends StatefulWidget {
     this.categorySelection,
     this.onFloorChanged,
     this.onFloorTransitionChanged,
+    this.onIndoorTransitionVeilChanged,
     this.onStartupReady,
     this.startupLoading = false,
     this.outerOverlayKeys = const [],
@@ -296,6 +297,14 @@ class OutdoorMapBody extends StatefulWidget {
   /// 이 화면이 직접 그리지 않는 이유: 검색창·카테고리 줄·하단 바가 셸 Stack의
   /// 형제라, 지도 안에서 그린 배너는 그 뒤에 깔린다.
   final FloorTransitionUiChanged? onFloorTransitionChanged;
+
+  /// 실내↔야외 전환 덮개의 불투명도(0~1)가 바뀔 때마다 셸에 알린다.
+  ///
+  /// **덮개는 지도 안에서 그리는데 셸 chrome은 그 형제다.** 그래서 검색창·길찾기
+  /// 바가 덮개 위에 그대로 남았다(실기기 증상) — 화면이 갈리는 순간을 가리는
+  /// 것이 이 연출의 존재 이유인데, 정작 출발지/도착지 칸이 그 위에 떠 있었다.
+  /// 층 전환이 [onFloorTransitionChanged]로 같은 일을 하는 것과 같은 구조다.
+  final ValueChanged<double>? onIndoorTransitionVeilChanged;
 
   /// 첫 위치의 건물 안팎 판정과 그 결과에 맞는 카메라 준비가 끝났을 때 한 번 호출.
   final VoidCallback? onStartupReady;
@@ -412,7 +421,6 @@ class OutdoorMapBody extends StatefulWidget {
 /// 덮개 카드의 점은 이 값을 보간해 프레임 단위로 부드럽게 그린다.
 const _escalatorGlideFrame = escalatorGlideSampleInterval;
 
-
 /// 건물 로드 실패 시 다시 시도하는 간격 사다리(약 1분간 6번). 이 로드는 initState
 /// 한 번뿐이라 실패하면 영영 복구되지 않았다. **무한 재시도는 안 한다** — 백엔드
 /// 없는 환경에서 배터리만 태운다.
@@ -476,6 +484,9 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   /// 지금 굴러가는 연출의 방향. 문이 당겨 열릴지 밀려 열릴지를 정한다.
   IndoorTransitionDirection _indoorTransitionDirection =
       IndoorTransitionDirection.enter;
+
+  /// 셸에 마지막으로 알린 덮개 불투명도([_publishIndoorTransitionVeil]).
+  double _lastPublishedIndoorVeil = 0;
 
   /// 앱을 켠 뒤 GPS가 "건물 밖"이라고 한 번이라도 말했는지([saysOutsideBuilding]).
   ///
@@ -558,6 +569,26 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   ll.LatLng? _pendingOutdoorDestination;
 
   String? _pendingOutdoorLabel;
+
+  /// 방금 걸어 나온 문의 좌표. 야외 구간을 **여기서부터** 다시 그린다
+  /// ([_activatePendingOutdoorRoute]).
+  ///
+  /// 안내를 걸 때 그려 둔 야외 구간은 *경로가 향하던* 문 기준이다
+  /// ([showIndoorToOutdoorRouteTo]). 사용자가 다른 문으로 나가면 그 선은 엉뚱한
+  /// 자리에서 시작한 채로 남는다 — 실내 재탐색이 목적지 노드를 안 바꾸므로
+  /// (`_rerouteIndoorFromCurrentPosition`) 실제로 흔한 일이다.
+  ///
+  /// **GPS를 쓰지 않는 이유.** 문을 막 나선 순간의 좌표는 건물이 가려 오차가
+  /// 가장 크다. 문 좌표는 도면이 아는 값이라 그 순간 가장 정확하다.
+  ll.LatLng? _exitDoorPoint;
+
+  /// 야외 구간이 아직 [_exitDoorPoint]에 못박혀 있는지. 참인 동안은 GPS가
+  /// 갱신돼도 경로를 다시 그리지 않는다([_updateRoute]).
+  ///
+  /// 문에서 [outdoorLegHandoffMeters]만큼 실제로 멀어지면 풀린다. 안 풀면 걷는
+  /// 내내 경로가 문에 붙어 사용자를 따라오지 않고, 바로 풀면 아직 건물에 가려
+  /// 오차가 큰 첫 좌표가 그 선을 곧장 뒤엎는다.
+  bool _outdoorLegPinnedToExitDoor = false;
 
   /// PDR 센서 세션을 언제 켜고 끌지. 정지가 끝나기를 기다리는 일도 여기가 한다.
   late final PdrSessionLifecycle _pdrLifecycle = PdrSessionLifecycle(
@@ -1010,6 +1041,7 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   @override
   void initState() {
     super.initState();
+    _indoorTransition.addListener(_publishIndoorTransitionVeil);
     _startupMinimumTimer = Timer(startupLoadingMinimum, () {
       _startupMinimumTimer = null;
       if (!_startupMinimumElapsed.isCompleted) {
@@ -1143,6 +1175,7 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
     if (!_styleReadySignal.isCompleted) _styleReadySignal.complete();
     if (!_buildingReadySignal.isCompleted) _buildingReadySignal.complete();
     _buildingRetryTimer?.cancel();
+    _indoorTransition.removeListener(_publishIndoorTransitionVeil);
     _indoorTransition.dispose();
     _gps.dispose();
     _pdrSnapshotSub?.cancel();
@@ -1387,6 +1420,9 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
       // 되돌아가야 하므로 반드시 null로 지워야 한다 — 안 지우면 예전에 찍어 둔
       // 지점이 계속 출발지로 남아, 현재 위치에서 출발하는 안내가 영영 안 된다.
       _fixedRouteOrigin = origin;
+      // 새 안내는 나온 문에 못박아 둔 그 구간이 아니다. 남겨 두면 계획 경로의
+      // 못박기까지 "문에서 멀어지면 풀린다"로 읽혀 걷는 도중에 스스로 풀린다.
+      _outdoorLegPinnedToExitDoor = false;
       // 이 경로는 걷는 안내다. 자동차에서 넘어왔으면 실선으로 남지 않게 되돌린다.
       _routeIsDriving = false;
       _guidanceStarted = continueGuidance;
