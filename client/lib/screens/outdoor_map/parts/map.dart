@@ -77,7 +77,7 @@ extension OutdoorMapMap on OutdoorMapBodyState {
     _syncDestinationLayer();
     _syncRouteLayer();
     _syncIndoorDestinationLayer();
-    _syncPdrCurrentLayer();
+    _syncPdrCurrentLayer(snap: true);
     unawaited(_syncDebugPdrLayers());
     _syncHighlightLayer();
     _syncDimScrimLayer();

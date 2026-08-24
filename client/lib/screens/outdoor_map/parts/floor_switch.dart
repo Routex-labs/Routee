@@ -197,7 +197,7 @@ extension OutdoorMapFloorSwitch on OutdoorMapBodyState {
       await _syncFloorBoundaryToActiveFloor();
     }
     await _loadFloorGraph(building.id, floor);
-    _syncPdrCurrentLayer();
+    _syncPdrCurrentLayer(snap: true);
     unawaited(_syncDebugPdrLayers());
     _syncRouteLayer();
     // 층이 바뀌면 도착 핀도 다시 판정한다 — 다층 경로에서 도착지 층을 벗어나면

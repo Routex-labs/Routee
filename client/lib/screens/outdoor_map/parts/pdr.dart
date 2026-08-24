@@ -180,10 +180,12 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
   /// 아직 없는 동안에는 [_indoorGapGpsPoint]를 **흐리게** 그린다. 셋 중 무엇을
   /// 고르는지는 [indoorMarkerAt] 하나가 정한다 — 소스가 하나뿐이라 화면 위의
   /// 점도 항상 하나다.
-  Future<void> _syncPdrCurrentLayer() {
-    final revision = ++_pdrMarkerRevision;
+  Future<void> _syncPdrCurrentLayer({bool snap = false}) {
     final controller = _mapController;
-    if (controller == null || !_styleReady) return Future<void>.value();
+    if (controller == null || !_styleReady) {
+      _pdrMarkerRevision++;
+      return Future<void>.value();
+    }
 
     if (!_indoorLocationVisible) _lastIndoorMarker = null;
     final here = _indoorLocationVisible ? _pdrCurrentWgs84() : null;
@@ -200,10 +202,31 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     // GPS라, 지금 어디를 보고 있는지는 모른다 — 삼각형을 그리면 모르는 것을
     // 아는 척한다.
     final heading = here == null ? null : _pdrCurrentHeadingDeg;
+
+    final kind = marker == null
+        ? _MarkerGlideKind.none
+        : (marker.offFloor ? _MarkerGlideKind.dimmed : _MarkerGlideKind.here);
+    // 활강 중에는 잇지 않는다. 진행률이 이미 프레임마다 흐르고 있어서
+    // ([_startEscalatorGlide]), 여기서 한 번 더 이으면 두 겹이 되어 마커가
+    // 하차 노드에 늦게 닿는다 — 도면은 새 층인데 점은 아직 오는 중이 된다.
+    final teleport =
+        snap || _escalatorGlide != null || kind != _markerGlideKind;
+    _markerGlideKind = kind;
+    _markerGlide.aimAt(marker?.point, headingDeg: heading, snap: teleport);
+    _syncMarkerGlideTicker();
+    return _writePdrMarkerSource(controller);
+  }
+
+  /// 보간기가 지금 그리라는 자리를 지도 소스에 쓴다.
+  ///
+  /// 목표를 새로 받았을 때와 보간 틱마다 같은 함수로 들어온다 — 두 벌로 두면
+  /// 흐린 마커의 opacity나 방향 유무가 한쪽에서만 바뀐다.
+  Future<void> _writePdrMarkerSource(MapLibreMapController controller) {
+    final revision = ++_pdrMarkerRevision;
     final data = pdrLocationData(
-      marker?.point,
-      headingDeg: heading,
-      offFloor: marker?.offFloor ?? false,
+      _markerGlide.point,
+      headingDeg: _markerGlide.headingDeg,
+      offFloor: _markerGlideKind == _MarkerGlideKind.dimmed,
     );
 
     final previous = _pdrMarkerWriteQueue;
@@ -228,6 +251,39 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
       }
     }();
     return _pdrMarkerWriteQueue;
+  }
+
+  /// 보간 틱을 켜고 끈다.
+  ///
+  /// 표시값이 목표에 붙으면 끈다 — 서 있는 동안까지 초당 서른 번 네이티브
+  /// 소스를 다시 쓸 이유가 없다. 다음 목표가 오면 [_syncPdrCurrentLayer]가
+  /// 다시 켠다.
+  void _syncMarkerGlideTicker() {
+    if (_markerGlide.isSettled) {
+      _stopMarkerGlideTicker();
+      return;
+    }
+    if (_markerGlideTimer != null) return;
+    _markerGlideTickAtMs = DateTime.now().millisecondsSinceEpoch;
+    _markerGlideTimer = Timer.periodic(locationMarkerGlideFrame, (timer) {
+      final controller = _mapController;
+      if (!mounted || controller == null || !_styleReady) {
+        _stopMarkerGlideTicker();
+        return;
+      }
+      final nowMs = DateTime.now().millisecondsSinceEpoch;
+      final elapsed = Duration(milliseconds: nowMs - _markerGlideTickAtMs);
+      _markerGlideTickAtMs = nowMs;
+      if (_markerGlide.advance(elapsed)) {
+        unawaited(_writePdrMarkerSource(controller));
+      }
+      if (_markerGlide.isSettled) _stopMarkerGlideTicker();
+    });
+  }
+
+  void _stopMarkerGlideTicker() {
+    _markerGlideTimer?.cancel();
+    _markerGlideTimer = null;
   }
 
   /// **다른 층에 서 있을 때** 흐리게 그릴 자리. 그릴 근거가 없으면 null.
@@ -785,7 +841,7 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     }
     if (!mounted) return;
     _setPlacingAnchor(false);
-    _syncPdrCurrentLayer();
+    _syncPdrCurrentLayer(snap: true);
     unawaited(_syncDebugPdrLayers());
     if (notifyLocationChanged) widget.onLocationAnchored?.call();
     // 배치가 끝났다는 안내는 따로 띄우지 않는다. 지도에 위치 마커가 바로
@@ -835,4 +891,17 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
       ),
     );
   }
+}
+
+/// 마커 한 점이 지금 무슨 뜻인지. 뜻이 바뀌는 순간은 걸어서 간 이동이 아니라
+/// 그리는 근거가 바뀐 것이라 보간하지 않는다([_syncPdrCurrentLayer]).
+enum _MarkerGlideKind {
+  /// 그릴 자리가 없다 — 마커가 사라진 상태.
+  none,
+
+  /// 지금 보고 있는 층의 내 위치.
+  here,
+
+  /// 다른 층 잔상이거나 진입 직후 GPS 폴백([indoorMarkerAt]의 2·3순위).
+  dimmed,
 }

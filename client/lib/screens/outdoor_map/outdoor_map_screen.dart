@@ -30,6 +30,7 @@ import '../../domain/geo/geo_transform.dart';
 import '../../domain/guidance/geo_route_progress.dart';
 import '../../domain/guidance/guidance_chrome.dart';
 import '../../domain/guidance/guidance_start_reach.dart';
+import '../../domain/guidance/location_marker_glide.dart';
 import '../../features/debug_mode/debug_mode.dart';
 import '../../domain/route/dijkstra.dart';
 import '../../domain/route/route_endpoint_fill.dart';
@@ -656,6 +657,24 @@ class OutdoorMapBodyState extends State<OutdoorMapBody> {
 
   Future<void> _pdrMarkerWriteQueue = Future<void>.value();
 
+  /// 걸음 하나만큼씩 뛰어 오는 위치를 프레임 단위로 이어 그리는 보간기.
+  ///
+  /// **목표와 표시를 가르는 것이 이 객체의 전부다.** 판정·카메라·경로 진행률은
+  /// 여전히 보간 전 값(`_pdrCurrentWgs84()`)을 본다 — 그리는 자리 하나 때문에
+  /// "도착했나"까지 늦게 판정되면 안 된다.
+  final LocationMarkerGlide _markerGlide = LocationMarkerGlide();
+
+  /// 보간 틱. 표시값이 목표에 붙으면 스스로 멈춘다([_syncMarkerGlideTicker]).
+  Timer? _markerGlideTimer;
+
+  /// 직전 틱 시각(ms). Timer.periodic은 틱을 정확히 지키지 않으므로 실제로 흐른
+  /// 시간을 재서 [LocationMarkerGlide.advance]에 넘긴다.
+  int _markerGlideTickAtMs = 0;
+
+  /// 지금 그리는 마커가 **어떤 뜻**인지. 뜻이 바뀌는 순간(내 층 위치 ↔ 다른 층
+  /// 잔상 ↔ GPS 폴백)은 걸어서 간 이동이 아니므로 보간하지 않고 옮긴다.
+  _MarkerGlideKind _markerGlideKind = _MarkerGlideKind.none;
+
   /// 회색/파란 경로 source도 센서 틱·GPS 틱·재탐색 확정에서 동시에 갱신된다.
   /// native MapLibre 쓰기가 호출 순서와 다른 순서로 완료될 수 있으므로 한 줄의
   /// queue에서 순서대로 반영한다. 이 큐가 없으면 최신 진행률로 만든 회색선이
@@ -1012,7 +1031,7 @@ class OutdoorMapBodyState extends State<OutdoorMapBody> {
           status.phase == CalibrationPhase.uncalibrated) {
         _setPlacingAnchor(false);
       }
-      _syncPdrCurrentLayer();
+      _syncPdrCurrentLayer(snap: true);
       unawaited(_syncRouteLayer());
       unawaited(_syncDebugPdrLayers());
     });
@@ -1096,6 +1115,7 @@ class OutdoorMapBodyState extends State<OutdoorMapBody> {
     _pdrAltitudeSub?.cancel();
     _pdrRawMotionSub?.cancel();
     _escalatorGlideTimer?.cancel();
+    _markerGlideTimer?.cancel();
     _arrivalRouteClearTimer?.cancel();
     _floorSwapVeilTimer?.cancel();
     _debugRideCompletionTimer?.cancel();
