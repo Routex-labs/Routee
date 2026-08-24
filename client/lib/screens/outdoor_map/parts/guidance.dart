@@ -218,36 +218,44 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
     return judgement.verdict == GpsBuildingVerdict.outside;
   }
 
-  /// 미리 보던 실내 경로에서 **실제 안내를 시작한다.**
+  /// 지금 걸을 구간이 실내인 여정에서 **실제 안내를 시작한다.**
   ///
-  /// 여기서야 출발지 매장에 앵커를 찍는다. 미리 보는 동안 찍지 않는 이유는
-  /// [_indoorRoutePreviewOrigin]에 적었다 — 그 사람은 아직 거기 서 있지 않다.
+  /// [_indoorRoutePreviewOrigin]이 있으면 여기서야 그 출발지 매장에 앵커를
+  /// 찍는다 — 미리 보는 동안 찍지 않는 이유는 그 값의 주석에 적었다(그 사람은
+  /// 아직 거기 서 있지 않다). 없으면(지금 있는 곳에서 출발, 실내→야외 여정
+  /// 포함) 이미 있는 PDR 앵커를 그대로 쓴다 — 앵커를 옮길 근거가 없다.
   ///
   /// **건물 밖에서 누르면 아무것도 바꾸지 않는다.** 앵커를 찍어 봐야 다음 GPS 틱이
   /// 곧바로 뒤집어 도면과 경로가 아무 말 없이 사라진다. 그래서 화면은 그대로 두고
   /// 언제 시작할 수 있는지만 말한다 — 보던 경로를 잃지 않는 것이 이 화면의 목적이다.
+  ///
+  /// **이미 실내로 들어와 있으면([_indoorEntered]) GPS는 보지 않는다.** 그
+  /// 판정은 아직 걸어 들어오지 않은 사람(미리 보기)을 막으려는 것인데, 실내
+  /// GPS는 문을 지나 들어온 사람에게도 얼마든지 "밖"이라고 말할 수 있다(신호
+  /// 오차·직전 좌표가 아직 안 갱신됨). 이미 문 노드에 앵커를 찍고 들어와 있는
+  /// 사실을 흔들리는 GPS 한 건이 뒤집으면 안 된다 — 실내→야외 여정에서
+  /// "안내 시작"이 매번 거부되던 원인이 이것이다.
   Future<void> _startIndoorGuidance() async {
-    if (_gpsSaysOutsideBuilding) {
+    if (!_indoorEntered && _gpsSaysOutsideBuilding) {
       _showSnack('건물에 도착하면 안내를 시작할 수 있습니다.');
       return;
     }
     final origin = _indoorRoutePreviewOrigin;
-    final floor = origin?.floor;
-    final nodeId = origin?.nodeId;
-    if (origin == null || nodeId == null || floor == null || floor.isEmpty) {
-      return;
-    }
     setState(() {
       _indoorRoutePreviewOrigin = null;
       _guidanceStarted = true;
     });
-    await _anchorAtStoreOrigin(
-      floor: floor,
-      nodeId: nodeId,
-      storePoint: origin.point,
-      storeName: origin.name,
-    );
-    if (!mounted) return;
+    final floor = origin?.floor;
+    final nodeId = origin?.nodeId;
+    if (origin != null && nodeId != null && floor != null && floor.isNotEmpty) {
+      await _anchorAtStoreOrigin(
+        floor: floor,
+        nodeId: nodeId,
+        storePoint: origin.point,
+        storeName: origin.name,
+      );
+      if (!mounted) return;
+    }
     _notifyRouteStateIfChanged();
     if (!mounted) return;
     // 야외와 **같은 약속**이다 — 시작을 누르면 화면이 내 자리로 내려간다. 실내는
@@ -287,15 +295,24 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
     _followCameraReleasedByUser = false;
     _followCameraBearingDeg = null;
     _followCameraTarget = null;
-    // **이 여정에 야외 구간이 있으면 실내 갈래로 새지 않는다.** 묻는 것은
-    // "미리 보기 출발지가 남아 있나"가 아니라 **"지금 시작할 구간이 실내인가"**다.
-    // 두 질문이 갈리면, 문 경유 안내(실외 → 건물 안 매장)를 그려 놓고도
-    // [_startIndoorGuidance]의 "건물에 도착하면…"에 막힌다 — 그 여정은 정의상
-    // 밖에서 시작하는데, 밖이라는 이유로 시작을 거부하는 화면이 된다.
-    //
     // 이 목록이 비었다는 것이 곧 "실내 구간만 살아 있다"이다([_guidanceStartRoutePoints]).
     final points = _guidanceStartRoutePoints;
-    if (points.isEmpty && _indoorRoutePreviewOrigin != null) {
+    // **실내→야외 여정([showIndoorToOutdoorRouteTo])도 실내 갈래를 탄다.** 그
+    // 함수는 문 밖 야외 구간을 "미리 보기"로 지금 함께 그려 두므로(`_route`가
+    // 이미 채워진다), 위 `points.isEmpty`만으로는 걸리지 않는다. 그런데 그
+    // 좌표열은 문에서 시작하는 미리 보기라, 아래 일반 갈래가 그 점들과 지금
+    // 위치(건물 안 깊숙한 곳일 수 있다) 사이 거리를 재면 실내에 있는 사람은
+    // 항상 "경로 근처가 아니다"로 막힌다.
+    //
+    // **`_indoorRouteDestination != null`만으로는 새는 자리가 있다** — 그 값은
+    // 다른 실내 미리 보기가 남긴 낡은 값일 수 있고(`outdoor_to_indoor_guidance_
+    // start_test.dart`가 그 자리를 지킨다), 그러면 정의상 밖에서 시작해야 하는
+    // 문 경유 안내(실외 → 건물 안 매장)가 "건물에 도착하면…"에 거꾸로 막힌다.
+    // 그래서 **지금 이 여정이 실내→야외라는 확실한 증거**
+    // ([_pendingOutdoorDestination], 이 함수 하나만 세운다)까지 함께 본다.
+    if ((points.isEmpty && _indoorRoutePreviewOrigin != null) ||
+        (_indoorRouteDestination != null &&
+            _pendingOutdoorDestination != null)) {
       await _startIndoorGuidance();
       return;
     }
