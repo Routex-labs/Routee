@@ -29,9 +29,18 @@ extension _MapShellCategory on _MapShellScreenState {
 
   /// 카테고리 선택을 바꾼다. 지도 강조는 상태를 내려받은 두 지도가 알아서
   /// 갱신하므로 여기서는 상태만 바꾼다.
+  ///
+  /// **매장 하나에 걸린 강조([OutdoorMapBodyState.focusStore])도 함께 걷는다.**
+  /// 편의시설 시트에서 에스컬레이터처럼 도착지가 아닌 종류를 고르면 그 하나에
+  /// `focusStore`로 강조가 걸리는데([_onFacilitiesTap]), 이 값은 카테고리
+  /// 선택과 별도 상태라 다음에 다른 종류(화장실·엘리베이터)를 골라도 저절로
+  /// 안 걷힌다. `_highlightTarget`이 매장 강조를 카테고리 강조보다 앞세우므로
+  /// (탭이 이긴다), 여기서 걷지 않으면 새 선택이 지도에 전혀 안 나타난다(실기기
+  /// 확인).
   void _onCategorySelectionChanged(CategorySelection? selection) {
     if (_categorySelection == selection) return;
     setState(() => _categorySelection = selection);
+    _outdoorKey.currentState?.clearHighlight();
   }
 
   /// 지도 위 대분류 chip을 눌렀을 때. 강조를 걸고 **곧바로** 목록 시트를 연다.
