@@ -129,17 +129,27 @@ const recenterDuration = Duration(milliseconds: 300);
 /// **따라가는** 배율이다. 뭉개짐이 문제가 되면 여기만 18.5로 내리면 된다.
 const indoorFollowZoom = 19.0;
 
-/// 팔로우 카메라를 다시 명령하기까지의 최소 간격(ms).
+/// 팔로우 카메라 bearing이 목표를 따라잡는 시정수.
 ///
-/// PDR 스냅샷은 걸음이 아니라 **모션 이벤트마다** 온다(초당 수십 건). 그대로
-/// animateCamera에 흘리면 이전 애니메이션이 끝나기 전에 다음이 덮어써 지도가
-/// 떨고 배터리를 먹는다. 걸음 간격(2 Hz 안팎)보다 조금 성기게 잡아, 한 걸음에
-/// 최대 한 번만 명령이 나가게 한다.
-const followCameraMinIntervalMs = 400;
+/// 카메라는 이제 명령을 띄엄띄엄 보내지 않고 **매 프레임** 이 시정수로 목표를
+/// 따라간다(`glidedFollowBearingDeg`). 예전에는 400ms마다 320ms짜리
+/// animateCamera를 걸었는데, 애니메이션마다 가속·감속이 붙어 있어 이어 붙이면
+/// 화면이 돌다 서다를 반복했다 — 현장에서 "돌 때 뚝뚝 끊긴다"로 올라온 화면이다.
+///
+/// 240ms는 90° 코너를 도는 데 약 0.7초가 걸리는 값이다. 더 키우면 몸을 다 튼
+/// 뒤에도 화면이 한참 따라오고, 더 줄이면 데드밴드가 낸 각 계단이 그대로 보인다.
+const followCameraBearingTimeConstant = Duration(milliseconds: 240);
 
-/// 팔로우 애니메이션 길이. [followCameraMinIntervalMs]보다 **짧아야** 다음 명령이
-/// 도는 애니메이션을 자르지 않는다.
-const followCameraMoveDuration = Duration(milliseconds: 320);
+/// 표시 각이 목표에 이만큼 붙으면 더 명령하지 않는다(도). 지수 평활은 영원히
+/// 도착하지 않으므로 끝을 정해 줘야 프레임 루프가 멈춘다.
+const followCameraBearingSettleDeg = 0.1;
+
+/// 이 시간 넘게 카메라를 안 잡고 있었으면 **지금 카메라 각을 다시 읽어** 거기서
+/// 이어 간다(ms).
+///
+/// 유예([`_holdFollowCamera`])나 층 fit처럼 다른 주인이 카메라를 돌린 뒤라,
+/// 마지막으로 우리가 그린 각에서 이어 가면 화면이 그 각으로 한 번 튄다.
+const followCameraResumeGapMs = 200;
 
 /// 이 각도 안의 변화로는 화면을 돌리지 않는다(도).
 ///

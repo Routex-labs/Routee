@@ -2,11 +2,14 @@
 ///
 /// `zoom_math.dart`와 같은 성격이다 — 언제 따라갈지·어떤 값으로 따라갈지 같은
 /// 판단은 여기 없고(`screens/outdoor_map/`), "이 각과 저 각을 섞으면 몇 도인가",
-/// "이번엔 돌려도 되는가"만 있다. 조정 값의 자리는 `outdoor_map_tuning.dart`.
+/// "이번엔 돌려도 되는가"만 있다. 조정 값의 자리는 `outdoor_map_tuning.dart`이고,
+/// 왜 프레임마다 보간하는지는 `docs/client/location-marker-glide.md`.
 library;
 
 import 'package:indoor_pdr_core/indoor_pdr_core.dart'
     show normalizeDegrees, shortestDeltaDegrees;
+
+import '../../domain/guidance/location_marker_glide.dart' show glideFollowFactor;
 
 /// [from]에서 [to]로 **0/360을 넘어 최단 경로로** 보간한 각(도).
 ///
@@ -73,3 +76,24 @@ double? nextFollowCameraBearingDeg({
   if (!targetMoved && held == normalizeDegrees(lastBearingDeg)) return null;
   return held;
 }
+
+/// 화면이 지금 그리고 있는 각([shown])을 목표([target]) 쪽으로 [elapsed]만큼
+/// 당긴 값.
+///
+/// **명령을 띄엄띄엄 보내는 대신 매 프레임 이 값으로 카메라를 놓는다.** 예전에는
+/// 목표가 바뀔 때마다 animateCamera를 걸었는데, 애니메이션마다 가속·감속이
+/// 붙어 있어 이어 붙이면 화면이 돌다 서다를 반복했다. 지수 평활은 목표가 언제
+/// 바뀌어도 이어지고, 감속 없이 남은 각만 계속 좁힌다.
+///
+/// [timeConstant]가 0 이하면 보간하지 않고 목표를 그대로 돌려준다.
+double glidedFollowBearingDeg({
+  required double shown,
+  required double target,
+  required Duration elapsed,
+  required Duration timeConstant,
+}) => lerpBearingDeg(shown, target, glideFollowFactor(elapsed, timeConstant));
+
+/// 두 각의 최단 차(도, 절댓값). 데드밴드와 수렴 판정이 **같은 산수**를 보게
+/// 한다 — 한쪽만 360을 못 넘으면 경계에서 서로 다른 답을 낸다.
+double bearingGapDeg(double a, double b) =>
+    shortestDeltaDegrees(a - b).abs();

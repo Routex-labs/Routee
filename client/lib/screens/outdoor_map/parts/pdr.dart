@@ -253,13 +253,14 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     return _pdrMarkerWriteQueue;
   }
 
-  /// 보간 틱을 켜고 끈다.
+  /// 보간 틱을 켜고 끈다. **마커와 팔로우 카메라가 같은 틱을 탄다** — 둘이
+  /// 따로 돌면 점과 화면이 서로 다른 프레임에서 움직여 어긋나 보인다.
   ///
-  /// 표시값이 목표에 붙으면 끈다 — 서 있는 동안까지 초당 서른 번 네이티브
-  /// 소스를 다시 쓸 이유가 없다. 다음 목표가 오면 [_syncPdrCurrentLayer]가
-  /// 다시 켠다.
+  /// 둘 다 목표에 붙으면 끈다 — 서 있는 동안까지 초당 서른 번 네이티브를 부를
+  /// 이유가 없다. 다음 목표가 오면 [_syncPdrCurrentLayer]나
+  /// [_moveFollowCamera]가 다시 켠다.
   void _syncMarkerGlideTicker() {
-    if (_markerGlide.isSettled) {
+    if (_markerGlide.isSettled && !_followCameraNeedsFrame) {
       _stopMarkerGlideTicker();
       return;
     }
@@ -277,7 +278,12 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
       if (_markerGlide.advance(elapsed)) {
         unawaited(_writePdrMarkerSource(controller));
       }
-      if (_markerGlide.isSettled) _stopMarkerGlideTicker();
+      // 마커를 옮긴 **뒤에** 카메라를 잡는다. 카메라 목표점이 방금 옮긴 자리라,
+      // 순서를 뒤집으면 화면이 한 프레임 지난 자리를 가운데 둔다.
+      _driveFollowCamera(controller, elapsed);
+      if (_markerGlide.isSettled && !_followCameraNeedsFrame) {
+        _stopMarkerGlideTicker();
+      }
     });
   }
 
@@ -514,17 +520,19 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     if (until > _followCameraNextMoveAtMs) _followCameraNextMoveAtMs = until;
   }
 
-  /// 사용자를 따라 카메라를 옮긴다. 매 스냅샷마다 부르되 실제로 명령이 나가는
-  /// 것은 최소 간격·데드밴드를 지난 틱뿐이다(판정은 [nextFollowCameraBearingDeg]).
+  /// 사용자를 따라갈 **목표**를 잡는다. 카메라를 직접 돌리지는 않는다 —
+  /// 프레임 루프([_driveFollowCamera])가 이 목표를 이어서 따라간다.
+  ///
+  /// 데드밴드에 걸리면 목표를 그대로 두므로([nextFollowCameraBearingDeg]) 서 있는
+  /// 동안 나침반이 흔들려도 화면은 돌지 않는다.
   ///
   /// bearing은 **나침반 각을 그대로** 쓴다. MapLibre 카메라 bearing은 진북
   /// 기준이라 층 좌표계로 옮기면 안 된다 — [_pdrCurrentHeadingDeg]가 이미
   /// 진북으로 되돌려 주고, 마커 화살표도 같은 값을 본다.
-  Future<void> _moveFollowCamera(PdrSnapshot snapshot) async {
+  void _moveFollowCamera(PdrSnapshot snapshot) {
     _recordFollowCameraSteps(snapshot);
     if (!_indoorFollowActive) return;
-    final controller = _mapController;
-    if (controller == null || !_styleReady) return;
+    if (_mapController == null || !_styleReady) return;
     final here = _pdrCurrentWgs84();
     final orientation = _pdrCurrentHeadingDeg;
     if (here == null || orientation == null) return;
@@ -552,20 +560,82 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
 
     _followCameraBearingDeg = bearing;
     _followCameraTarget = here;
-    _followCameraNextMoveAtMs = nowMs + followCameraMinIntervalMs;
-    await controller.animateCamera(
-      CameraUpdate.newCameraPosition(
-        CameraPosition(
-          target: _toGl(_followCameraTargetFor(here, bearing)),
-          zoom: indoorFollowZoom,
-          bearing: bearing,
-          // **기울이지 않는다.** 도면 판독이 쉽고 매장 라벨이 안 가려지는 쪽을
-          // 골랐다. 3D로 눕히면 앞쪽이 더 보이는 대신 도면이 사다리꼴로 찌그러진다.
-          tilt: 0,
+    _syncMarkerGlideTicker();
+  }
+
+  /// 카메라를 한 프레임 돌린다. 실제로 명령을 냈으면 true.
+  ///
+  /// 목표점은 **마커가 지금 그려지는 자리**([_markerGlide])다. 보간 전 좌표를
+  /// 쓰면 화면은 걸음마다 튀는데 그 위의 마커만 부드럽게 흘러, 둘이 어긋난다.
+  ///
+  /// 유예 중이거나([_holdFollowCamera]) 팔로우가 꺼져 있으면 아무것도 하지
+  /// 않는다 — 그동안 카메라의 주인은 다른 쪽이고, 여기서 한 프레임이라도
+  /// 끼어들면 그쪽 애니메이션이 잘린다.
+  bool _driveFollowCamera(MapLibreMapController controller, Duration elapsed) {
+    if (!_indoorFollowActive) return false;
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    if (nowMs < _followCameraNextMoveAtMs) return false;
+    final target = _followCameraBearingDeg;
+    final here = _markerGlide.point;
+    if (target == null || here == null) return false;
+
+    // 한동안 못 잡고 있었으면 지금 카메라 각에서 이어 간다. 우리가 마지막으로
+    // 그린 각에서 이으면 다른 주인이 돌려놓은 화면이 그 각으로 한 번 튄다.
+    final resumed =
+        nowMs - _followCameraDrivenAtMs > followCameraResumeGapMs ||
+        _followCameraShownBearingDeg == null;
+    final shown = resumed
+        ? (controller.cameraPosition?.bearing ?? target)
+        : _followCameraShownBearingDeg!;
+    final next = glidedFollowBearingDeg(
+      shown: shown,
+      target: target,
+      elapsed: elapsed,
+      timeConstant: followCameraBearingTimeConstant,
+    );
+
+    final moved = _followCameraShownPoint != here;
+    final turned = bearingGapDeg(next, shown) > 0;
+    if (!resumed && !moved && !turned) return false;
+
+    _followCameraShownBearingDeg = next;
+    _followCameraShownPoint = here;
+    _followCameraDrivenAtMs = nowMs;
+    // **애니메이션 없이 놓는다.** 보간은 이미 우리가 하고 있어서, 여기에
+    // animateCamera를 걸면 프레임마다 새 애니메이션이 앞엣것을 잘라 되레 떤다.
+    unawaited(
+      controller.moveCamera(
+        CameraUpdate.newCameraPosition(
+          CameraPosition(
+            target: _toGl(_followCameraTargetFor(here, next)),
+            zoom: indoorFollowZoom,
+            bearing: next,
+            // **기울이지 않는다.** 도면 판독이 쉽고 매장 라벨이 안 가려지는 쪽을
+            // 골랐다. 3D로 눕히면 앞쪽이 더 보이는 대신 도면이 사다리꼴로 찌그러진다.
+            tilt: 0,
+          ),
         ),
       ),
-      duration: followCameraMoveDuration,
     );
+    return true;
+  }
+
+  /// 카메라가 아직 목표에 못 붙어 프레임이 더 필요한지.
+  ///
+  /// 유예 중에는 false다 — 그동안은 카메라를 잡지 않으므로 틱을 돌려도 아무
+  /// 일도 안 일어난다. 유예가 풀리면 다음 스냅샷이 [_moveFollowCamera]로 들어와
+  /// 다시 켠다.
+  bool get _followCameraNeedsFrame {
+    if (!_indoorFollowActive) return false;
+    if (DateTime.now().millisecondsSinceEpoch < _followCameraNextMoveAtMs) {
+      return false;
+    }
+    final target = _followCameraBearingDeg;
+    if (target == null || _markerGlide.point == null) return false;
+    final shown = _followCameraShownBearingDeg;
+    if (shown == null) return true;
+    return bearingGapDeg(target, shown) >= followCameraBearingSettleDeg ||
+        _followCameraShownPoint != _markerGlide.point;
   }
 
   /// 내 위치가 화면 아래쪽에 오도록 카메라 목표점을 **진행 방향으로 민다.**

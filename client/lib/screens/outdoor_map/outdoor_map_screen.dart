@@ -579,11 +579,26 @@ class OutdoorMapBodyState extends State<OutdoorMapBody> {
   /// 주인이 도는 동안의 유예([_holdFollowCamera])를 같은 값으로 센다.
   int _followCameraNextMoveAtMs = 0;
 
-  /// 마지막으로 명령한 팔로우 bearing과 목표점. 데드밴드와 "움직였나" 판정의
-  /// 기준이라, 실제로 명령을 보낸 뒤에만 갱신한다.
+  /// 팔로우 카메라가 **가려는** bearing과 목표점. 데드밴드와 "움직였나" 판정의
+  /// 기준이라, 목표를 새로 잡은 뒤에만 갱신한다.
+  ///
+  /// 화면이 실제로 그리는 각은 따로다([_followCameraShownBearingDeg]) — 목표는
+  /// 데드밴드 때문에 몇 도씩 계단으로 움직이고, 그리는 각이 그 사이를 잇는다.
   double? _followCameraBearingDeg;
 
   ll.LatLng? _followCameraTarget;
+
+  /// 프레임마다 실제로 카메라에 놓은 bearing과 목표점.
+  ///
+  /// null이면 이번 구간의 첫 프레임을 아직 안 냈다는 뜻이라, 지금 카메라 각을
+  /// 읽어 거기서 이어 간다([followCameraResumeGapMs]).
+  double? _followCameraShownBearingDeg;
+
+  ll.LatLng? _followCameraShownPoint;
+
+  /// 마지막으로 카메라를 잡은 시각(ms). 이 값과 지금의 간격이
+  /// [followCameraResumeGapMs]를 넘으면 다른 주인이 카메라를 돌린 뒤로 본다.
+  int _followCameraDrivenAtMs = 0;
 
   /// 마지막으로 걸음 수가 늘어난 시각(ms)과 그때의 걸음 수. "지금 걷는 중인가"를
   /// 이 둘로 판정한다([followCameraWalkingStepWindowMs]).
@@ -1008,9 +1023,10 @@ class OutdoorMapBodyState extends State<OutdoorMapBody> {
       // 좌표가 안 올 때 아예 못 묻는데, 지하에서 올라온 구간이 바로 그때다.
       _checkExitDoorReached();
       _syncPdrCurrentLayer();
-      // 마커를 옮긴 **직후**가 카메라를 따라 보낼 자리다. 걸음마다 쏘지 않도록
-      // 거르는 몫은 [_moveFollowCamera] 안에 있다.
-      unawaited(_moveFollowCamera(snapshot));
+      // 마커를 옮긴 **직후**가 카메라 목표를 다시 잡을 자리다. 카메라를 실제로
+      // 돌리는 것은 프레임 루프이고, 흔들림을 거르는 몫은 [_moveFollowCamera]
+      // 안의 데드밴드에 있다.
+      _moveFollowCamera(snapshot);
       // 사용자 회색선은 실제 PDR 궤적이 아니라 현재 계획 경로의 완료 구간이다.
       // 진행률이 바뀐 같은 틱에 경로 source도 갱신해야 파란 잔여선과 회색 완료선이
       // 같은 투영점을 공유한다. GuidanceTrailSession은 별도 진단 궤적으로만 남긴다.

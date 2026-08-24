@@ -4,7 +4,8 @@ import 'package:navigation_client/map/camera/follow_camera.dart';
 /// 팔로우 카메라 각도 산수의 검증 기준.
 ///
 /// 화면 코드에 묻으면 확인할 방법이 없어 따로 뺀 계산이다. 여기서 지키는 것은
-/// 넷 — 0/360을 넘는 최단 경로, 나침반↔걷는 방향 혼합, 최소 간격, 데드밴드.
+/// 다섯 — 0/360을 넘는 최단 경로, 나침반↔걷는 방향 혼합, 유예 시각, 데드밴드,
+/// 프레임 보간.
 void main() {
   group('lerpBearingDeg', () {
     test('359°에서 1°로 갈 때 한 바퀴 돌지 않는다', () {
@@ -109,6 +110,64 @@ void main() {
         next(nowMs: 0, lastBearingDeg: 90, desired: 130, targetMoved: false),
         130,
       );
+    });
+  });
+
+  group('glidedFollowBearingDeg', () {
+    double glide(double shown, double target, {int ms = 32}) =>
+        glidedFollowBearingDeg(
+          shown: shown,
+          target: target,
+          elapsed: Duration(milliseconds: ms),
+          timeConstant: const Duration(milliseconds: 240),
+        );
+
+    test('한 프레임에 다 돌지 않는다 — 이 지연이 곧 부드러움이다', () {
+      final next = glide(0, 90);
+      expect(next, greaterThan(0));
+      expect(next, lessThan(90));
+    });
+
+    test('프레임이 길수록 더 많이 돈다', () {
+      expect(glide(0, 90, ms: 64), greaterThan(glide(0, 90, ms: 32)));
+    });
+
+    test('오래 쉬었다 오면 한 번에 목표까지 붙는다', () {
+      expect(glide(0, 90, ms: 5000), closeTo(90, 0.1));
+    });
+
+    test('경계를 넘어도 짧은 쪽으로 돈다', () {
+      // 350°에서 10°로 갈 때 거꾸로 돌면 340°를 지나며 화면이 한 바퀴 돈다.
+      final next = glide(350, 10);
+      expect(next, greaterThan(350));
+      expect(next, lessThan(360));
+    });
+
+    test('목표에 서 있으면 그대로 있는다', () {
+      expect(glide(90, 90), closeTo(90, 1e-9));
+    });
+
+    test('시정수가 0이면 보간하지 않는다', () {
+      expect(
+        glidedFollowBearingDeg(
+          shown: 0,
+          target: 90,
+          elapsed: const Duration(milliseconds: 32),
+          timeConstant: Duration.zero,
+        ),
+        closeTo(90, 1e-9),
+      );
+    });
+  });
+
+  group('bearingGapDeg', () {
+    test('0/360을 넘어 잰다 — 데드밴드와 같은 산수다', () {
+      expect(bearingGapDeg(358, 2), closeTo(4, 1e-9));
+      expect(bearingGapDeg(2, 358), closeTo(4, 1e-9));
+    });
+
+    test('반대편은 180이 상한이다', () {
+      expect(bearingGapDeg(0, 190), closeTo(170, 1e-9));
     });
   });
 }

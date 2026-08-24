@@ -56,6 +56,18 @@ double _metersBetween(LatLng a, LatLng b) {
   return math.sqrt(dLat * dLat + dLng * dLng);
 }
 
+/// 이번 틱에 남은 거리(또는 각)의 몇 할을 좁힐지 — 지수 평활의 계수다.
+///
+/// 틱이 길수록 1에 가까워져, 오래 쉰 뒤에는 한 번에 목표까지 붙는다. 위치·방향·
+/// 팔로우 카메라가 **같은 산수**를 쓰게 하려고 밖에 뒀다(카메라 쪽은
+/// `map/camera/follow_camera.dart`).
+double glideFollowFactor(Duration elapsed, Duration timeConstant) {
+  final tauMs = timeConstant.inMicroseconds / 1000;
+  if (tauMs <= 0) return 1;
+  final dtMs = elapsed.inMicroseconds / 1000;
+  return (1 - math.exp(-dtMs / tauMs)).clamp(0.0, 1.0);
+}
+
 /// 마커의 목표 위치([aimAt])와 화면에 그릴 위치([point])를 따로 들고 있는 상태.
 ///
 /// 화면은 매 틱 [advance]를 부르고, true가 오면 그때만 지도 소스를 다시 쓴다.
@@ -133,7 +145,7 @@ class LocationMarkerGlide {
         shown.longitude == target.longitude) {
       return false;
     }
-    final k = _followFactor(elapsed, locationMarkerGlideTimeConstant);
+    final k = glideFollowFactor(elapsed, locationMarkerGlideTimeConstant);
     final next = LatLng(
       shown.latitude + (target.latitude - shown.latitude) * k,
       shown.longitude + (target.longitude - shown.longitude) * k,
@@ -162,18 +174,9 @@ class LocationMarkerGlide {
       _shownHeadingDeg = target;
       return true;
     }
-    final k = _followFactor(elapsed, locationMarkerGlideHeadingTimeConstant);
+    final k = glideFollowFactor(elapsed, locationMarkerGlideHeadingTimeConstant);
     _shownHeadingDeg = _normalizeDeg(shown + delta * k);
     return true;
-  }
-
-  /// 이번 틱에 남은 거리의 몇 할을 좁힐지. 틱이 길수록 1에 가까워져, 오래 쉰
-  /// 뒤에는 한 번에 목표까지 붙는다.
-  static double _followFactor(Duration elapsed, Duration timeConstant) {
-    final tauMs = timeConstant.inMicroseconds / 1000;
-    if (tauMs <= 0) return 1;
-    final dtMs = elapsed.inMicroseconds / 1000;
-    return (1 - math.exp(-dtMs / tauMs)).clamp(0.0, 1.0);
   }
 
   static double _shortestArcDeg(double deltaDeg) {
