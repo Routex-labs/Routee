@@ -631,9 +631,18 @@ extension OutdoorMapUi on OutdoorMapBodyState {
         //
         // 도착을 말하는 표면이 위(배너)·아래(카드) 둘인 것은 역할이 달라서다.
         // 배너는 **무슨 일이 일어났는지**를, 카드는 **이제 무엇을 할지**(매장
-        // 정보·안내 종료)를 말한다. 지나쳐 걸어가 안내가 되살아나면(`arrived`가
-        // 풀리면) 이 카드가 다시 돌아온다.
-        if (indoorRouteDestination != null && !_showingArrivalOnly)
+        // 정보·안내 종료)를 말한다.
+        //
+        // **`!_showingArrivalOnly`가 아니라 `_arrivedDestination == null`로
+        // 가른다.** [_showingArrivalOnly]는 판정(`action`)이 `arrived`인
+        // 프레임에만 참이라, 도착 직후 판정이 걸음 잡음으로 한 프레임만
+        // `arrived`를 벗어나도 이 카드가 도착 카드 위에 같이 뜬다 — 두 카드에
+        // `안내 종료`가 하나씩, 사용자는 아래(도착 카드)를 눌러도 안 끝나고
+        // 위(이 카드)를 한 번 더 눌러야 끝났다(실기기 증상). 도착 카드가 떠
+        // 있는 동안은(`_arrivedDestination != null`) 이 카드를 아예 안 그려서
+        // 끝내는 버튼을 하나로 묶는다 — 지나쳐 걸어간 사람도 도착 카드의
+        // `안내 종료`로 끝낼 수 있으니 이 카드가 따로 돌아올 이유가 없다.
+        if (indoorRouteDestination != null && _arrivedDestination == null)
           _bottomDockedCard(
             EtaCard(
               key: _etaCardKey,
