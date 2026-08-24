@@ -35,6 +35,18 @@ abstract interface class IndoorNavigationIntents {
     required AnchorRotationBasis basis,
   });
 
+  /// 센서 세션은 그대로 두고 **방위 신뢰 상태만** 새로 잡는다.
+  ///
+  /// [startGuidance]가 세션을 여는 순간에 하는 것과 같은 방위 초기화이지만,
+  /// native 센서는 멈추지도 다시 켜지도 않는다 — 걸음·기록은 그대로 잇고,
+  /// 밖을 걷는 동안 흔들렸을 수 있는 자북 신뢰·걸음 방향 누적만 새로 판단하게
+  /// 한다. 문을 다시 지나 들어온 재진입에서 부른다 — 세션이 이미 이 층에서
+  /// 돌고 있어도, 이번에 찍는 앵커의 회전각은 그 낡은 누적이 아니라 여기서부터
+  /// 다시 판단해야 한다.
+  ///
+  /// 세션이 열려 있지 않으면([startGuidance] 전) 아무 일도 하지 않는다.
+  Future<void> resetHeadingTrust();
+
   /// 복도 축으로 잡은 anchor의 **앞뒤만** 뒤집는다(회전각 +180°).
   ///
   /// 위치는 그대로 두고 회전각만 바꾼다 — anchor 원점은 사용자가 찍은 그 점이고,

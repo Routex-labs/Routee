@@ -91,6 +91,11 @@ class FakeIndoorNavigation implements IndoorNavigationController {
   }
 
   @override
+  Future<void> resetHeadingTrust() async {
+    log.add('resetHeadingTrust');
+  }
+
+  @override
   Future<void> changeFloor({required String floorId}) async {
     _floorId = floorId;
     log.add('floor:$floorId');

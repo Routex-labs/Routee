@@ -265,6 +265,15 @@ class IndoorNavigationDriver implements IndoorNavigationController {
   }
 
   @override
+  Future<void> resetHeadingTrust() async {
+    if (!_guiding) return;
+    // startGuidance가 세션을 여는 순간 부르는 것과 같은 호출이다 — native
+    // 소스는 건드리지 않으므로 걸음 세션은 끊기지 않는다.
+    _session.reset();
+    _updateCalibration(CalibrationPhase.awaitingPin);
+  }
+
+  @override
   Future<void> changeFloor({required String floorId}) async {
     _floorId = floorId;
     _pendingPinFloorM = null;

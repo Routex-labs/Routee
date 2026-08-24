@@ -494,7 +494,17 @@ extension OutdoorMapGps on OutdoorMapBodyState {
 
     // GPS로 건물 안임을 이미 확인했으므로 권한 게이트를 다시 두지 않는다. 세션이
     // 다른 층에서 돌고 있으면 이 층으로 옮겨야 앵커가 이 층으로 기록된다.
-    if (!await _bindPdrSessionToFloor(floor, gatePermission: false)) return;
+    //
+    // [entrance]가 있으면(문을 지나 들어온 진짜 재진입) 세션이 이미 돌고
+    // 있어도 방위만은 새로 잡는다([forceFreshHeading]) — 밖을 걷는 동안 흔들린
+    // 방위가 이번에 찍는 문 앞 앵커의 회전각에 그대로 구워지는 것을 막는다.
+    if (!await _bindPdrSessionToFloor(
+      floor,
+      gatePermission: false,
+      forceFreshHeading: entrance != null,
+    )) {
+      return;
+    }
     await _awaitSensorWarmup();
     if (!mounted || !_indoorEntered) return;
 

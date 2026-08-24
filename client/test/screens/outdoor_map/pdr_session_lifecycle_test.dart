@@ -239,6 +239,9 @@ class _FakeDriver implements IndoorNavigationController {
   Future<void> flipAnchorRotation() async {}
 
   @override
+  Future<void> resetHeadingTrust() async {}
+
+  @override
   Future<void> changeFloor({required String floorId}) async {
     _floorId = floorId;
   }

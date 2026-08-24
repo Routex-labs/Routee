@@ -692,10 +692,23 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
   /// [gatePermission]이 false면 권한 확인 없이 시작한다(GPS 자동 진입 전용 — 거기서
   /// 한 번 더 막으면 자동 추적이 시작되지 않는다). [announceFailure]는 사용자가 직접
   /// "위치 지정"을 누른 경우에만 켠다.
+  ///
+  /// [forceFreshHeading]은 **문을 다시 지나 들어온 진짜 재진입**에서만 켠다
+  /// ([_startIndoorTracking]의 [entrance] 갈래). 세션이 아직 이 층에서 도는
+  /// 중이면(디버그 모드로 나갈 때 센서를 살려 두거나, 직전 정지가 채 안 끝난
+  /// 경우) 아래 사다리는 그 세션을 그대로 잇는다 — 그런데 방위 보정
+  /// (`_session`의 heading trust)까지 그대로 이어지면, 밖을 걷는 동안 흔들린
+  /// 값이 새로 찍는 앵커의 회전각에 그대로 구워진다. 위치는 문 노드로 옳게
+  /// 찍히는데 마커의 방향 원뿔만 엉뚱한 쪽을 보는 것이 이 증상이다. 걸음·기록을
+  /// 잇는 것과 방위를 잇는 것은 다른 문제라, 여기서는 세션은 그대로 두고
+  /// 방위 신뢰만 새로 잡는다([IndoorNavigationIntents.resetHeadingTrust]) —
+  /// native 센서를 멈추고 다시 켜는 길은 실기기에서 왕복이 걸음 세션을 끊을
+  /// 만큼 걸릴 수 있어 고르지 않았다.
   Future<bool> _bindPdrSessionToFloor(
     String floor, {
     bool gatePermission = true,
     bool announceFailure = false,
+    bool forceFreshHeading = false,
   }) async {
     // 아래 사다리는 전부 "지금 세션 상태"를 읽어 갈린다. 정지가 아직 도는 중이면
     // 그 상태가 거짓말을 한다([PdrSessionLifecycle.awaitStop]).
@@ -720,7 +733,20 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     } else if (indoorNavigationDriver.currentFloorId != floor) {
       await indoorNavigationDriver.changeFloor(floorId: floor);
       if (!mounted) return false;
+      if (forceFreshHeading) await indoorNavigationDriver.resetHeadingTrust();
     } else if (!gatePermission) {
+      if (forceFreshHeading) {
+        // 세션은 그대로 두고 방위 신뢰만 새로 잡는다 — native 센서를 멈추지
+        // 않으므로 걸음 세션은 끊기지 않는다.
+        await indoorNavigationDriver.resetHeadingTrust();
+        setState(() {
+          _pdrTrailState.beginNewSession();
+          _guidance
+            ..resetTracking()
+            ..clearProgress();
+        });
+        return mounted;
+      }
       // 자동 진입인데 이미 이 층 세션이 돌고 있다. 그대로 이어 쓴다.
       return true;
     }
