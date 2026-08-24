@@ -31,8 +31,9 @@ extension _MapShellSearch on _MapShellScreenState {
   /// 카메라가 실내 진입 임계값(15.6) 위에 남아, 다음 카메라 정지에서 곧바로
   /// 되끌려 들어간다(`indoor_entry_zoom.dart`). 그 함수가 축소까지 한다.
   ///
-  /// 건물 안에 서서 눌러도 유지된다 — 그 함수가 GPS 자동 진입까지 끈다. 안 끄면
-  /// 축소해 놓아도 다음 좌표 한 건이 그대로 되끌고 들어간다.
+  /// 건물 안에 서서 눌러도 유지된다 — 이 브랜치에는 GPS 자동 진입이 없어서,
+  /// 축소해 놓으면 좌표가 아무리 와도 되끌려 들어가지 않는다. 들어가는 것은
+  /// 사용자가 「진입」을 누른 순간뿐이다.
   Future<void> _onSearchOutsideRequested() async {
     await _outdoorKey.currentState?.returnToOutdoorView();
   }
