@@ -1616,8 +1616,13 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
 
   /// 건물 **안**에서 바깥 목적지까지. [showOutdoorToIndoorRouteTo]의 거울상이다.
   ///
-  /// **출구는 목적지 기준으로 고른다** — 반대편으로 나가면 실내에서 아낀 30 m를
-  /// 바깥에서 200 m로 갚는다.
+  /// **출구는 실내 길찾기가 실제로 안내하는 문을 쓴다** — 목적지에서 가까운
+  /// 문이 아니라, 지금 서 있는 곳(또는 [origin])에서 실내 그래프를 따라 가장
+  /// 짧게 닿는 문이다([_nearestReachableEntrance]). 한때는 목적지 기준
+  /// 직선거리로 골랐는데("반대편으로 나가면 실내에서 아낀 30 m를 바깥에서
+  /// 200 m로 갚는다"는 것이 그 근거였다), 실측에서는 그 직선거리가 실제 복도
+  /// 거리와 어긋나 지도상 가까워 보이는 문을 두고 반대편 문으로 안내했다
+  /// (더현대 서울, 실기기).
   ///
   /// [origin]을 주면 PDR 앵커 대신 그 실내 매장에서 출발한다. 앵커가 없어도
   /// 그릴 수 있어야 하므로 [showIndoorRouteTo]가 그 검사를 건너뛴다.
@@ -1630,13 +1635,34 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
     PoiSearchResult? origin,
   }) async {
     final exitFloor = _groundEntranceFloor;
-    final exit = exitFloor == null
-        ? null
-        : nearestEntrance(_groundEntrances, destination);
-    if (exitFloor == null || exit == null) {
+    if (exitFloor == null || _groundEntrances.isEmpty) {
       // 출입구 데이터가 없으면 실내 구간을 만들 수 없다. 야외 경로만 그리되,
       // 사용자가 실내 매장을 출발지로 **골랐다면** 그 선택이 조용히 무시되므로
       // 말해 준다 — 안 그러면 "출발지를 잡았는데 왜 여기서 시작하지"가 된다.
+      if (origin != null) {
+        _showSnack('건물 출입구 정보가 없어 실내 구간을 건너뛰고 바깥 경로만 안내합니다.');
+      }
+      await showRouteTo(destination, label: label);
+      return;
+    }
+
+    // 도착 노드는 문 **바깥** 노드다. 그래야 실내 선이 문까지 닿아 아래에서
+    // 그리는 야외 구간과 같은 점에서 맞물린다. 그래프를 못 받았거나 그 출구를
+    // 꿰매지 못했으면 [entranceRouteNodeId]가 예전 안쪽 노드로 폴백한다 —
+    // 이 호출은 캐시를 공유하므로 대개 네트워크를 타지 않는다. 문을 고르는
+    // 데도 이 그래프(복도 거리)가 필요해 여기서 먼저 받는다.
+    final exitBuilding = _building;
+    final exitGraph = exitBuilding == null
+        ? null
+        : await buildingRepository.getBuildingGraph(exitBuilding.id);
+    if (!mounted) return;
+
+    // 그래프가 없거나 시작 노드를 못 찾으면(냉초기 등) 목적지 기준 최근접으로
+    // 물러선다 — 방향이 어긋날 수 있는 문이라도 아예 없는 것보다 낫다.
+    final exit =
+        _nearestReachableEntrance(graph: exitGraph, origin: origin) ??
+        nearestEntrance(_groundEntrances, destination);
+    if (exit == null) {
       if (origin != null) {
         _showSnack('건물 출입구 정보가 없어 실내 구간을 건너뛰고 바깥 경로만 안내합니다.');
       }
@@ -1648,15 +1674,6 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
       exit,
       _buildingCenter(_buildingFootprint ?? const []),
     );
-    // 도착 노드는 문 **바깥** 노드다. 그래야 실내 선이 문까지 닿아 아래에서
-    // 그리는 야외 구간과 같은 점에서 맞물린다. 그래프를 못 받았거나 그 출구를
-    // 꿰매지 못했으면 [entranceRouteNodeId]가 예전 안쪽 노드로 폴백한다 —
-    // 이 호출은 캐시를 공유하므로 대개 네트워크를 타지 않는다.
-    final exitBuilding = _building;
-    final exitGraph = exitBuilding == null
-        ? null
-        : await buildingRepository.getBuildingGraph(exitBuilding.id);
-    if (!mounted) return;
 
     // 실내 구간은 기존 실내 라우팅을 그대로 쓴다. 출구도 노드를 가진 지점이라
     // 매장과 다를 게 없다 — 따로 만들면 층 전환·재탐색·진행률이 전부 갈라진다.
@@ -1709,8 +1726,10 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   /// 좌표를 돌려준다. 실내 구간을 못 그렸으면 null이라 호출부가 예전처럼 야외
   /// 좌표를 그대로 쓴다([prepareIndoorLegFromDrop]의 거울상).
   ///
-  /// **문은 [boardingPoint](처음 타는 정류장) 기준으로 고른다.** 목적지 기준으로
-  /// 고르면 정류장이 건물 반대편일 때 실내에서 아낀 거리를 바깥에서 갚는다.
+  /// **문은 실내 길찾기가 실제로 안내하는 문을 쓴다**
+  /// ([_nearestReachableEntrance]) — [boardingPoint](처음 타는 정류장) 직선거리가
+  /// 아니다. 근거는 [showIndoorToOutdoorRouteTo]와 같다: 지도상 가까운 문이
+  /// 실제로는 복도가 반대편으로 돌아 나가는 문일 수 있다.
   ///
   /// 대중교통 경로를 그리기 **전에** 불러야 한다 — [showIndoorRouteTo]가
   /// `_userDestination`을 비우므로, 뒤에 부르면 방금 세운 도착 핀이 지워진다.
@@ -1719,10 +1738,18 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
     PoiSearchResult? origin,
   }) async {
     final exitFloor = _groundEntranceFloor;
-    final exit = exitFloor == null
+    if (exitFloor == null || _groundEntrances.isEmpty) return null;
+
+    final boardingBuilding = _building;
+    final boardingGraph = boardingBuilding == null
         ? null
-        : nearestEntrance(_groundEntrances, boardingPoint);
-    if (exitFloor == null || exit == null) return null;
+        : await buildingRepository.getBuildingGraph(boardingBuilding.id);
+    if (!mounted) return null;
+
+    final exit =
+        _nearestReachableEntrance(graph: boardingGraph, origin: origin) ??
+        nearestEntrance(_groundEntrances, boardingPoint);
+    if (exit == null) return null;
 
     await showIndoorRouteTo(
       PoiSearchResult(
@@ -1732,7 +1759,7 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
         ),
         floor: exitFloor,
         point: exit.point,
-        nodeId: exit.nodeId,
+        nodeId: entranceRouteNodeId(boardingGraph?.nodes, exit),
       ),
       origin: origin,
     );
@@ -1740,6 +1767,56 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
     // 위 호출은 실패해도 스낵바만 띄우고 조용히 돌아온다. 성공 여부는 결과
     // 상태로 확인한다 — 실내 구간이 없으면 문을 출발점으로 삼을 근거도 없다.
     return _indoorRouteDestination == null ? null : exit.point;
+  }
+
+  /// [showIndoorToOutdoorRouteTo]·[showIndoorLegToTransitBoarding]이 함께 쓰는
+  /// 출구 선택. **목적지·정류장까지의 직선거리가 아니라, 지금 있는 곳(또는
+  /// [origin])에서 실내 그래프를 따라 가장 짧게 닿는 문**을 고른다.
+  ///
+  /// 직선거리로 고르면 지도상 가까워 보이는 문이 실제로는 복도가 반대편으로
+  /// 돌아 나가는 문일 수 있어, 나가는 순간 실내에서 아낀 거리를 야외에서 훨씬
+  /// 크게 물게 된다(실측: 더현대 서울).
+  ///
+  /// [graph]가 없거나 시작 노드를 못 찾으면(냉초기·앵커 없음 등) null — 호출부가
+  /// 목적지 기준 최근접([nearestEntrance])으로 물러선다.
+  BuildingEntrance? _nearestReachableEntrance({
+    required BuildingGraph? graph,
+    required PoiSearchResult? origin,
+  }) {
+    if (graph == null || _groundEntrances.isEmpty) return null;
+    final originNodeId = origin?.nodeId;
+    final originFloor = origin?.floor;
+    final hasExplicitOrigin =
+        originNodeId != null && originFloor != null && originFloor.isNotEmpty;
+    final startNodeId = hasExplicitOrigin
+        ? originNodeId
+        : _pickStartNodeIdInBuildingGraph(
+            graph: graph,
+            startFloorName: _pdrTrailState.anchor?.floorId ?? '',
+          );
+    if (startNodeId == null) return null;
+
+    final Map<String, NodeReach> reach;
+    try {
+      reach = reachableFrom(
+        nodes: graph.nodes,
+        edges: graph.edges,
+        startNodeId: startNodeId,
+      );
+    } on ArgumentError {
+      return null;
+    }
+
+    BuildingEntrance? best;
+    var bestDistance = double.infinity;
+    for (final entrance in _groundEntrances) {
+      final nodeId = entranceRouteNodeId(graph.nodes, entrance);
+      final distance = reach[nodeId]?.distanceM;
+      if (distance == null || distance >= bestDistance) continue;
+      bestDistance = distance;
+      best = entrance;
+    }
+    return best;
   }
 
   /// 이 화면에 그려진 안내를 **전부** 지운다 — 야외 도보 구간과 실내 구간까지.
