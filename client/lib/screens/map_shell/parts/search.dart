@@ -71,6 +71,11 @@ extension _MapShellSearch on _MapShellScreenState {
   /// 남아 겹치면 안 된다.
   void _closeSearch() {
     _searchFocus.unfocus();
+    // **노드 하나로는 모자란다.** 지우기 X는 IconButton이라 눌리는 순간 자기가
+    // 포커스를 가져간다 — 그러면 위 한 줄은 이미 포커스를 잃은 노드에 대고 하는
+    // no-op이고, 키보드는 뜬 채로 남는다. 실기기에서는 "포커스만 풀리고 키보드는
+    // 그대로"로 보였다. scope에서 떼면 누가 들고 있든 함께 내려간다.
+    FocusScope.of(context).unfocus();
     _searchController.clear();
     // 잠금 해제는 조기 반환보다 먼저 한다. 잡고 있지 않은 이유를 푸는 것은
     // no-op이므로, 상태가 어긋나도 잠금이 남아 지도가 굳는 일이 없다.
