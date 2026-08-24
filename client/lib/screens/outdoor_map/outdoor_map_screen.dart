@@ -1452,7 +1452,15 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
         destination: destination,
       );
       if (!mounted) return;
-      _applyRoute(extendRouteToDestination(route, destination));
+      // **양 끝을 다 맞춘다.** TMAP은 출발점도 도착점도 가장 가까운 보행 도로로
+      // 스냅하므로, 문을 출발점으로 준 이 경로는 그냥 그리면 문이 아니라 그 앞
+      // 도로에서 시작한다 — 실내 선은 문에서 끝나 있어 두 구간이 안 이어진다.
+      _applyRoute(
+        extendRouteFromOrigin(
+          extendRouteToDestination(route, destination),
+          origin,
+        ),
+      );
       return;
     }
 

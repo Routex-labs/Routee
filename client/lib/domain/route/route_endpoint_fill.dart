@@ -84,6 +84,50 @@ DirectionsRoute? extendRouteToDestination(
   );
 }
 
+/// 도로 경로의 **시작**을 실제 출발점에 맞춘다. 끝을 맞추는
+/// [extendRouteToDestination]의 거울상이다.
+///
+/// **끝만 맞춰서는 문에서 안 이어진다.** TMAP은 출발점도 가장 가까운 보행 가능
+/// 도로로 스냅하므로, 건물 출입구를 출발점으로 주면 받은 선이 문이 아니라 그
+/// 앞 도로 어딘가에서 시작한다. 실내 선은 문에서 끝나 있어서 두 구간 사이가
+/// 통째로 비어 보인다 — 「밖으로 나가기」를 눌러도, 아직 안에서 계획 화면을
+/// 보고 있어도 같은 화면이다(실기기 증상).
+///
+/// 갈리는 규칙·문턱은 [extendRouteToDestination]과 **같아야 한다.** 한쪽만
+/// 고치면 같은 여정의 두 끝이 서로 다른 규칙으로 이어진다. 그래서 조건을 다시
+/// 세지 않고 좌표열을 뒤집어 그 함수에 넘긴다 — 거리·시간은 방향과 무관한
+/// 스칼라라 뒤집어도 뜻이 그대로다. 우회를 잘라 내는 훑기 방향까지 함께
+/// 뒤집히는 것이 정확히 맞는 동작이다([_replaceDetourTail]의 "앞에서부터"는
+/// 여기서 "뒤에서부터"가 된다 — 우회는 출발 쪽에서 시작되므로).
+///
+/// **GPS를 따라가는 안내에는 쓰지 않는다**(`_updateRoute`). 그쪽 출발점은 매
+/// 좌표마다 바뀌는 원시 GPS라, 앞에 붙이면 오차만큼 선 머리가 걸음마다 떤다.
+/// 이 함수가 필요한 것은 출발점이 **못박힌** 경로뿐이다 — 나온 문, 길찾기
+/// 시트에서 직접 고른 출발지.
+DirectionsRoute? extendRouteFromOrigin(DirectionsRoute? route, LatLng? origin) {
+  if (route == null || origin == null) return route;
+  final reversed = _reversed(route);
+  final filled = extendRouteToDestination(reversed, origin);
+  // 손댈 것이 없으면 **원본을 그대로** 돌려준다. 뒤집기가 턴바이턴 미리보기를
+  // 버리므로([_reversed]), 여기서 뒤집힌 것을 다시 뒤집어 돌려주면 아무 일도
+  // 없었던 경로가 `steps`만 잃는다.
+  if (identical(filled, reversed)) return route;
+  return _reversed(filled!);
+}
+
+/// 좌표열만 뒤집은 같은 경로. 거리·시간·요금은 방향과 무관한 스칼라라 그대로다.
+///
+/// **턴바이턴은 들고 가지 않는다.** 순서를 뒤집어도 "좌회전"이 "우회전"이 되지
+/// 않아, 그대로 옮기면 반대 방향 안내 문구가 붙는다. 끝을 잇는 쪽도 기하가
+/// 바뀌면 같은 이유로 `steps`를 버린다([extendRouteToDestination]).
+DirectionsRoute _reversed(DirectionsRoute route) => DirectionsRoute(
+  points: route.points.reversed.toList(growable: false),
+  distanceMeters: route.distanceMeters,
+  durationSeconds: route.durationSeconds,
+  tollFareWon: route.tollFareWon,
+  taxiFareWon: route.taxiFareWon,
+);
+
 /// 도착점까지 직선으로 가는 편이 확실히 짧아지는 **가장 이른** 지점에서 경로를
 /// 끊고, 거기서 도착점까지 직선으로 잇는다. 그런 지점이 없으면 null.
 ///
