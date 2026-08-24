@@ -1995,7 +1995,9 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
     _setIndoorEntered(false);
     final controller = _mapController;
     if (controller == null || !_styleReady) return;
-    await controller.animateCamera(CameraUpdate.zoomTo(outdoorReturnZoom));
+    // 축소만으로는 부족하다 — 실내에서 나침반을 따라 돌려 둔 방위가 그대로
+    // 남는다. 야외 화면의 규칙은 정북이다([resetCameraToNorthUp]).
+    await resetCameraToNorthUp(controller, zoom: outdoorReturnZoom);
   }
 
   // 실내 MVT 소스·레이어는 스타일 로드와 활성 건물 로드 둘 다 되면 한 번만 등록.

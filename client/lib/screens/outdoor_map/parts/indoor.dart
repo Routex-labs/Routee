@@ -1021,6 +1021,13 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     // (배치 대기 중인 탭은 위에서 이미 소비되므로 방어적 처리다.)
     if (_placingPdrAnchor) _setPlacingAnchor(false);
     _setIndoorEntered(false, source: 'outsideTap');
+    // 이 길은 카메라를 아예 안 만진다 — 배율도 그대로 두는 것이 맞다(사용자가
+    // 도면을 보려고 당겨 둔 자리다). 되돌릴 것은 방위뿐이고, 그걸 안 되돌리면
+    // 야외 지도가 돌아간 채로 남는다([resetCameraToNorthUp]).
+    final controller = _mapController;
+    if (controller != null && _styleReady) {
+      unawaited(resetCameraToNorthUp(controller));
+    }
   }
 
   /// [_indoorEntered] 상태 변경을 한 곳으로 모은 헬퍼. setState·상위 통지에 더해
