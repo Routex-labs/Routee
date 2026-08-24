@@ -275,7 +275,6 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
     // 뒀던 것이 남으면, 새로 "안내 시작"을 눌러도 화면이 따라오지 않는다.
     _followCameraReleasedByUser = false;
     _followCameraBearingDeg = null;
-    _followCameraTarget = null;
     // **이 여정에 야외 구간이 있으면 실내 갈래로 새지 않는다.** 묻는 것은
     // "미리 보기 출발지가 남아 있나"가 아니라 **"지금 시작할 구간이 실내인가"**다.
     // 두 질문이 갈리면, 문 경유 안내(실외 → 건물 안 매장)를 그려 놓고도

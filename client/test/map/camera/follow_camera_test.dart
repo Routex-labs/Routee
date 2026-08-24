@@ -4,8 +4,7 @@ import 'package:navigation_client/map/camera/follow_camera.dart';
 /// 팔로우 카메라 각도 산수의 검증 기준.
 ///
 /// 화면 코드에 묻으면 확인할 방법이 없어 따로 뺀 계산이다. 여기서 지키는 것은
-/// 다섯 — 0/360을 넘는 최단 경로, 나침반↔걷는 방향 혼합, 유예 시각, 데드밴드,
-/// 프레임 보간.
+/// 넷 — 0/360을 넘는 최단 경로, 나침반↔걷는 방향 혼합, 프레임 보간, 데드존.
 void main() {
   group('lerpBearingDeg', () {
     test('359°에서 1°로 갈 때 한 바퀴 돌지 않는다', () {
@@ -61,61 +60,10 @@ void main() {
     });
   });
 
-  group('nextFollowCameraBearingDeg', () {
-    double? next({
-      required int nowMs,
-      int notBeforeMs = 0,
-      double? lastBearingDeg,
-      bool targetMoved = true,
-      required double desired,
-      double deadbandDeg = 8,
-    }) => nextFollowCameraBearingDeg(
-      nowMs: nowMs,
-      notBeforeMs: notBeforeMs,
-      lastBearingDeg: lastBearingDeg,
-      targetMoved: targetMoved,
-      desiredBearingDeg: desired,
-      deadbandDeg: deadbandDeg,
-    );
-
-    test('유예 시각 전에는 아무것도 명령하지 않는다', () {
-      expect(next(nowMs: 1000, notBeforeMs: 1400, desired: 90), isNull);
-      expect(next(nowMs: 1400, notBeforeMs: 1400, desired: 90), 90);
-    });
-
-    test('첫 명령에는 데드밴드를 적용하지 않는다', () {
-      expect(next(nowMs: 0, lastBearingDeg: null, desired: 3), 3);
-    });
-
-    test('데드밴드 안의 흔들림으로는 각을 바꾸지 않는다', () {
-      // 위치는 따라가되 각은 이전 값 그대로 — 서 있는 지도가 진동하지 않는다.
-      expect(next(nowMs: 0, lastBearingDeg: 90, desired: 95), 90);
-      expect(next(nowMs: 0, lastBearingDeg: 90, desired: 99), 99);
-    });
-
-    test('데드밴드도 0/360을 넘어 잰다', () {
-      // 358°와 2°는 4° 차이다. 360을 그냥 빼면 356°로 읽혀 화면이 돈다.
-      expect(next(nowMs: 0, lastBearingDeg: 358, desired: 2), 358);
-    });
-
-    test('각도 흔들림도 데드밴드에 먹히고 위치도 그대로면 건너뛴다', () {
-      expect(
-        next(nowMs: 0, lastBearingDeg: 90, desired: 93, targetMoved: false),
-        isNull,
-      );
-    });
-
-    test('각이 데드밴드를 넘으면 제자리에 서 있어도 돌린다', () {
-      expect(
-        next(nowMs: 0, lastBearingDeg: 90, desired: 130, targetMoved: false),
-        130,
-      );
-    });
-  });
-
   group('glidedFollowBearingDeg', () {
     const tau = Duration(milliseconds: 120);
-    const maxRate = 90.0;
+    const maxRate = 360.0;
+    const deadZone = 5.0;
     const frame = Duration(milliseconds: 16);
 
     double glide(
@@ -123,25 +71,15 @@ void main() {
       double target, {
       Duration elapsed = frame,
       double rate = maxRate,
+      double deadZoneDeg = 0,
     }) => glidedFollowBearingDeg(
       shown: shown,
       target: target,
       elapsed: elapsed,
       timeConstant: tau,
       maxRateDegPerSec: rate,
+      deadZoneDeg: deadZoneDeg,
     );
-
-    /// [target]까지 도는 동안의 프레임별 회전량(도).
-    List<double> steps(double target, {int frames = 60}) {
-      final out = <double>[];
-      var shown = 0.0;
-      for (var i = 0; i < frames; i++) {
-        final next = glide(shown, target);
-        out.add(bearingGapDeg(next, shown));
-        shown = next;
-      }
-      return out;
-    }
 
     test('한 프레임에 다 돌지 않는다', () {
       final next = glide(0, 90);
@@ -167,40 +105,43 @@ void main() {
       expect(glide(90, 90), closeTo(90, 1e-9));
     });
 
-    test('각속도가 상한을 넘지 않는다 — 도약이 램프가 되는 근거다', () {
+    test('데드존 안의 흔들림에는 화면이 꿈쩍도 안 한다', () {
+      // 서 있어도 나침반은 몇 도씩 흔들린다. 그걸 따라가면 지도가 잘게 진동한다.
+      expect(glide(90, 93, deadZoneDeg: deadZone), 90);
+      expect(glide(90, 87, deadZoneDeg: deadZone), 90);
+    });
+
+    test('데드존을 벗어나면 이어서 따라간다 — 목표는 계단이 아니다', () {
+      // 데드존을 목표각에 걸면 목표가 5°씩 뛰고 그 계단이 회전에 그대로 보인다.
+      // 여기서는 목표가 연속이고, 화면이 따라갈지만 데드존이 가른다.
+      var shown = 90.0;
+      for (var target = 95.0; target < 120; target += 0.5) {
+        final next = glide(shown, target, deadZoneDeg: deadZone);
+        expect(next, greaterThanOrEqualTo(shown));
+        shown = next;
+      }
+      expect(shown, greaterThan(100));
+    });
+
+    test('목표가 멈추면 화면도 멎는다 — 관성이 남지 않는다', () {
+      // 상한으로 등속을 만들던 때는 몸이 멈춘 뒤에도 밀린 각만큼 계속 돌았다.
+      var shown = 0.0;
+      final steps = <double>[];
+      for (var i = 0; i < 40; i++) {
+        final next = glide(shown, 30);
+        steps.add(bearingGapDeg(next, shown));
+        shown = next;
+      }
+      // 프레임마다 회전량이 줄어든다 = 목표에 가까워질수록 느려진다.
+      expect(steps.last, lessThan(steps.first));
+      expect(steps.last, lessThan(0.05));
+      expect(shown, closeTo(30, 1));
+    });
+
+    test('각이 통째로 벌어져도 상한을 넘지는 않는다', () {
+      // 층 fit이나 하차 조준 뒤 팔로우가 돌아오는 경우의 안전판이다.
       final perFrame = maxRate * frame.inMilliseconds / 1000;
-      for (final step in steps(180)) {
-        expect(step, lessThanOrEqualTo(perFrame + 1e-9));
-      }
-    });
-
-    test('큰 도약은 한동안 **등속**으로 돈다', () {
-      // 지수만 있으면 첫 프레임이 가장 크고 계속 줄어든다 — 그 모양이 화면에서
-      // "확 돌고 멈춤"으로 보인다. 상한에 걸린 구간은 프레임마다 같아야 한다.
-      final head = steps(90).take(10).toList();
-      for (final step in head) {
-        expect(step, closeTo(head.first, 1e-9));
-      }
-    });
-
-    test('마지막 몇 도는 지수로 잦아들며 멈춘다', () {
-      // 등속만 쓰면 도착 순간 속도가 뚝 끊겨 멈춤이 딱딱하다.
-      final tail = steps(90, frames: 200).skip(120).toList();
-      expect(tail.first, lessThan(maxRate * frame.inMilliseconds / 1000));
-      expect(tail.last, lessThan(tail.first));
-    });
-
-    test('오래 쉬었다 와도 한 프레임에 상한 이상 돌지 않는다', () {
-      // 상한이 시간에 비례하므로 5초가 밀리면 그만큼은 허용된다 — 다만 지수가
-      // 계산한 값(=목표)보다 크게 돌지는 않는다.
-      expect(glide(0, 90, elapsed: const Duration(seconds: 5)), closeTo(90, 1e-9));
-    });
-
-    test('상한을 낮추면 그 속도로만 돈다', () {
-      expect(
-        glide(0, 90, elapsed: frame, rate: 30),
-        closeTo(30 * frame.inMilliseconds / 1000, 1e-9),
-      );
+      expect(bearingGapDeg(glide(0, 180), 0), lessThanOrEqualTo(perFrame + 1e-9));
     });
   });
 

@@ -482,28 +482,50 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
   /// 아직 못 얻은 상태(예: 자북 못 잡음 + 수동 방향 보정 아직 안 함, 첫 걸음
   /// 전)에는 null을 돌려주고, 이 경우 마커도 방향 삼각형 없이 도트만 뜬다.
   /// 계산식은 실내와 동일하며 walkOffset·복도 bias를 섞지 않는다.
-  double? get _pdrCurrentHeadingDeg {
-    final snapshot = _pdrTrailState.snapshot;
-    final anchor = _pdrTrailState.anchor;
-    if (snapshot == null || anchor == null || !snapshot.hasHeading) return null;
-    final transform = FloorCoordinateTransform(anchor);
-    final orientationFloorHeading = transform.toFloorBearing(
-      snapshot.orientationHeadingDeg,
-    );
-    return transform.floorBearingToMapBearing(orientationFloorHeading);
-  }
+  double? get _pdrCurrentHeadingDeg => _mapBearingOf(
+    _liveHeading?.orientationDeg ?? _pdrTrailState.snapshot?.orientationHeadingDeg,
+  );
 
   /// 실제로 걸어가고 있는 방향(true north 기준). [_pdrCurrentHeadingDeg]와 **같은
   /// 변환**을 지나야 두 각을 섞을 수 있다 — 한쪽만 층 좌표계에 있으면 도면이
   /// 돌아간 건물에서 섞은 결과가 엉뚱한 데를 가리킨다.
-  double? get _pdrWalkingHeadingDeg {
-    final snapshot = _pdrTrailState.snapshot;
+  double? get _pdrWalkingHeadingDeg => _mapBearingOf(
+    _liveHeading?.walkingDeg ?? _pdrTrailState.snapshot?.walkingHeadingDeg,
+  );
+
+  /// 세션 좌표계의 각을 지도 bearing(진북 기준)으로 옮긴다. 앵커가 없거나
+  /// 방향이 아직 자리를 못 잡았으면 null — 그때는 삼각형도 카메라도 돌리지
+  /// 않는다.
+  ///
+  /// 두 heading이 **같은 변환**을 지나야 섞을 수 있다([blendedFollowBearingDeg]).
+  /// 한쪽만 층 좌표계에 있으면 도면이 돌아간 건물에서 섞은 결과가 엉뚱한 데를
+  /// 가리킨다.
+  double? _mapBearingOf(double? sessionDeg) {
     final anchor = _pdrTrailState.anchor;
-    if (snapshot == null || anchor == null || !snapshot.hasHeading) return null;
+    final hasHeading =
+        _liveHeading?.converged ?? _pdrTrailState.snapshot?.hasHeading ?? false;
+    if (sessionDeg == null || anchor == null || !hasHeading) return null;
     final transform = FloorCoordinateTransform(anchor);
     return transform.floorBearingToMapBearing(
-      transform.toFloorBearing(snapshot.walkingHeadingDeg),
+      transform.toFloorBearing(sessionDeg),
     );
+  }
+
+  /// native motion 주기(≈33Hz)로 오는 방향. **카메라와 삼각형만** 이걸 본다.
+  ///
+  /// 스냅샷은 초당 두어 번이라, 그 주기로 목표각을 갈면 한 번에 수십 도가
+  /// 도착해 화면이 확 돌고 멈추기를 반복한다. 위치·층 판정은 그대로 스냅샷이
+  /// 단일 출처다([PdrHeadingSample]).
+  void _onPdrHeading(PdrHeadingSample sample) {
+    if (!mounted || !_indoorEntered) return;
+    _liveHeading = sample;
+    // 삼각형과 카메라가 **같은 틱에** 같은 값을 받는다. 한쪽만 촘촘하면 코너에서
+    // 삼각형이 앞질렀다 되돌아온다.
+    if (_markerGlideKind == _MarkerGlideKind.here) {
+      _markerGlide.aimHeadingAt(_pdrCurrentHeadingDeg);
+    }
+    _aimFollowCamera();
+    _syncMarkerGlideTicker();
   }
 
   /// 실내 안내 카메라가 지금 사용자를 따라가도 되는 상태인지.
@@ -559,35 +581,29 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
   /// 진북으로 되돌려 주고, 마커 화살표도 같은 값을 본다.
   void _moveFollowCamera(PdrSnapshot snapshot) {
     _recordFollowCameraSteps(snapshot);
+    _aimFollowCamera();
+  }
+
+  /// 카메라가 **가려는** 각을 다시 잡는다. 스냅샷(위치가 바뀐 순간)과 방향
+  /// 스트림(≈33Hz) 양쪽에서 들어온다.
+  ///
+  /// **여기서 거르지 않는다.** 예전에는 데드밴드로 목표를 붙들어 뒀는데, 그러면
+  /// 목표가 8°씩 계단으로 뛰고 그 계단이 그대로 회전에 보였다. 흔들림을 거르는
+  /// 몫은 그리는 쪽 데드존으로 옮겼다([glidedFollowBearingDeg]).
+  void _aimFollowCamera() {
     if (!_indoorFollowActive) return;
     if (_mapController == null || !_styleReady) return;
-    final here = _pdrCurrentWgs84();
     final orientation = _pdrCurrentHeadingDeg;
-    if (here == null || orientation == null) return;
+    if (orientation == null) return;
 
     final nowMs = DateTime.now().millisecondsSinceEpoch;
-    final last = _followCameraTarget;
-    final bearing = nextFollowCameraBearingDeg(
-      nowMs: nowMs,
-      notBeforeMs: _followCameraNextMoveAtMs,
-      lastBearingDeg: _followCameraBearingDeg,
-      targetMoved:
-          last == null ||
-          last.latitude != here.latitude ||
-          last.longitude != here.longitude,
-      desiredBearingDeg: blendedFollowBearingDeg(
-        orientationHeadingDeg: orientation,
-        walkingHeadingDeg: _pdrWalkingHeadingDeg,
-        walking:
-            nowMs - _followCameraLastStepAtMs < followCameraWalkingStepWindowMs,
-        walkingPullWeight: followCameraWalkingPullWeight,
-      ),
-      deadbandDeg: followCameraBearingDeadbandDeg,
+    _followCameraBearingDeg = blendedFollowBearingDeg(
+      orientationHeadingDeg: orientation,
+      walkingHeadingDeg: _pdrWalkingHeadingDeg,
+      walking:
+          nowMs - _followCameraLastStepAtMs < followCameraWalkingStepWindowMs,
+      walkingPullWeight: followCameraWalkingPullWeight,
     );
-    if (bearing == null) return;
-
-    _followCameraBearingDeg = bearing;
-    _followCameraTarget = here;
     _syncMarkerGlideTicker();
   }
 
@@ -621,6 +637,7 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
       elapsed: elapsed,
       timeConstant: followCameraBearingTimeConstant,
       maxRateDegPerSec: followCameraBearingMaxRateDegPerSec,
+      deadZoneDeg: followCameraBearingDeadZoneDeg,
     );
 
     final moved = _followCameraShownPoint != here;
@@ -671,7 +688,8 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     if (target == null || _markerGlide.point == null) return false;
     final shown = _followCameraShownBearingDeg;
     if (shown == null) return true;
-    return bearingGapDeg(target, shown) >= followCameraBearingSettleDeg ||
+    // 데드존 안이면 그리는 쪽이 어차피 안 돈다 — 프레임을 낼 이유도 없다.
+    return bearingGapDeg(target, shown) >= followCameraBearingDeadZoneDeg ||
         _followCameraShownPoint != _markerGlide.point;
   }
 

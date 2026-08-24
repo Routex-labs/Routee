@@ -25,10 +25,11 @@ const locationMarkerGlideTimeConstant = Duration(milliseconds: 260);
 /// `followCameraBearing*`). 팔로우 중 화면 위 삼각형이 가리키는 쪽은 두 각의
 /// 차라서, 한쪽만 빨리 돌면 코너마다 삼각형이 앞질렀다 되돌아온다.
 ///
-/// 속도를 자르는 이유는 카메라와 같다 — 방향 신호가 초당 두어 번, 한 번에
-/// 수십 도씩 뛰어서 온다. 근거는 `docs/client/location-marker-glide.md`.
+/// 상한은 **안전판이다.** 방향 신호가 촘촘해진 뒤로 보통 회전에서는 걸리지
+/// 않고, 앵커를 다시 찍어 각이 통째로 바뀌는 경우에만 걸린다. 근거는
+/// `docs/client/location-marker-glide.md`.
 const locationMarkerGlideHeadingTimeConstant = Duration(milliseconds: 120);
-const locationMarkerGlideHeadingMaxRateDegPerSec = 90.0;
+const locationMarkerGlideHeadingMaxRateDegPerSec = 360.0;
 
 /// 이 거리를 넘게 뛰면 보간하지 않고 그 자리로 옮긴다(m).
 ///
@@ -123,6 +124,16 @@ class LocationMarkerGlide {
       _shown = target;
       _shownHeadingDeg = headingDeg;
     }
+  }
+
+  /// 방향 목표만 갈아 끼운다. 자리는 그대로다.
+  ///
+  /// 방향은 위치보다 **훨씬 촘촘하게** 온다(native motion 주기). 그때마다
+  /// [aimAt]을 부르면 같은 자리를 목표로 다시 넣게 되어, 스냅 판정이 매번
+  /// 도는 것을 피하려고 따로 뒀다.
+  void aimHeadingAt(double? headingDeg) {
+    if (_target == null) return;
+    _targetHeadingDeg = headingDeg;
   }
 
   /// [elapsed]만큼 시간을 흘려 표시값을 목표 쪽으로 당긴다. 그림이 바뀌었으면

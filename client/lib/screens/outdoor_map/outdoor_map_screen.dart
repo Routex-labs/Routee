@@ -582,14 +582,11 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   /// 주인이 도는 동안의 유예([_holdFollowCamera])를 같은 값으로 센다.
   int _followCameraNextMoveAtMs = 0;
 
-  /// 팔로우 카메라가 **가려는** bearing과 목표점. 데드밴드와 "움직였나" 판정의
-  /// 기준이라, 목표를 새로 잡은 뒤에만 갱신한다.
+  /// 팔로우 카메라가 **가려는** bearing. 방향 신호가 올 때마다(≈33Hz) 그대로
+  /// 갱신한다 — 거르는 몫은 그리는 쪽 데드존에 있다.
   ///
-  /// 화면이 실제로 그리는 각은 따로다([_followCameraShownBearingDeg]) — 목표는
-  /// 데드밴드 때문에 몇 도씩 계단으로 움직이고, 그리는 각이 그 사이를 잇는다.
+  /// 화면이 실제로 그리는 각은 따로다([_followCameraShownBearingDeg]).
   double? _followCameraBearingDeg;
-
-  ll.LatLng? _followCameraTarget;
 
   /// 프레임마다 실제로 카메라에 놓은 bearing과 목표점.
   ///
@@ -689,6 +686,10 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   /// 프레임 동안 그대로 서 있었고, 카메라 각이 **한 틱씩 계단으로** 도는 것이
   /// 그대로 보였다(maplibre의 moveCamera는 우리가 보낸 순간에만 각을 바꾼다).
   Ticker? _markerGlideTicker;
+
+  /// native motion 주기로 오는 마지막 방향. 카메라·삼각형만 본다
+  /// ([_onPdrHeading]).
+  PdrHeadingSample? _liveHeading;
 
   /// 마커 소스에 마지막으로 **실제로 쓴** 그림. 같은 값이면 다시 쓰지 않는다.
   ({ll.LatLng? point, double? headingDeg, bool offFloor})? _lastWrittenMarker;
@@ -791,6 +792,8 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   StreamSubscription<AltitudeSample>? _pdrAltitudeSub;
 
   StreamSubscription<RawMotionActivity>? _pdrRawMotionSub;
+
+  StreamSubscription<PdrHeadingSample>? _pdrHeadingSub;
 
   // --- 자동 층 전환 ---
   //
@@ -1077,6 +1080,9 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
     _pdrRawMotionSub = indoorNavigationDriver.rawMotion.listen(
       _guidance.onRawMotion,
     );
+    // 방향만 오는 스트림. 스냅샷과 달리 setState도, 경로·마커 소스 쓰기도 걸지
+    // 않는다 — 목표각만 갈아 끼우고 그리는 것은 프레임 루프가 한다.
+    _pdrHeadingSub = indoorNavigationDriver.headings.listen(_onPdrHeading);
     unawaited(_loadBuildingEntrance());
     _syncGpsSubscription();
   }
@@ -1148,6 +1154,7 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
     _pdrCalibrationSub?.cancel();
     _pdrAltitudeSub?.cancel();
     _pdrRawMotionSub?.cancel();
+    _pdrHeadingSub?.cancel();
     _escalatorGlideTimer?.cancel();
     _markerGlideTicker?.dispose();
     _arrivalRouteClearTimer?.cancel();

@@ -142,9 +142,9 @@ void main() {
       expect(glide.isSettled, isTrue);
     });
 
-    test('큰 도약은 각속도 상한에 걸려 등속으로 돈다', () {
-      // 방향 신호도 초당 두어 번 수십 도씩 뛰어서 온다. 지수만 쓰면 첫 프레임이
-      // 가장 크고 계속 줄어들어, 삼각형이 확 돌고 멈춘다.
+    test('각이 통째로 바뀌어도 상한을 넘지는 않는다', () {
+      // 앵커를 다시 찍으면 방향이 한 번에 90° 바뀔 수 있다. 그때 삼각형이 한
+      // 프레임에 튀지 않게 막는 안전판이다.
       final glide = LocationMarkerGlide()..aimAt(_origin, headingDeg: 0);
       glide.aimAt(_origin, headingDeg: 90);
       final perFrame =
@@ -161,7 +161,6 @@ void main() {
       }
       for (final step in steps) {
         expect(step, lessThanOrEqualTo(perFrame + 1e-9));
-        expect(step, closeTo(steps.first, 1e-9));
       }
     });
 

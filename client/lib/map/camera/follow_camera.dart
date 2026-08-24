@@ -47,60 +47,33 @@ double blendedFollowBearingDeg({
   );
 }
 
-/// 이번 스냅샷에 카메라를 명령할 bearing. **null이면 이번엔 움직이지 않는다.**
-///
-/// 거르는 이유는 둘이다. [notBeforeMs]는 걸음마다 애니메이션을 쏘아 지도가 떠는
-/// 것을 막고(최소 간격), 동시에 다른 카메라 주인이 도는 동안의 유예로도 쓴다 —
-/// 둘 다 "이 시각 전에는 손대지 않는다"라 값 하나면 된다. 데드밴드([deadbandDeg])
-/// 는 몇 도짜리 나침반 흔들림으로 화면이 돌지 않게 한다. 데드밴드에 걸리면 각을
-/// **이전 값 그대로** 두고 위치만 따라가므로 [targetMoved]가 필요하다.
-///
-/// [lastBearingDeg]가 null이면 아직 한 번도 안 돌린 것이라 데드밴드를 건너뛴다.
-double? nextFollowCameraBearingDeg({
-  required int nowMs,
-  required int notBeforeMs,
-  required double? lastBearingDeg,
-  required bool targetMoved,
-  required double desiredBearingDeg,
-  required double deadbandDeg,
-}) {
-  if (nowMs < notBeforeMs) return null;
-  final desired = normalizeDegrees(desiredBearingDeg);
-  if (lastBearingDeg == null) return desired;
-  final held =
-      shortestDeltaDegrees(desired - lastBearingDeg).abs() < deadbandDeg
-      ? normalizeDegrees(lastBearingDeg)
-      : desired;
-  // 각도 흔들림도 데드밴드에 먹히고 위치도 그대로면 명령할 것이 없다. 서 있는
-  // 동안 초당 몇 번씩 같은 자리로 animateCamera를 쏘지 않기 위한 갈래다.
-  if (!targetMoved && held == normalizeDegrees(lastBearingDeg)) return null;
-  return held;
-}
-
 /// 화면이 지금 그리고 있는 각([shown])을 목표([target]) 쪽으로 [elapsed]만큼
 /// 당긴 값. **명령을 띄엄띄엄 보내는 대신 매 프레임 이 값으로 카메라를 놓는다.**
 ///
-/// 두 규칙을 겹친다.
+/// 규칙 셋이 겹친다.
 ///
-/// 1. 남은 각에 비례해 다가간다(지수 평활, [timeConstant]). 작은 보정이
-///    부드럽게 **멈추는** 것은 이쪽 몫이다.
-/// 2. 각속도를 [maxRateDegPerSec]로 **자른다**. 목표각은 초당 두어 번, 한 번에
-///    수십 도씩 뛰어서 오므로(PDR 스냅샷 주기) 1번만 두면 도착 직후 300°/s로
-///    후려치고 다음 목표까지 멈춰 선다 — 그것이 "뚝뚝 끊겨 돈다"의 정체다.
-///    잘라 두면 그 도약이 등속 램프가 되어 다음 목표가 올 때까지 이어진다.
+/// 1. **데드존**([deadZoneDeg]) — 남은 각이 이보다 작으면 아예 안 돈다. 실내
+///    나침반은 서 있어도 몇 도씩 흔들리는데, 그걸 따라가면 지도가 계속 잘게
+///    진동해 읽을 수가 없다. 목표를 계단으로 만들지 않고 **화면이 안 따라가는**
+///    쪽으로 거르는 것이 요점이다 — 목표를 계단으로 만들면 그 계단이 그대로
+///    회전에 보인다.
+/// 2. **지수 평활**([timeConstant]) — 남은 각에 비례해 다가간다. 몸이 멈추면
+///    남은 각이 줄면서 화면도 같이 멎는다. 관성이 없다.
+/// 3. **각속도 상한**([maxRateDegPerSec]) — 안전판이다. 층 fit이나 하차 조준
+///    뒤 팔로우가 돌아올 때처럼 각이 통째로 벌어진 경우에만 걸린다.
 ///
-/// 그래서 큰 도약은 등속으로, 마지막 몇 도는 지수로 잦아들며 멈춘다. 목표보다
-/// 늦게 도착하는 것은 **의도한 교환**이다 — 근거는
-/// `docs/client/location-marker-glide.md`.
+/// 근거와 버린 대안은 `docs/client/location-marker-glide.md`.
 double glidedFollowBearingDeg({
   required double shown,
   required double target,
   required Duration elapsed,
   required Duration timeConstant,
   required double maxRateDegPerSec,
+  required double deadZoneDeg,
 }) {
-  final eased = shortestDeltaDegrees(target - shown) *
-      glideFollowFactor(elapsed, timeConstant);
+  final delta = shortestDeltaDegrees(target - shown);
+  if (delta.abs() < deadZoneDeg) return normalizeDegrees(shown);
+  final eased = delta * glideFollowFactor(elapsed, timeConstant);
   final cap = maxRateDegPerSec * elapsed.inMicroseconds / 1000000;
   final step = eased.abs() <= cap ? eased : (eased.isNegative ? -cap : cap);
   return normalizeDegrees(shown + step);
