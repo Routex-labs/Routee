@@ -45,6 +45,9 @@ void main() {
   /// 건물 밖. 북쪽 변에서 약 33 m 떨어져 있다 — 나간 뒤 카메라가 따라갈 좌표다.
   const wellOutside = LatLng(37.5670, 126.9780);
 
+  /// 건물에서 한참 떨어진 바깥 목적지(북쪽 약 190 m). 실내→야외 여정의 도착점이다.
+  const outsideDestination = LatLng(37.5680, 126.9790);
+
 
   Map<String, dynamic> node(String id, double xM, double yM) => {
     'id': id,
@@ -257,6 +260,51 @@ void main() {
       indoorLocationEstimateController.current,
       isNull,
       reason: '야외에 선 사용자에게 30초짜리 실내 좌표가 남아 있으면 안 된다',
+    );
+  });
+
+  testWidgets('나가기 버튼은 실내→야외 여정의 안내를 끊지 않는다', (WidgetTester tester) async {
+    // 실측 증상: 실내에서 바깥 목적지로 안내를 걸고 「밖으로 나가기」를 누르면,
+    // 출구에서 안내가 계획 상태로 떨어져 `안내 시작` 버튼이 다시 떴다.
+    //
+    // 뿌리는 **실내 구간이 끝난 것과 여정이 끝난 것을 같이 본 것**이다. 나가는
+    // 길은 실내 위치를 버리면서(`_dropIndoorPosition`) 실내 경로도 함께 접는데,
+    // 그 접기가 기본값으로 안내 세션까지 끝냈다. 곧이어 야외 구간을 이어받는
+    // `_activatePendingOutdoorRoute`는 "이미 안내 중이었나"를 보고 이어갈지를
+    // 정하므로, 그 값이 먼저 내려가면 이어받을 것이 없다고 읽는다.
+    //
+    // 계획/안내는 하단 카드로 가른다 — 계획 카드에만 `안내 시작`이 있고, 안내
+    // 중에는 남은 값 세 개(`남은 시간` 등)가 그 자리를 받는다([EtaCard]).
+    final positions = StreamController<Position>.broadcast();
+    await enterIndoorByButton(tester, positions);
+    await settleSensorWarmup(tester);
+
+    final state = tester.state<OutdoorMapBodyState>(find.byType(OutdoorMapBody));
+    await state.showIndoorToOutdoorRouteTo(outsideDestination, label: '목적지까지');
+    await drain(tester);
+
+    await tester.tap(find.text('안내 시작'));
+    await drain(tester);
+    expect(
+      find.text('안내 시작'),
+      findsNothing,
+      reason: '테스트 전제(실내에서 안내를 시작했다)가 성립하지 않았다',
+    );
+
+    await leaveIndoorByButton(tester);
+    await drain(tester);
+    await settleSensorWarmup(tester);
+
+    expect(find.byType(FloorSelector), findsNothing, reason: '테스트 전제(야외로 나갔다)');
+    expect(
+      find.text('안내 시작'),
+      findsNothing,
+      reason: '문을 나선 사람에게 다시 안내를 시작하라고 하면 같은 여정이 두 번 시작된다',
+    );
+    expect(
+      find.text('남은 시간'),
+      findsOneWidget,
+      reason: '야외 구간을 이어받았으면 안내 중 카드가 그 자리를 받는다',
     );
   });
 
@@ -481,13 +529,35 @@ class _GraphBuildingRepository implements BuildingRepository {
     };
   }
 
+  /// 두 노드를 **그래프 좌표 그대로** 직선으로 잇는다. 서버의 다익스트라를
+  /// 흉내 내는 것이 목적이 아니라, 실내 구간이 "그려졌다"를 성립시키는 것이
+  /// 목적이다 — 여기서 null을 돌려주면 실내→야외 여정이 실내 구간 실패로
+  /// 접혀, 나가는 순간의 안내 이어받기를 확인할 자리가 아예 없다.
   @override
   Future<IndoorRoute?> getShortestRoute(
     String buildingId,
     String floor,
     String startNodeId,
     String endNodeId,
-  ) async => null;
+  ) async {
+    final start = _nodePoint(startNodeId);
+    final end = _nodePoint(endNodeId);
+    if (start == null || end == null) return null;
+    return IndoorRoute(
+      points: [start, end],
+      distanceMeters: const Distance().as(LengthUnit.Meter, start, end),
+      nodeIds: [startNodeId, endNodeId],
+    );
+  }
+
+  LatLng? _nodePoint(String nodeId) {
+    for (final node in graphJson['nodes'] as List<dynamic>) {
+      final row = node as Map<String, dynamic>;
+      if (row['id'] != nodeId) continue;
+      return LatLng(row['lat'] as double, row['lng'] as double);
+    }
+    return null;
+  }
 
   @override
   Future<BuildingGraph?> getBuildingGraph(

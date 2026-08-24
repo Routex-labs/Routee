@@ -62,7 +62,12 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
   void _dropIndoorPosition() {
     _pdrTrailState.beginNewSession();
     _syncCorridorTracking(null);
-    _clearIndoorRoute();
+    // **실내 구간이 끝난 것과 안내가 끝난 것은 다르다.** 야외 구간이 예약돼
+    // 있으면([_pendingOutdoorDestination]) 이 사람의 여정은 문 밖에서 이어진다.
+    // 기본값대로 세션까지 끝내면 곧이어 도는 [_activatePendingOutdoorRoute]가
+    // `_guidanceStarted`를 이미 false로 읽어, 이어받을 안내가 없다고 판단한다 —
+    // 출구에서 `안내 시작` 버튼이 다시 뜨던 화면이 이것이다(실기기 증상).
+    _clearIndoorRoute(endGuidance: _pendingOutdoorDestination == null);
     final recorder = _pdrDebugRecorder;
     if (_debugModeController.enabled && recorder != null) {
       // 방금 [_clearIndoorRoute]가 'routeEnded'를 찍었으므로 **그 뒤에** 덮는다.
