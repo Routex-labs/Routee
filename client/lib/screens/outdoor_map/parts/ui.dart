@@ -31,6 +31,14 @@ extension OutdoorMapUi on OutdoorMapBodyState {
     );
   }
 
+  /// 하단 바 바로 위의 자리. 계산과 근거는 [aboveMapBottomBarPx].
+  ///
+  /// ETA 카드가 뜰 때의 [bottomBarLiftPx]는 **부르는 쪽이 더한다** — 카드에
+  /// 따라 함께 올라갈지가 얹는 것마다 다르다(축척은 야외 경로, 스낵바는 모든
+  /// 경로를 본다).
+  double get _aboveBottomBarPx =>
+      aboveMapBottomBarPx(widget.bottomOverlayLiftPx);
+
   void _showSnack(String message, {Duration? duration}) =>
       _showSnackGuarded(message, replace: false, duration: duration);
 
@@ -80,8 +88,13 @@ extension OutdoorMapUi on OutdoorMapBodyState {
             margin: EdgeInsets.only(
               left: RoutexSpacing.componentPadding,
               right: RoutexSpacing.componentPadding,
+              // **안전영역을 여기서 더한다.** floating SnackBar는 제 SafeArea를
+              // 아래로는 끄고(`snack_bar.dart`), 이 화면의 Scaffold는
+              // `resizeToAvoidBottomInset: false`라 배치도 그것을 안 세 준다 —
+              // 안 더하면 제스처 바가 있는 기기에서 그만큼 낮게 떠 버튼을 덮는다.
               bottom:
-                  mapShellBottomChromePx +
+                  _aboveBottomBarPx +
+                  MediaQuery.paddingOf(context).bottom +
                   (_hasAnyRouteVisible ? bottomBarLiftPx : 0),
             ),
           ),
@@ -279,12 +292,15 @@ extension OutdoorMapUi on OutdoorMapBodyState {
         // 축척 막대는 **위치 보정·위치 지정 버튼 바로 위**다. 그 두 버튼과 같은
         // 오른쪽 끝선(16)에 세워 한 열로 읽히게 하고, ETA 카드가 뜨면 버튼과
         // 함께 올라간다 — 따로 두면 카드가 막대만 덮는다.
+        //
+        // 높이는 [_aboveBottomBarPx]가 잰다. 상수(112)로 두었더니 탭 줄이 생긴
+        // 뒤 그만큼 밀려 올라간 "위치 보정"(GPS) 버튼 위로 자가 걸쳤다.
         AnimatedPositioned(
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeOut,
           right: RoutexSpacing.componentPadding,
           bottom:
-              mapShellBottomChromePx +
+              _aboveBottomBarPx +
               (indoorRouteVisible ? bottomBarLiftPx : 0),
           child: SafeArea(
             top: false,
