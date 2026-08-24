@@ -230,8 +230,8 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
       headingDeg: _markerGlide.headingDeg,
       offFloor: _markerGlideKind == _MarkerGlideKind.dimmed,
     );
-    // **같은 그림이면 안 쓴다.** 스냅샷은 걸음이 아니라 모션 이벤트마다 오므로
-    // (초당 수십 건) 대부분의 호출이 직전과 똑같은 좌표를 다시 인코딩해 채널로
+    // **같은 그림이면 안 쓴다.** 좌표가 바뀌는 것은 걸음마다지만 스냅샷은 그보다
+    // 자주 오므로, 대부분의 호출이 직전과 똑같은 좌표를 다시 인코딩해 채널로
     // 보내고 있었다. 그 몫이 카메라 명령을 밀어낸다.
     if (drawn == _lastWrittenMarker) return Future<void>.value();
     _lastWrittenMarker = drawn;
