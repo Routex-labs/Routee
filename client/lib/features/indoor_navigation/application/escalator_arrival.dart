@@ -92,6 +92,7 @@ FloorTransitionUiState? floorTransitionUiState({
   if (ride != null) {
     return FloorTransitionUiState(
       stage: FloorTransitionStage.swapping,
+      vehicle: FloorTransitionVehicle.escalator,
       fromFloorLabel: ride.fromFloorLabel,
       toFloorLabel: ride.toFloorLabel,
       goingUp: ride.direction == EscalatorDirection.up,
@@ -103,6 +104,7 @@ FloorTransitionUiState? floorTransitionUiState({
     stage: stage.phase == EscalatorPhase.verticalMotionDetected
         ? FloorTransitionStage.moving
         : FloorTransitionStage.boarding,
+    vehicle: FloorTransitionVehicle.escalator,
     fromFloorLabel: stage.fromFloorLabel,
     toFloorLabel: stage.toFloorLabel!,
     goingUp: stage.direction == EscalatorDirection.up,

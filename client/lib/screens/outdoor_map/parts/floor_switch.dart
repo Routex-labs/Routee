@@ -40,6 +40,12 @@ extension OutdoorMapFloorSwitch on OutdoorMapBodyState {
     await _fitCameraToActiveFloor(duration: floorSwitchZoomDuration);
   }
 
+  /// 층 선택기 탭의 테스트 진입점. 층 chip은 셸이 그리는 위젯이라 이 화면의
+  /// 위젯 테스트에서는 누를 수 없으므로, 실기기와 **같은 함수**를 부른다.
+  @visibleForTesting
+  Future<void> selectFloorChipForTest(String floor) =>
+      _onFloorChipSelected(floor);
+
   /// [_switchOverlayFloor]를 크로스페이드로 돈다. **층이 바뀌는 모든 경로**가 이걸
   /// 쓴다 — 직접 부르면 타일 교체가 "지워졌다 다시 그려지는" 장면으로 드러난다.
   ///

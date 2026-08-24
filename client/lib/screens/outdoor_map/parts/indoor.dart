@@ -371,7 +371,6 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     );
     _gpsEntryArmed = true;
     _entryFloorAsked = false;
-    _nearbyStoreAsked = false;
     unawaited(_resetActiveFloorToDefault());
   }
 
@@ -884,7 +883,6 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     // 자리에 그대로 있어서, 다시 펼 때마다 묻는 것은 답을 아는 질문을 되묻는 것이다.
     if (!value && leftBuilding) {
       _entryFloorAsked = false;
-      _nearbyStoreAsked = false;
     }
     // 약한 이탈의 두 래치는 **들어올 때** 되돌린다. 들어온 사람은 문 앞에서
     // 시작하므로 [_leftExitDoorZone]이 false여야, 안으로 걸어 들어가 문에서
@@ -909,8 +907,9 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
       // **호출처가 여기 하나뿐이다** — 만들기만 하고 버리는 자리가 없었다.
       indoorLocationEstimateController.clear();
       // 야외로 나가면 진행 중이던 층 전환도 끝난다. 남겨 두면 배너가 야외
-      // 화면에 떠 있고 걸음이 멈춘 채로 유지된다.
-      _enqueueFloorTransition(_endEscalatorRide);
+      // 화면에 떠 있고 걸음이 멈춘 채로 유지된다. 탈것을 가리지 않는다 —
+      // 나가는 쪽은 무엇을 타고 있었는지 모른다([OutdoorMapElevator._endAnyRide]).
+      _enqueueFloorTransition(_endAnyRide);
     }
     setState(() => _indoorEntered = value);
     widget.onIndoorEnteredChanged?.call(value);
@@ -1095,7 +1094,10 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
 
     final graph =
         _journeyBuildingGraph ??
-        await buildingRepository.getBuildingGraph(building.id);
+        await buildingRepository.getBuildingGraph(
+          building.id,
+          vertical: _verticalQuery,
+        );
     if (!mounted) return;
     // 진입 구간도 문에서 시작한다(outdoor_map_screen의 같은 자리와 한 규칙).
     final leg = graph == null

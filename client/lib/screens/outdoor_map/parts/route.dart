@@ -32,7 +32,9 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
   ) async {
     debugPrint('floor transition failed: $error\n$stackTrace');
     if (!mounted) return;
-    await _endEscalatorRide();
+    // 어느 탈것이 던졌는지 모른다. 둘 다 끝내지 않으면 남은 쪽 활강이 마커를
+    // 그 자리에 영영 붙들어 둔다([OutdoorMapElevator._endAnyRide]).
+    await _endAnyRide();
     if (!mounted) return;
     setState(() => _pendingArrivalNode = null);
     _showSnack('층 전환을 완료하지 못했습니다. 현재 층과 위치를 다시 확인해주세요.');
@@ -171,9 +173,32 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
     return route != null && route.nodeIds.firstOrNull == nodeId;
   }
 
-  /// 지금 화면이 그려야 하는 층 전환 배너 상태.
+  /// 지금 화면이 그려야 하는 층 전환 배너 상태. **자리는 하나다.**
+  /// 셋이 겹칠 때 누가 이기는지와 그 이유는 [mergeFloorTransitionUiState].
   FloorTransitionUiState? get _floorTransitionUiState =>
-      floorTransitionUiState(ride: _escalatorRide, stage: _escalatorStage);
+      mergeFloorTransitionUiState(
+        escalatorRide: floorTransitionUiState(ride: _escalatorRide, stage: null),
+        elevatorRide: _elevatorTransitionUiState,
+        escalatorApproach: floorTransitionUiState(
+          ride: null,
+          stage: _escalatorStage,
+        ),
+      );
+
+  /// 층 전환 큐의 예외 복구를 위젯 테스트가 직접 태운다. 실기기에서는 큐에 들어간
+  /// 액션이 던졌을 때 `onError`가 여기로 온다([_enqueueFloorTransition]).
+  @visibleForTesting
+  Future<void> recoverFloorTransitionFailureForTest() =>
+      _recoverFloorTransitionFailure(
+        StateError('test'),
+        StackTrace.current,
+      );
+
+  /// 지금 그려지는 배너 상태를 위젯 테스트가 읽는다. 화면 밖으로 나가는 값과
+  /// **같은 값**이라, 배너가 뜨는·사라지는 시점을 여기서 그대로 본다.
+  @visibleForTesting
+  FloorTransitionUiState? get floorTransitionUiStateForTest =>
+      _floorTransitionUiState;
 
   /// 배너·스크림 상태가 바뀌면 셸에 알린다. 같은 값이면 알리지 않는다.
   ///
@@ -840,6 +865,43 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
     }
   }
 
+  /// 수직 이동 선호를 바꾸고 **지금 그려진 경로를 다시 뽑는다.**
+  ///
+  /// 값만 갈아 두면 화면의 선은 옛 정책으로 계산된 그대로라, 사용자는 바꿨는데
+  /// 아무 일도 안 일어난 화면을 본다. 저장과 재계산은 한 사건이다.
+  Future<void> _applyVerticalPreference(VerticalPreference preference) async {
+    if (verticalPreferenceController.value == preference) return;
+    await verticalPreferenceController.set(preference);
+    if (!mounted) return;
+    // 여정 그래프는 옛 정책으로 받아 둔 것이다. 안 버리면 야외→실내 진입 구간만
+    // 방금 바꾼 선호를 무시한 채 남는다([_journeyBuildingGraph]).
+    setState(() => _journeyBuildingGraph = null);
+
+    final multi = _indoorMultiFloorRoute;
+    final destination = _indoorRouteDestination;
+    final destinationNodeId = destination?.nodeId;
+    final buildingId = _building?.id;
+    if (multi == null ||
+        destination == null ||
+        destinationNodeId == null ||
+        buildingId == null) {
+      return;
+    }
+    // 지금 보고 있는 경로의 시작점을 그대로 이어 쓴다. 새 목적지를 고른 것이
+    // 아니므로 개요 연출도 진단 세션도 새로 열지 않는다(층 전환 후 재계산과
+    // 같은 규칙 — [_recomputeRouteFrom]).
+    final start = multi.segments.first;
+    await _computeAndShowMultiFloorIndoorRoute(
+      buildingId: buildingId,
+      startFloor: start.floorName,
+      endFloor: destination.floor,
+      endNodeId: destinationNodeId,
+      playOverview: false,
+      beginNewRecordingSession: false,
+      startNodeId: start.route.nodeIds.firstOrNull,
+    );
+  }
+
   /// 층 간 경로를 층별 세그먼트로 나누고 현재 층 세그먼트를 지도에 얹는다. 활성
   /// 층은 시작 층으로 자동 전환되고, 층 chip으로 훑으면 그 층 세그먼트로 갈아탄다.
   /// 인자의 뜻은 [_computeAndShowSingleFloorIndoorRoute]와 같다.
@@ -855,7 +917,11 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
     final completionAtRequest = _currentIndoorCompletionSnapshot();
     final hadExistingIndoorRoute =
         _indoorRouteSegment != null || _indoorMultiFloorRoute != null;
-    final buildingGraph = await buildingRepository.getBuildingGraph(buildingId);
+    final preference = verticalPreferenceController.value;
+    var buildingGraph = await buildingRepository.getBuildingGraph(
+      buildingId,
+      vertical: preference.wireValue,
+    );
     if (!mounted) return;
     if (buildingGraph == null || buildingGraph.nodes.isEmpty) {
       _showSnack('층 간 경로 계산에 필요한 그래프를 불러오지 못했습니다.');
@@ -872,9 +938,30 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
       _clearIndoorRoute();
       return;
     }
-    final route = computeMultiFloorRoute(buildingGraph, startNodeId, endNodeId);
+    var route = computeMultiFloorRoute(buildingGraph, startNodeId, endNodeId);
     if (!mounted) return;
-    if (route == null || route.isEmpty) {
+    // 선호가 이 건물에서 불가능할 때의 규칙: **경로를 포기하지 않고 자동으로 한 번
+    // 되돌린 뒤, 그렇게 했다고 말한다.** 조용히 폴백하면 사용자는 엘리베이터로
+    // 간다고 믿은 채 에스컬레이터 앞에 서고, 조용히 실패하면 갈 길이 있는데도
+    // 없는 것이 된다.
+    //
+    // **저장된 선호는 안 건드린다** — 이 건물에 엘리베이터 간선이 없다고 다음
+    // 건물에서까지 선택을 잃을 이유가 없다. 되돌림은 이번 계산 한 번짜리다.
+    if ((route == null || route.isEmpty) &&
+        preference != VerticalPreference.auto) {
+      buildingGraph = await buildingRepository.getBuildingGraph(
+        buildingId,
+        vertical: VerticalPreference.auto.wireValue,
+      );
+      if (!mounted) return;
+      route = buildingGraph == null
+          ? null
+          : computeMultiFloorRoute(buildingGraph, startNodeId, endNodeId);
+      if (route != null && route.isNotEmpty) {
+        _showSnack('이 건물에는 ${preference.label} 연결이 없어 자동으로 경로를 잡았습니다.');
+      }
+    }
+    if (buildingGraph == null || route == null || route.isEmpty) {
       _showSnack('층 간 경로를 찾지 못했습니다. 엘리베이터/에스컬레이터 연결을 확인해주세요.');
       if (!hadExistingIndoorRoute) _clearIndoorRoute();
       return;
@@ -989,12 +1076,16 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
     _endRouteRecordingSession();
   }
 
-  /// 안내 배너를 탭했을 때 — 경로 전체를 단계 목록으로 펴서 시트로 보여준다.
+  /// 지금 실내 경로의 전체 단계 목록. 그릴 경로가 없으면 빈 목록.
   ///
   /// 다층 경로면 **모든 층의 세그먼트**를 순서대로 편다. 화면에 그려지는 것은
   /// 지금 층 세그먼트뿐이지만, 목록의 존재 이유가 "이 다음에 뭐가 오는지"라
   /// 아직 안 간 층의 단계까지 있어야 한다.
-  void _showIndoorRouteSteps(PoiSearchResult destination) {
+  ///
+  /// 이 값을 쓰는 자리가 둘이라 여기 한 번만 만든다 — 출발 전 카드에서 접었다
+  /// 펴는 줄과([CollapsibleRouteSteps]), 걷는 중 배너를 탭해 올라오는 시트
+  /// ([_showIndoorRouteSteps]).
+  List<RouteStep> _indoorRouteSteps() {
     final multi = _indoorMultiFloorRoute;
     final List<RouteStepLeg> legs;
     if (multi != null && multi.isNotEmpty) {
@@ -1013,7 +1104,7 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
     } else {
       final segment = _indoorRouteSegment;
       final floor = _activeFloor;
-      if (segment == null || floor == null) return;
+      if (segment == null || floor == null) return const [];
       legs = [
         (
           wgs84Points: segment.points,
@@ -1024,7 +1115,15 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
         ),
       ];
     }
-    final steps = buildRouteStepList(legs);
+    return buildRouteStepList(legs);
+  }
+
+  /// 안내 배너를 탭했을 때 — 같은 목록을 시트로 보여준다.
+  ///
+  /// **걷는 중에는 이쪽이 유일한 입구다.** 출발 전 카드의 접이 줄은 안내를
+  /// 시작하면 사라진다([EtaCard.routeOptions]가 진행 표시로 바뀐다).
+  void _showIndoorRouteSteps(PoiSearchResult destination) {
+    final steps = _indoorRouteSteps();
     if (steps.isEmpty) return;
     showRouteStepsSheet(
       context,

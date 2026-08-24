@@ -474,7 +474,12 @@ extension _MapShellRoutePlan on _MapShellScreenState {
     );
     if (nearest == null) return null;
 
-    final graph = await buildingRepository.getBuildingGraph(_buildingId);
+    // 여기서 읽는 것은 노드 좌표뿐이라 수직 정책이 답을 바꾸지 않는다. 그래도
+    // 같은 값을 싣는 이유는 [_verticalQuery]에 있다(캐시 키).
+    final graph = await buildingRepository.getBuildingGraph(
+      _buildingId,
+      vertical: _verticalQuery,
+    );
     if (!mounted || graph == null) return null;
     final nodeId = nearest.entranceNodeId;
     final node = graph.nodes.where((n) => n.id == nodeId).firstOrNull;

@@ -639,6 +639,7 @@ extension OutdoorMapUi on OutdoorMapBodyState {
                       .clamp(1, 999),
               label: _indoorEtaLabel(indoorRouteDestination),
               guidanceStarted: _guidanceStarted,
+              routeOptions: _indoorRouteExtras(indoorRouteDestination),
               onStartGuidance: _guidanceStarted
                   ? null
                   : () => unawaited(_startCurrentGuidance()),
@@ -688,6 +689,48 @@ extension OutdoorMapUi on OutdoorMapBodyState {
                   : null,
             ),
           ),
+      ],
+    );
+  }
+
+  /// 층을 옮길 때 무엇을 타고 갈지 고르는 줄. 층 간 경로가 아니면 null이다.
+  ///
+  /// **이 자리를 고른 이유.** 선호는 실내 층 간 경로에서만 뜻이 있다 — 야외·
+  /// 자동차·대중교통 카드에는 탈 것이 없어 늘 보이면 소음이고, 앱 메뉴에 숨기면
+  /// 정작 층을 옮기는 순간에는 안 보인다. 이 카드는 이미 제목에 "1F → 3F
+  /// 에스컬레이터"를 적고 있으므로, 그 판단을 바꾸는 자리가 바로 위인 것이 가장
+  /// 짧다.
+  ///
+  /// 안내를 시작하면 [EtaCard]가 이 자리를 그리지 않는다 — 걷는 중에 경로를
+  /// 갈아 끼우는 것은 다른 사건이고, 자동차 후보 줄도 같은 규칙이다.
+  Widget? _verticalPreferenceExtras() {
+    if (_indoorMultiFloorRoute == null) return null;
+    return VerticalPreferenceBar(
+      selected: verticalPreferenceController.value,
+      onSelected: (preference) =>
+          unawaited(_applyVerticalPreference(preference)),
+    );
+  }
+
+  /// 실내 계획 카드의 선택 영역 — 수직 이동 선호 줄 + 접어 둔 전체 단계 목록.
+  ///
+  /// **단계 목록은 접힌 채로 시작한다.** 이유는 [CollapsibleRouteSteps]에 있고,
+  /// 대중교통 요약 카드가 세부 타임라인을 접어 두는 것과 같은 규칙이다.
+  ///
+  /// 둘 다 없으면 null을 돌려 카드가 **제목부터 시작하게** 한다 — 빈 줄을 남기면
+  /// 그만큼 지도가 가려진다.
+  Widget? _indoorRouteExtras(PoiSearchResult destination) {
+    final preference = _verticalPreferenceExtras();
+    final steps = _indoorRouteSteps();
+    if (preference == null && steps.isEmpty) return null;
+    return RoutexStack(
+      gap: RoutexStackGap.inline,
+      children: [
+        ?preference,
+        CollapsibleRouteSteps(
+          steps: steps,
+          destinationName: destination.name,
+        ),
       ],
     );
   }

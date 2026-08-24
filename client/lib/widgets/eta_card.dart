@@ -118,7 +118,12 @@ class GuidanceBanner extends StatelessWidget {
       return RoutexManeuverBanner(
         distance: transition.headline,
         detail: transition.detail,
-        icon: RoutexIcons.escalator,
+        // 아이콘 표는 [routeGuidanceIcon] 하나다. 여기서 글리프를 직접 고르면
+        // 같은 이동이 배너와 단계 목록에서 다른 그림으로 나온다.
+        icon: routeGuidanceIcon(switch (transition.vehicle) {
+          FloorTransitionVehicle.escalator => RouteGuidanceAction.escalator,
+          FloorTransitionVehicle.elevator => RouteGuidanceAction.elevator,
+        }),
       );
     }
     final arrival = arrivalAt;

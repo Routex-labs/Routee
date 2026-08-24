@@ -267,6 +267,12 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     if (glide != null) {
       return glide.pointAtProgress(_escalatorGlideProgress.value);
     }
+    // 엘리베이터도 같은 이유로 활강이 출처다. 도면을 반쯤 올라간 자리에서 미리
+    // 갈아 끼우므로, 이 갈래가 없으면 그 순간 마커가 흐린 점으로 물러난다.
+    final elevatorGlide = _elevatorGlide;
+    if (elevatorGlide != null) {
+      return elevatorGlide.pointAtProgress(_elevatorGlideProgress.value);
+    }
     final graph = _floorGraph;
     if (graph == null || graph.nodes.isEmpty) return null;
     final position = _indoorPosition;
@@ -555,6 +561,8 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     // 탑승점 접근 배너와 마커 고정은 기압이 아니라 **걸음 갱신**에서 올라온다.
     // 여기서 비우지 않으면 다음 기압 샘플(iOS는 약 1초)까지 늦는다.
     if (result != null) _handleEscalatorPhaseChanges();
+    // 엘리베이터 판정기도 같은 보정 위치를 받아야 승강장 근접에 허가가 걸린다.
+    if (result != null) _feedElevatorPosition(result, snapshot);
     _syncIndoorRouteProgress(result, snapshot);
     if (result == null) return;
     final anchor = _pdrTrailState.anchor;
@@ -629,6 +637,9 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
         ..resetTracking()
         ..clearProgress();
     });
+    // 층 전이 판정은 연속된 기압 시계열을 전제로 한다. 세션이 끊긴 자리의
+    // 고도차는 근거가 못 되고, 타는 중으로 남으면 걸음 재개까지 막는다.
+    _resetElevatorForNewSession();
     return true;
   }
 
@@ -696,6 +707,37 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     } finally {
       if (mounted) setState(() => _exportingPdrDebugJson = false);
     }
+  }
+
+  /// 층별 고도표 측정 화면을 연다(디버그 전용).
+  ///
+  /// 건물의 층 목록·기압계 상태·공유가 전부 이 화면에 있어서 셸이 아니라 여기가
+  /// 진입점이다. 셸은 [OutdoorMapBodyState]에 대고 부르기만 한다.
+  Future<void> openElevatorAltitudeProbe() async {
+    if (!indoorNavigationDriver.altimeterStatus.available) {
+      _showSnack('이 기기에는 기압계가 없어 고도를 잴 수 없습니다.');
+      return;
+    }
+    await showElevatorAltitudeSheet(
+      context,
+      probe: elevatorAltitudeProbe,
+      floors: _building?.floors ?? const [],
+      onShare: (origin) async {
+        final device = await PdrDebugDeviceInfo.load();
+        if (!mounted) return;
+        await const PdrDebugSessionShare().share(
+          elevatorAltitudeProbe.buildJson(
+            buildingId: _building?.id ?? demoBuildingId,
+            altimeter: indoorNavigationDriver.altimeterStatus,
+            device: device,
+          ),
+          sharePositionOrigin: origin,
+          filenamePrefix: 'elevator-altitude',
+          subject: 'Elevator altitude probe',
+          text: '층별 고도표 실측 JSON입니다.',
+        );
+      },
+    );
   }
 
   /// 내보낸 세션을 놓고 새 세션을 연다. 공유 시트를 띄우지 않고 이 전이만

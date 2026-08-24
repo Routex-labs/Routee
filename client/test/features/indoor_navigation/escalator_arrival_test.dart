@@ -185,6 +185,7 @@ void main() {
   group('FloorTransitionUiState — 배너 문구', () {
     FloorTransitionUiState state(FloorTransitionStage stage) =>
         FloorTransitionUiState(
+          vehicle: FloorTransitionVehicle.escalator,
           stage: stage,
           fromFloorLabel: 'B2',
           toFloorLabel: 'B1',

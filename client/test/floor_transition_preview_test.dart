@@ -60,6 +60,7 @@ Widget _screen({
               fadeOut: Duration.zero,
               photoAssets: floorConceptPhotos(to),
               state: FloorTransitionUiState(
+                vehicle: FloorTransitionVehicle.escalator,
                 stage: stage,
                 fromFloorLabel: from,
                 toFloorLabel: to,
