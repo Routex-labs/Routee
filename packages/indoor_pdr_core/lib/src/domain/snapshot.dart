@@ -43,6 +43,8 @@ class PdrAppliedBatch {
     required this.spanEndMs,
     required this.appliedSteps,
     required this.appliedDistanceM,
+    this.consumedPreviewSteps,
+    this.acknowledgedPreviewSteps,
   });
 
   /// 세션 안에서 단조 증가한다. 같은 값이면 이미 소비한 배치다.
@@ -54,6 +56,15 @@ class PdrAppliedBatch {
 
   final int appliedSteps;
   final double appliedDistanceM;
+
+  /// 이번 배치가 실제로 대응시킨 accel preview 걸음 수.
+  ///
+  /// 시간창 안의 peak 수와 [appliedSteps]는 같지 않을 수 있으므로 별도 값이다.
+  final int? consumedPreviewSteps;
+
+  /// 세션 시작부터 이 배치까지 대응이 끝난 preview 걸음의 누적 번호.
+  /// null은 시간창만 기록하던 이전 snapshot/fixture다.
+  final int? acknowledgedPreviewSteps;
 }
 
 /// Android RoNIN 자동보폭 비교 경로.
@@ -149,9 +160,9 @@ class PdrSnapshot {
 
   /// 마지막으로 confirmed 경로에 반영된 배치. 아직 없으면 null.
   ///
-  /// preview의 어느 구간까지 확정으로 소비할지 판단하는 기준이다.
-  /// `preview.acceptedPeakTimesMs[i] <= lastAppliedBatch.spanEndMs`인 점까지가
-  /// 확정 시간창 안에 들어온 preview 걸음이다.
+  /// preview의 어느 구간까지 확정으로 소비할지 판단하는 기준이다. 새 snapshot은
+  /// [PdrAppliedBatch.acknowledgedPreviewSteps]를 쓰고, 이전 fixture만 시간창으로
+  /// 폴백한다.
   final PdrAppliedBatch? lastAppliedBatch;
 
   /// 확정 경로 끝에서 아직 확정되지 않은 preview peak만 다시 이어 붙인 표시
@@ -161,21 +172,33 @@ class PdrSnapshot {
   /// peak만 소비하고, 이후 peak의 이동 벡터를 새 초록 끝점에 재부착하므로
   /// 마커가 과거 위치로 튀었다 다시 전진하는 현상을 막는다.
   List<PdrLocalPoint> get reconciledPreviewPath {
+    final acknowledgedSteps = lastAppliedBatch?.acknowledgedPreviewSteps;
     final spanEndMs = lastAppliedBatch?.spanEndMs;
     final rawPath = preview.path;
     final times = preview.acceptedPeakTimesMs;
-    if (spanEndMs == null ||
-        rawPath.length < 2 ||
-        times.length != rawPath.length) {
+    if (acknowledgedSteps == null &&
+        (spanEndMs == null ||
+            rawPath.length < 2 ||
+            times.length != rawPath.length)) {
       return rawPath;
     }
 
     var firstPending = -1;
-    for (var index = 1; index < times.length; index++) {
-      final peakMs = times[index];
-      if (peakMs != null && peakMs > spanEndMs) {
-        firstPending = index;
-        break;
+    if (acknowledgedSteps != null) {
+      final firstPathStep = preview.steps - (rawPath.length - 1);
+      for (var index = 1; index < rawPath.length; index++) {
+        if (firstPathStep + index > acknowledgedSteps) {
+          firstPending = index;
+          break;
+        }
+      }
+    } else {
+      for (var index = 1; index < times.length; index++) {
+        final peakMs = times[index];
+        if (peakMs != null && peakMs > spanEndMs!) {
+          firstPending = index;
+          break;
+        }
       }
     }
     final output = <PdrLocalPoint>[...path];

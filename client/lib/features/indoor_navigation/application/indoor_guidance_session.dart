@@ -80,14 +80,28 @@ PdrLocalPoint? routeBoardingHoldPoint({
   return node == null ? null : PdrLocalPoint(node.xM, node.yM);
 }
 
-/// 고정 지점이 지금 위치에서 이만큼 넘게 떨어져 있으면 **그 자리에 세운다**.
+/// 수직 이동이 잡힌 뒤, 고정 지점이 지금 위치에서 이만큼 넘게 떨어져 있으면
+/// **그 자리에 세운다**.
 ///
 /// 고정은 원래 "탑승점을 지나 앞 매장으로 흘러가는 것"을 막으려는 것이다.
 /// 그런데 판정이 이르거나 틀렸을 때 먼 노드로 스냅하면 마커가 눈에 띄게 뒤로
 /// 순간이동하고, 사용자는 그걸 "위치가 튄다"로 읽는다 — 막으려던 것보다 나쁜
-/// 그림이다. 6m는 랜딩 폭과 보정 오차를 감안한 값으로, 실제로 탑승점에 서
-/// 있으면 이 안에 든다.
+/// 그림이다. 6m는 랜딩 폭과 보정 오차를 감안한 강한 단계의 보정 한계다. 접근
+/// 중 화면 고정을 시작하는 문턱으로는 쓰지 않는다.
 const boardingHoldSnapRadiusM = 6.0;
+
+/// 탑승점 후보를 화면 고정으로 올릴 때의 반경.
+///
+/// 6m는 판정 허가 오차를 품는 범위라 그 경계에서 탑승점으로 당기면 눈에 띄는
+/// 순간이동이 된다. 화면 고정은 마커가 실제로 노드에 붙어 보이는 범위만 쓴다.
+const boardingApproachVisibleSnapRadiusM = 1.5;
+
+/// 활성 경로가 지목한 탑승점의 가시 반경에 들어온 뒤 필요한 전진 peak 수.
+///
+/// 대상 일치는 이미 [routeBoardingHoldPoint]가 보장한다. 여기서 한 걸음을 더
+/// 기다리면 marker가 실제 사용자보다 앞서 탑승점을 지나친 경우 다음 peak가
+/// "멀어짐"으로 읽혀 후보가 사라졌다. 첫 신뢰 가능한 근접 걸음에서 붙든다.
+const boardingApproachVisiblePeakCount = 1;
 
 /// 고정 지점을 지금 위치 기준으로 다듬는다. 멀면 [currentM]을 그대로 쓴다.
 PdrLocalPoint? clampBoardingHold({
@@ -162,11 +176,19 @@ class IndoorGuidanceSession {
   /// 걸음으로 세어져 마커가 앞 매장으로 흘러갔다.
   PdrLocalPoint? _rideHoldPointM;
 
+  /// 경로 탑승 후보에서 1차 수직 속도가 확인된 순간의 표시 위치.
+  ///
+  /// 아직 0.5m 강한 문턱 전이라 탑승점으로 스냅하거나 배너를 열지는 않는다.
+  /// 다만 이때도 사람이 이미 발판 위일 수 있으므로, 이후 걸음과 재탐색이 반대
+  /// 레인까지 마커를 밀지 못하게 그 순간 보이던 자리를 붙든다.
+  PdrLocalPoint? _verticalObservationHoldPointM;
+
   /// 고도 근거가 오기 **전에** 탑승점 하나만으로 거는 고정 지점.
   ///
   /// 위 둘과 달리 단계 전이가 아니라 [_syncBoardingApproach]가 매 스냅샷 갱신한다.
   /// 탑승 직후 몇 초는 판정기가 idle이라 단계가 아예 안 나오기 때문이다.
   PdrLocalPoint? _approachHoldPointM;
+  int? _approachHoldEnteredAtMs;
 
   /// 경로가 지목한 탑승점까지의 거리(m). 그런 탑승점이 없으면 null.
   double? _boardingApproachDistanceM;
@@ -176,6 +198,26 @@ class IndoorGuidanceSession {
 
   /// 탑승점 근거만으로 재탐색을 막는 구간인지. [_syncBoardingApproach]가 정한다.
   bool _boardingApproachGateOpen = false;
+  int? _boardingApproachLastActivityPeakId;
+  int? _boardingApproachLastActivityConfirmedSteps;
+  int _boardingApproachEvidencePeaks = 0;
+  int? _boardingApproachLastPeakId;
+  int? _boardingApproachLastConfirmedSteps;
+  double? _boardingApproachLastDistanceM;
+  int _boardingVestibuleEvidencePeaks = 0;
+  double? _boardingVestibuleLastDistanceM;
+
+  /// 마지막으로 신뢰한 graph 위치에서 원시 PDR의 **이동 벡터만** 이어 붙인
+  /// 탑승 접근 그림자. 화면에는 그리지 않고, 열린 공간에서 경로 간선을 잘라
+  /// 에스컬레이터로 곧장 가는 경우의 근접 근거로만 쓴다.
+  PdrLocalPoint? _boardingApproachShadowM;
+  PdrLocalPoint? _boardingApproachShadowLastRawM;
+  String? _boardingApproachShadowNodeId;
+  double? _boardingApproachShadowHeadingBiasDeg;
+  int _boardingApproachShadowEvidencePeaks = 0;
+  int? _boardingApproachShadowLastPeakId;
+  int? _boardingApproachShadowLastConfirmedSteps;
+  double? _boardingApproachShadowLastDistanceM;
 
   bool get isAttached => _attached;
   String? get buildingId => _buildingId;
@@ -194,6 +236,7 @@ class IndoorGuidanceSession {
   bool get isPositionHeld =>
       _boardingHoldPointM != null ||
       _rideHoldPointM != null ||
+      _verticalObservationHoldPointM != null ||
       _approachHoldPointM != null;
 
   /// 경로가 지목한 탑승점까지의 거리(m). 디버그 칩이 읽는다 — 게이트가 안 열렸을 때
@@ -241,7 +284,9 @@ class IndoorGuidanceSession {
   void clearBoardingHold() {
     _boardingHoldPointM = null;
     _rideHoldPointM = null;
+    _verticalObservationHoldPointM = null;
     _approachHoldPointM = null;
+    _approachHoldEnteredAtMs = null;
   }
 
   /// 접근 근거 자체를 버린다. [clearBoardingHold]와 나눈 이유는 **시간 상한** 때문이다 —
@@ -251,6 +296,30 @@ class IndoorGuidanceSession {
     _boardingApproachDistanceM = null;
     _boardingApproachSinceMs = null;
     _boardingApproachGateOpen = false;
+    _boardingApproachLastActivityPeakId = null;
+    _boardingApproachLastActivityConfirmedSteps = null;
+    _clearBoardingApproachEvidence();
+    _clearBoardingApproachShadow();
+  }
+
+  void _clearBoardingApproachEvidence() {
+    _boardingApproachEvidencePeaks = 0;
+    _boardingApproachLastPeakId = null;
+    _boardingApproachLastConfirmedSteps = null;
+    _boardingApproachLastDistanceM = null;
+    _boardingVestibuleEvidencePeaks = 0;
+    _boardingVestibuleLastDistanceM = null;
+    _boardingApproachShadowEvidencePeaks = 0;
+    _boardingApproachShadowLastPeakId = null;
+    _boardingApproachShadowLastConfirmedSteps = null;
+    _boardingApproachShadowLastDistanceM = null;
+  }
+
+  void _clearBoardingApproachShadow() {
+    _boardingApproachShadowM = null;
+    _boardingApproachShadowLastRawM = null;
+    _boardingApproachShadowNodeId = null;
+    _boardingApproachShadowHeadingBiasDeg = null;
   }
 
   /// 부착·층·경로는 그대로 두고 **보정만** 처음부터 다시 본다.
@@ -346,11 +415,20 @@ class IndoorGuidanceSession {
     final anchor = _anchor;
     if (anchor == null || anchor.floorId != _floorId) return null;
     final atMs = timestampMs ?? _nowMs();
+    final lockBoardingTerminal =
+        _boardingApproachGateOpen &&
+        (_approachHoldPointM != null ||
+            (_boardingApproachDistanceM ?? double.infinity) <=
+                _escalator.config.armRadiusM);
     final result = _corridor.update(
       graph: _graph,
       anchor: anchor,
       snapshot: snapshot,
       timestampMs: atMs,
+      preferredRouteEdgeIds: _routeSegment?.edgeIds ?? const [],
+      preferredRouteNodeIds: _routeSegment?.nodeIds ?? const [],
+      preferRouteContinuity: _boardingApproachGateOpen,
+      lockPreferredRouteTerminal: lockBoardingTerminal,
     );
     if (result == null) return null;
     _feedEscalator(result, snapshot, atMs);
@@ -381,50 +459,118 @@ class IndoorGuidanceSession {
         ? null
         : _multiFloorRoute?.segmentForFloor(floor);
     final route = segment?.route;
+    PdrLocalPoint? routeApproachPositionM;
     if (segment != null &&
         segment.transferModeToNext == 'escalator' &&
         segment.transferFromNodeId != null &&
         route != null &&
         route.pointsLocalM.isNotEmpty) {
       final routeEnd = route.pointsLocalM.last;
+      final routeEndM = PdrLocalPoint(routeEnd.x, routeEnd.y);
+      routeApproachPositionM = _updateBoardingApproachShadow(
+        boardingNodeId: segment.transferFromNodeId!,
+        routeEndM: routeEndM,
+        result: result,
+      );
       _escalator.onEscalatorRouteApproach(
-        positionM: result.previewPosition,
-        routeEndM: PdrLocalPoint(routeEnd.x, routeEnd.y),
+        positionM: routeApproachPositionM,
+        routeEndM: routeEndM,
         expectedBoardingNodeId: segment.transferFromNodeId!,
         expectedArrivalNodeId: segment.transferToNodeId,
         steps: steps,
         timestampMs: atMs,
         immediateTransfer: route.distanceMeters <= consecutiveTransferRouteM,
       );
+    } else {
+      _clearBoardingApproachShadow();
     }
     _syncBoardingApproach(
-      boardingNodeId: segment?.transferFromNodeId,
-      currentM: result.previewPosition,
+      segment: segment,
+      result: result,
+      confirmedSteps: steps,
       atMs: atMs,
+      routeApproachPositionM: routeApproachPositionM,
+    );
+  }
+
+  /// graph에 고정된 표시 위치와 자유보행 그림자 중 탑승점에 가까운 쪽을 낸다.
+  ///
+  /// 원시 PDR 절대좌표를 그대로 믿지 않는다. 마지막 안정된 표시점에 그림자를
+  /// 놓고, 이후 원시 이동 벡터를 tracker가 학습한 heading bias로 회전해 누적한다.
+  /// 그래서 heading 오차는 보정하면서도 graph에 없는 대각선 지름길은 보존한다.
+  PdrLocalPoint _updateBoardingApproachShadow({
+    required String boardingNodeId,
+    required PdrLocalPoint routeEndM,
+    required CorridorTrackingResult result,
+  }) {
+    final matchedM = result.previewPosition;
+    final matchedDistanceM = (routeEndM - matchedM).distance;
+    final config = _escalator.config;
+    final sameTarget = _boardingApproachShadowNodeId == boardingNodeId;
+    if (!sameTarget) _clearBoardingApproachShadow();
+
+    if (_boardingApproachShadowM == null) {
+      final canSeed =
+          matchedDistanceM <= config.routeApproachArmRadiusM &&
+          result.state != CorridorTrackingState.uncertain &&
+          !result.leaderRelocated;
+      if (!canSeed) return matchedM;
+      _boardingApproachShadowM = matchedM;
+      _boardingApproachShadowLastRawM = result.rawPreviewPosition;
+      _boardingApproachShadowNodeId = boardingNodeId;
+      _boardingApproachShadowHeadingBiasDeg = result.headingBiasDeg;
+    } else {
+      final previousRawM = _boardingApproachShadowLastRawM;
+      if (previousRawM != null) {
+        final rawDelta = result.rawPreviewPosition - previousRawM;
+        _boardingApproachShadowM =
+            _boardingApproachShadowM! +
+            _rotateFloorVector(
+              rawDelta,
+              _boardingApproachShadowHeadingBiasDeg ?? result.headingBiasDeg,
+            );
+      }
+      _boardingApproachShadowLastRawM = result.rawPreviewPosition;
+    }
+
+    final shadowM = _boardingApproachShadowM!;
+    return (routeEndM - shadowM).distance < matchedDistanceM
+        ? shadowM
+        : matchedM;
+  }
+
+  PdrLocalPoint _rotateFloorVector(PdrLocalPoint vector, double degrees) {
+    final radians = degrees * math.pi / 180;
+    final cosine = math.cos(radians);
+    final sine = math.sin(radians);
+    return PdrLocalPoint(
+      vector.eastM * cosine + vector.northM * sine,
+      -vector.eastM * sine + vector.northM * cosine,
     );
   }
 
   /// 고도가 오기 **전** 구간을 탑승점 하나로 표현한다.
   ///
-  /// 판정기는 Δ가 `minDeltaM`(1.2m)만큼 변해야 후보를 여는데, 탑승 직후 몇 초는
-  /// 계단이 아직 사람을 안 올려 Δ가 0이다. 그 사이 걸음이 계속 옆 복도로 스냅되고
-  /// 이탈 증거가 쌓여 재탐색이 돌았다(2026-08-20 실기기).
-  ///
-  /// 근거의 세기가 달라 문턱을 둘로 나눈다. 표는
-  /// `docs/client/escalator-thresholds.md`가 단일 출처다.
+  /// 탑승 직후 Δ가 0인 몇 초 동안 걸음이 옆 복도로 스냅되지 않게 한다. 임계값과
+  /// 실측 근거의 단일 출처는 `docs/client/escalator-thresholds.md`다.
   /// - **재탐색 차단**: `routeApproachArmRadiusM`(16m). 틀려도 몇 초 늦을 뿐이다.
-  /// - **위치 고정**: [boardingHoldSnapRadiusM](6m)에서 걸고
-  ///   `boardingAbandonRadiusM`(8m)에서 푼다. 탑승점을 지나 발판에 올라서는 동안
-  ///   거리가 늘어나는 것은 이탈이 아니라 탑승의 모양이라 넓게 푼다.
+  /// - **가시 고정 후보**: 판정기의 `boardingApproachRadiusM`(3m) 안에서 활성
+  ///   경로를 따라 전진하는 서로 다른 peak를 센다.
+  /// - **위치 고정**: 후보가 [boardingApproachVisiblePeakCount]번 이어지거나 탑승
+  ///   노드를 실제 통과하면 건다. 노드에서 [boardingApproachVisibleSnapRadiusM]
+  ///   안일 때만 노드에 붙이고, 아니면 그 순간 보이던 위치를 붙든다.
   ///
-  /// 탈출구가 둘이다 — 탑승점에서 멀어지면 그 자리에서 풀리고, 반경 안에 머물러도
-  /// `boardingPhaseTimeoutMs`(40초)가 지나면 접는다. 판정기가 배너를 접는 규칙과
-  /// 같은 거리·시간을 쓴다.
+  /// 짧은 기압 인계 유예 뒤 `boardingAbandonRadiusM`에서 풀리고,
+  /// 반경 안에서도 새 걸음 없이 `boardingPhaseTimeoutMs`(40초)가 지나면 접는다.
+  /// 천천히 계속 걷는 접근은 걸음마다 이 무동작 시간을 갱신한다.
   void _syncBoardingApproach({
-    required String? boardingNodeId,
-    required PdrLocalPoint currentM,
+    required IndoorRouteSegment? segment,
+    required CorridorTrackingResult result,
+    required int confirmedSteps,
     required int atMs,
+    required PdrLocalPoint? routeApproachPositionM,
   }) {
+    final boardingNodeId = segment?.transferFromNodeId;
     final holdPoint = routeBoardingHoldPoint(
       boardingNodeId: boardingNodeId,
       anchorFloorId: _anchor?.floorId,
@@ -433,30 +579,420 @@ class IndoorGuidanceSession {
       graph: _graph,
     );
     final config = _escalator.config;
-    final distanceM = holdPoint == null
+    // terminal lock이 표시 matcher를 탑승 노드에 세운 뒤에는 "가까운 쪽"을
+    // 이탈 거리로 쓰면 항상 0m가 된다. 접근할 때는 matched/shadow 중 가까운
+    // 쪽을 쓰되, 이미 붙든 뒤의 실제 통과 여부는 계속 흐르는 shadow로 잰다.
+    final distanceProbeM = _approachHoldPointM == null
+        ? routeApproachPositionM
+        : _boardingApproachShadowM ?? routeApproachPositionM;
+    final distanceM = holdPoint == null || distanceProbeM == null
         ? null
-        : (holdPoint - currentM).distance;
+        : (holdPoint - distanceProbeM).distance;
+    final holdGraceActive =
+        _approachHoldPointM != null &&
+        _approachHoldEnteredAtMs != null &&
+        atMs - _approachHoldEnteredAtMs! < config.boardingAbandonGraceMs;
+    if (distanceM != null && holdGraceActive) {
+      _boardingApproachDistanceM = distanceM;
+      _boardingApproachGateOpen = true;
+      return;
+    }
     if (distanceM == null || distanceM > config.routeApproachArmRadiusM) {
       _approachHoldPointM = null;
+      _approachHoldEnteredAtMs = null;
       _clearBoardingApproach();
       _boardingApproachDistanceM = distanceM;
       return;
     }
     _boardingApproachDistanceM = distanceM;
-    final since = _boardingApproachSinceMs ??= atMs;
+    var hadMovement = false;
+    for (final step in result.optimisticStepAdvances) {
+      if (_boardingApproachLastActivityPeakId == step.peakId) continue;
+      _boardingApproachLastActivityPeakId = step.peakId;
+      hadMovement = true;
+    }
+    final lastConfirmed = _boardingApproachLastActivityConfirmedSteps;
+    if (lastConfirmed == null || confirmedSteps > lastConfirmed) {
+      _boardingApproachLastActivityConfirmedSteps = confirmedSteps;
+      hadMovement = lastConfirmed != null;
+    }
+    if (_boardingApproachSinceMs == null || hadMovement) {
+      _boardingApproachSinceMs = atMs;
+    }
+    final since = _boardingApproachSinceMs!;
     if (atMs - since >= config.boardingPhaseTimeoutMs) {
-      // 시간 상한. 거리로 한 번 나갔다 들어와야 다시 열린다 — 그래야 탑승점 앞에
-      // 계속 서 있는 사람에게 무한히 걸리지 않는다.
+      // 움직임 없는 상태의 시간 상한. 천천히 접근하는 실제 걸음은 위에서 lease를
+      // 갱신하지만, 탑승점 앞에 놓인 기기는 결국 풀려야 한다.
       _boardingApproachGateOpen = false;
       _approachHoldPointM = null;
+      _approachHoldEnteredAtMs = null;
+      _clearBoardingApproachEvidence();
       return;
     }
     _boardingApproachGateOpen = true;
-    if (_approachHoldPointM == null) {
-      if (distanceM <= boardingHoldSnapRadiusM) _approachHoldPointM = holdPoint;
-    } else if (distanceM > config.boardingAbandonRadiusM) {
-      _approachHoldPointM = null;
+    if (_approachHoldPointM != null) {
+      if (distanceM > config.boardingAbandonRadiusM) {
+        _approachHoldPointM = null;
+        _approachHoldEnteredAtMs = null;
+        _clearBoardingApproachEvidence();
+      }
+      return;
     }
+    _updateBoardingApproachEvidence(
+      segment: segment,
+      result: result,
+      confirmedSteps: confirmedSteps,
+      boardingNodeId: boardingNodeId!,
+      holdPoint: holdPoint!,
+      atMs: atMs,
+    );
+  }
+
+  void _updateBoardingApproachEvidence({
+    required IndoorRouteSegment? segment,
+    required CorridorTrackingResult result,
+    required int confirmedSteps,
+    required String boardingNodeId,
+    required PdrLocalPoint holdPoint,
+    required int atMs,
+  }) {
+    final graph = _graph;
+    final route = segment?.route;
+    if (graph == null || route == null) {
+      _clearBoardingApproachEvidence();
+      return;
+    }
+    final previousConfirmedSteps = _boardingApproachLastConfirmedSteps;
+    _boardingApproachLastConfirmedSteps = confirmedSteps;
+    final vestibule = _boardingVestibule(
+      route: route,
+      graph: graph,
+      boardingNodeId: boardingNodeId,
+    );
+    var sawNewOptimisticStep = false;
+    int? latestPeakId;
+    for (final optimisticStep in result.optimisticStepAdvances) {
+      if (_boardingApproachLastPeakId == optimisticStep.peakId) continue;
+      sawNewOptimisticStep = true;
+      latestPeakId = optimisticStep.peakId;
+      _boardingApproachLastPeakId = optimisticStep.peakId;
+      if (vestibule != null &&
+          _optimisticStepReachedBoardingVestibule(
+            step: optimisticStep,
+            route: route,
+            graph: graph,
+            vestibuleNodeId: vestibule.nodeId,
+          )) {
+        _holdBoardingApproach(
+          holdPoint: holdPoint,
+          currentM: optimisticStep.position,
+          atMs: atMs,
+        );
+        return;
+      }
+      final routeStep = adaptOptimisticStepToRoute(
+        step: optimisticStep,
+        graph: graph,
+        routeEdgeIds: route.edgeIds,
+        routeNodeIds: route.nodeIds,
+      );
+      final marker = routeStep.actualMarkerPosition;
+      final trustedForward =
+          routeStep.relation == RouteStepRelation.forward &&
+          !routeStep.previewIsAmbiguous &&
+          marker != null;
+      if (!trustedForward) {
+        _rejectBoardingApproachEvidence();
+        continue;
+      }
+      if (vestibule != null &&
+          _acceptBoardingVestibuleEvidence(
+            markerDistanceM: (vestibule.pointM - marker).distance,
+            crossedVestibule: routeStep.crossedRouteWaypointIds.contains(
+              vestibule.nodeId,
+            ),
+          )) {
+        _holdBoardingApproach(
+          holdPoint: holdPoint,
+          currentM: marker,
+          atMs: atMs,
+        );
+        return;
+      }
+      final markerDistanceM = (holdPoint - marker).distance;
+      final crossedBoarding = routeStep.crossedRouteWaypointIds.contains(
+        boardingNodeId,
+      );
+      if (_acceptBoardingApproachEvidence(
+        markerDistanceM: markerDistanceM,
+        crossedBoarding: crossedBoarding,
+      )) {
+        _holdBoardingApproach(
+          holdPoint: holdPoint,
+          currentM: marker,
+          atMs: atMs,
+        );
+        return;
+      }
+    }
+    if (_acceptBoardingApproachShadowEvidence(
+      result: result,
+      confirmedSteps: confirmedSteps,
+      latestPeakId: latestPeakId,
+      holdPoint: holdPoint,
+    )) {
+      _holdBoardingApproach(
+        holdPoint: holdPoint,
+        currentM: result.previewPosition,
+        atMs: atMs,
+      );
+      return;
+    }
+    final hasNewConfirmedStep =
+        previousConfirmedSteps != null &&
+        confirmedSteps > previousConfirmedSteps;
+    if (!sawNewOptimisticStep &&
+        hasNewConfirmedStep &&
+        vestibule != null &&
+        _isConfirmedForwardOnRouteEdge(
+          route: route,
+          graph: graph,
+          result: result,
+          edgeIndex: route.edgeIds.length - 2,
+          allowJunctionAmbiguity: true,
+        ) &&
+        _acceptBoardingVestibuleEvidence(
+          markerDistanceM:
+              (vestibule.pointM - result.correctedPosition).distance,
+          crossedVestibule: false,
+        )) {
+      _holdBoardingApproach(
+        holdPoint: holdPoint,
+        currentM: result.correctedPosition,
+        atMs: atMs,
+      );
+      return;
+    }
+    if (sawNewOptimisticStep || !hasNewConfirmedStep) {
+      return;
+    }
+    if (!_isConfirmedForwardOnFinalRouteEdge(
+      route: route,
+      graph: graph,
+      result: result,
+    )) {
+      _rejectBoardingNodeApproachEvidence();
+      return;
+    }
+    final crossedBoarding = result.lastConfirmedNodeId == boardingNodeId;
+    if (_acceptBoardingApproachEvidence(
+      markerDistanceM: (holdPoint - result.correctedPosition).distance,
+      crossedBoarding: crossedBoarding,
+    )) {
+      _holdBoardingApproach(
+        holdPoint: holdPoint,
+        currentM: result.correctedPosition,
+        atMs: atMs,
+      );
+    }
+  }
+
+  /// 짧은 마지막 간선으로 에스컬레이터에 직접 붙는 직전 노드.
+  ///
+  /// 이 노드에서는 사람이 graph의 마지막 직각을 정확히 밟지 않고 눈앞의 발판을
+  /// 탈 수 있다. 마지막 간선이 기존 물리 허가 반경(6m) 안일 때만 전실로 인정해,
+  /// 긴 일반 복도 초입에서 마커가 멈추는 실패를 막는다.
+  ({String nodeId, PdrLocalPoint pointM})? _boardingVestibule({
+    required IndoorRoute route,
+    required FloorGraph graph,
+    required String boardingNodeId,
+  }) {
+    if (route.nodeIds.length < 3 || route.edgeIds.length < 2) return null;
+    if (route.nodeIds.last != boardingNodeId) return null;
+    final vestibuleNodeId = route.nodeIds[route.nodeIds.length - 2];
+    final edge = graph.edges
+        .where((item) => item.id == route.edgeIds.last)
+        .firstOrNull;
+    if (edge == null || edge.lengthM > _escalator.config.armRadiusM) {
+      return null;
+    }
+    final directlyConnected =
+        (edge.fromNodeId == vestibuleNodeId &&
+            edge.toNodeId == boardingNodeId) ||
+        (edge.toNodeId == vestibuleNodeId && edge.fromNodeId == boardingNodeId);
+    if (!directlyConnected) return null;
+    final node = graph.nodes
+        .where((item) => item.id == vestibuleNodeId)
+        .firstOrNull;
+    if (node == null) return null;
+    return (nodeId: node.id, pointM: PdrLocalPoint(node.xM, node.yM));
+  }
+
+  bool _optimisticStepReachedBoardingVestibule({
+    required OptimisticStepAdvance step,
+    required IndoorRoute route,
+    required FloorGraph graph,
+    required String vestibuleNodeId,
+  }) {
+    if (step.leaderRelocated ||
+        step.previewIsAmbiguous ||
+        !step.crossedNodeIds.contains(vestibuleNodeId)) {
+      return false;
+    }
+    final incomingIndex = route.edgeIds.length - 2;
+    final edgeId = route.edgeIds[incomingIndex];
+    final edge = graph.edges.where((item) => item.id == edgeId).firstOrNull;
+    if (edge == null) return false;
+    final routeFrom = route.nodeIds[incomingIndex];
+    final expectedSign =
+        edge.fromNodeId == routeFrom && edge.toNodeId == vestibuleNodeId
+        ? 1
+        : edge.toNodeId == routeFrom && edge.fromNodeId == vestibuleNodeId
+        ? -1
+        : 0;
+    if (expectedSign == 0) return false;
+    return step.traversals.any(
+      (item) => item.edgeId == edgeId && item.edgeDirectionSign == expectedSign,
+    );
+  }
+
+  bool _acceptBoardingVestibuleEvidence({
+    required double markerDistanceM,
+    required bool crossedVestibule,
+  }) {
+    final wasApproaching =
+        _boardingVestibuleLastDistanceM == null ||
+        markerDistanceM <= _boardingVestibuleLastDistanceM! + 0.1;
+    _boardingVestibuleLastDistanceM = markerDistanceM;
+    if (!crossedVestibule &&
+        (markerDistanceM > boardingApproachVisibleSnapRadiusM ||
+            !wasApproaching)) {
+      _boardingVestibuleEvidencePeaks = 0;
+      return false;
+    }
+    _boardingVestibuleEvidencePeaks++;
+    return crossedVestibule ||
+        _boardingVestibuleEvidencePeaks >= boardingApproachVisiblePeakCount;
+  }
+
+  bool _acceptBoardingApproachShadowEvidence({
+    required CorridorTrackingResult result,
+    required int confirmedSteps,
+    required int? latestPeakId,
+    required PdrLocalPoint holdPoint,
+  }) {
+    final shadowM = _boardingApproachShadowM;
+    if (shadowM == null) return false;
+    var hasNewStep = false;
+    if (latestPeakId != null &&
+        latestPeakId != _boardingApproachShadowLastPeakId) {
+      _boardingApproachShadowLastPeakId = latestPeakId;
+      hasNewStep = true;
+    } else if (latestPeakId == null) {
+      final previousConfirmed = _boardingApproachShadowLastConfirmedSteps;
+      _boardingApproachShadowLastConfirmedSteps = confirmedSteps;
+      hasNewStep =
+          previousConfirmed != null && confirmedSteps > previousConfirmed;
+    }
+    if (!hasNewStep) return false;
+
+    final distanceM = (holdPoint - shadowM).distance;
+    final wasApproaching =
+        _boardingApproachShadowLastDistanceM == null ||
+        distanceM <= _boardingApproachShadowLastDistanceM! + 0.1;
+    _boardingApproachShadowLastDistanceM = distanceM;
+    if (distanceM > _escalator.config.boardingApproachRadiusM ||
+        !wasApproaching) {
+      _boardingApproachShadowEvidencePeaks = 0;
+      return false;
+    }
+    _boardingApproachShadowEvidencePeaks++;
+    return _boardingApproachShadowEvidencePeaks >=
+        boardingApproachVisiblePeakCount;
+  }
+
+  void _holdBoardingApproach({
+    required PdrLocalPoint holdPoint,
+    required PdrLocalPoint currentM,
+    required int atMs,
+  }) {
+    _approachHoldPointM =
+        (holdPoint - currentM).distance <= boardingApproachVisibleSnapRadiusM
+        ? holdPoint
+        : currentM;
+    _approachHoldEnteredAtMs = atMs;
+  }
+
+  bool _isConfirmedForwardOnFinalRouteEdge({
+    required IndoorRoute route,
+    required FloorGraph graph,
+    required CorridorTrackingResult result,
+  }) {
+    return _isConfirmedForwardOnRouteEdge(
+      route: route,
+      graph: graph,
+      result: result,
+      edgeIndex: route.edgeIds.length - 1,
+    );
+  }
+
+  bool _isConfirmedForwardOnRouteEdge({
+    required IndoorRoute route,
+    required FloorGraph graph,
+    required CorridorTrackingResult result,
+    required int edgeIndex,
+    bool allowJunctionAmbiguity = false,
+  }) {
+    if (edgeIndex < 0 ||
+        edgeIndex >= route.edgeIds.length ||
+        route.nodeIds.length != route.edgeIds.length + 1 ||
+        result.state == CorridorTrackingState.uncertain ||
+        (!allowJunctionAmbiguity && result.previewIsAmbiguous) ||
+        result.leaderRelocated) {
+      return false;
+    }
+    final edgeId = route.edgeIds[edgeIndex];
+    final edge = graph.edges.where((item) => item.id == edgeId).firstOrNull;
+    if (edge == null || result.currentEdgeId != edgeId) return false;
+    final routeFrom = route.nodeIds[edgeIndex];
+    final routeTo = route.nodeIds[edgeIndex + 1];
+    final expectedSign =
+        edge.fromNodeId == routeFrom && edge.toNodeId == routeTo
+        ? 1
+        : edge.fromNodeId == routeTo && edge.toNodeId == routeFrom
+        ? -1
+        : 0;
+    return expectedSign != 0 && result.travelDirectionSign == expectedSign;
+  }
+
+  bool _acceptBoardingApproachEvidence({
+    required double markerDistanceM,
+    required bool crossedBoarding,
+  }) {
+    final wasApproaching =
+        _boardingApproachLastDistanceM == null ||
+        markerDistanceM <= _boardingApproachLastDistanceM! + 0.1;
+    _boardingApproachLastDistanceM = markerDistanceM;
+    if (!crossedBoarding &&
+        (markerDistanceM > _escalator.config.boardingApproachRadiusM ||
+            !wasApproaching)) {
+      _boardingApproachEvidencePeaks = 0;
+      return false;
+    }
+    _boardingApproachEvidencePeaks++;
+    return crossedBoarding ||
+        _boardingApproachEvidencePeaks >= boardingApproachVisiblePeakCount;
+  }
+
+  void _rejectBoardingApproachEvidence() {
+    _rejectBoardingNodeApproachEvidence();
+    _boardingVestibuleEvidencePeaks = 0;
+    _boardingVestibuleLastDistanceM = null;
+  }
+
+  void _rejectBoardingNodeApproachEvidence() {
+    _boardingApproachEvidencePeaks = 0;
+    _boardingApproachLastDistanceM = null;
   }
 
   /// 기압 샘플 한 건을 판정기에 넣는다.
@@ -466,6 +1002,11 @@ class IndoorGuidanceSession {
   EscalatorAltitudeOutcome onAltitude(AltitudeSample sample) {
     if (!_attached) return const EscalatorAltitudeOutcome();
     final confirmed = _escalator.onAltitude(sample);
+    if (_escalator.hasRouteVerticalMotionLock) {
+      _verticalObservationHoldPointM ??= _corridor.result?.previewPosition;
+    } else {
+      _verticalObservationHoldPointM = null;
+    }
     return EscalatorAltitudeOutcome(
       started: _escalator.takeStartedTransition(),
       cancelled: _escalator.takeCancelledTransition(),
@@ -490,10 +1031,12 @@ class IndoorGuidanceSession {
       final currentM = _corridor.result?.previewPosition;
       switch (change.phase) {
         case EscalatorPhase.boardingDetected:
-          _boardingHoldPointM = clampBoardingHold(
-            holdPoint: _routeBoardingHoldPoint(change),
-            currentM: currentM,
-          );
+          _boardingHoldPointM =
+              _approachHoldPointM ??
+              _visibleBoardingHold(
+                holdPoint: _routeBoardingHoldPoint(change),
+                currentM: currentM,
+              );
         case EscalatorPhase.verticalMotionDetected:
           _boardingHoldPointM = clampBoardingHold(
             holdPoint: _routeBoardingHoldPoint(change),
@@ -515,6 +1058,17 @@ class IndoorGuidanceSession {
       }
     }
     return changes;
+  }
+
+  PdrLocalPoint? _visibleBoardingHold({
+    required PdrLocalPoint? holdPoint,
+    required PdrLocalPoint? currentM,
+  }) {
+    if (holdPoint == null) return currentM;
+    if (currentM == null) return holdPoint;
+    return (holdPoint - currentM).distance <= boardingApproachVisibleSnapRadiusM
+        ? holdPoint
+        : currentM;
   }
 
   /// 판정기가 고른 탑승 노드의 좌표. 경로가 지목한 노드가 아니어도 쓴다 —
@@ -557,16 +1111,16 @@ class IndoorGuidanceSession {
     if (onThisFloor) {
       final result = _corridor.result;
       if (result != null) {
-        // 고정 중이면 걸음이 더 세어져도 그 자리다. 에스컬레이터 앞에 선 뒤의
-        // 걸음은 발판 위 진동이거나 대기 중 제자리 움직임이라, 그대로 두면
-        // 마커가 탑승점을 지나 앞 매장으로 흘러간다. 탑승 고정이 접근 고정을
-        // 이긴다 — 늦게 잡힌 쪽이 더 강한 근거다.
+        // 수평 보행의 실제 마커는 항상 optimistic tracker 위치다. 파란선 진행률
+        // 보호가 이 값을 붙들면 첫 역방향 걸음과 실제 이탈이 화면에서 사라진다.
+        // 에스컬레이터 근거가 만든 명시적 고정만 tracker보다 우선한다.
         return GuidancePosition(
           localM:
               _rideHoldPointM ??
               _boardingHoldPointM ??
+              _verticalObservationHoldPointM ??
               _approachHoldPointM ??
-              _displayTrackedPosition(result),
+              result.previewPosition,
           source: GuidancePositionSource.tracked,
           headingDeg: _floorHeadingDeg(anchor),
         );
@@ -591,57 +1145,6 @@ class IndoorGuidanceSession {
     );
   }
 
-  /// 길안내 중에는 화면용으로 채택한 경로 투영점을 우선한다.
-  ///
-  /// tracker의 위치를 경로에 끌어당기는 것이 아니다. tracker 결과와 경로 진행률
-  /// 계산은 그대로 두고, **표시할 때만** 예전 실내 화면과 같은 규칙을 적용한다.
-  /// 정상적으로 경로 위에 있거나 아직 이탈 증거가 충분히 쌓이지 않았으면
-  /// `projectedPoint`를 사용해 대표 간선 교체가 마커를 뒤로 밀지 않게 한다.
-  /// 다만 재탐색 대기 중에는 회색선 기준인 `displayProgress`만 멈추고, 마커는
-  /// tracker의 optimistic 위치를 계속 따라가야 한다. 둘을 같이 멈추면 사람이
-  /// 이미 코너를 돌아 걸어가도 코너 직전에서 마커가 고정된다.
-  /// 이탈이 확정됐거나 재획득한 경우에도 raw preview로 돌아가 실제 이탈을
-  /// 숨기지 않는다.
-  PdrLocalPoint _displayTrackedPosition(CorridorTrackingResult result) {
-    // 이탈 대기(pendingDeviation)는 회색선이 센서 흔들림을 따라 늘어나지 않게
-    // 하는 상태다. 위치 표시까지 이전 투영점에 붙들 이유는 없다. tracker가
-    // 이미 다음 연결 간선으로 이동한 optimistic cursor를 공개하고 있으므로
-    // 마커는 그 값을 쓴다. 실제 재탐색이 확정되면 다음 progress 갱신에서 새
-    // 경로의 displayProgress가 다시 시작된다.
-    if (_displayProgressHoldReason == 'pendingDeviation') {
-      return result.previewPosition;
-    }
-
-    final progress = _displayProgress;
-    final projected = progress?.projectedPoint;
-    final junctionPreviewHasMoved =
-        projected != null &&
-        result.isInJunctionZone &&
-        result.state != CorridorTrackingState.uncertain &&
-        (result.previewPosition - PdrLocalPoint(projected.x, projected.y))
-                .distance >
-            0.75;
-    if (junctionPreviewHasMoved) {
-      // 교차점에서는 `currentEdgeId`·route edge 일치가 한두 peak 늦을 수 있다.
-      // 이때 경로 투영점만 쓰면 outgoing 간선으로 이미 코너를 돈 preview가
-      // incoming 간선 끝점에 눌린다. tracker가 연결 간선 후보를 그래프로
-      // 제한하고 있으므로, 불확실 상태가 아닌 동안은 실제 preview를 쓴다.
-      return result.previewPosition;
-    }
-
-    final canFollowGuidance =
-        _routeSegment != null &&
-        progress != null &&
-        projected != null &&
-        result.state != CorridorTrackingState.uncertain &&
-        (progress.onRouteEdge ||
-            (!progress.reacquired &&
-                progress.offsetM < 4 &&
-                _offRouteEvidenceUpdates < 3));
-    if (!canFollowGuidance) return result.previewPosition;
-    return PdrLocalPoint(projected.x, projected.y);
-  }
-
   // --- 경로 진행률 ---
   //
   // 진행률에 얽힌 상태를 **여기 한 곳에** 모은다. 예전에는 화면이
@@ -662,7 +1165,6 @@ class IndoorGuidanceSession {
   double? _lastTraveledM;
   int? _lastAcceptedSteps;
   int? _lastEvaluatedSteps;
-  String? _displayProgressHoldReason;
 
   int _offRouteEvidenceUpdates = 0;
   int? _offRouteFirstEvidenceAtMs;
@@ -696,7 +1198,6 @@ class IndoorGuidanceSession {
     _lastTraveledM = progress?.traveledM;
     _lastAcceptedSteps = progress == null ? null : atSteps;
     _lastEvaluatedSteps = null;
-    _displayProgressHoldReason = null;
     _offRouteEvidenceUpdates = 0;
     _offRouteFirstEvidenceAtMs = null;
   }
@@ -751,6 +1252,8 @@ class IndoorGuidanceSession {
 
     final advances = <GuidanceStepAdvance>[];
     final events = <RouteCheckpointEvent>[];
+    var trustedForwardDistanceM = 0.0;
+    var trustedReverseDistanceM = 0.0;
     final graph = _graph;
     if (graph != null) {
       for (final optimisticStep in result.optimisticStepAdvances) {
@@ -763,6 +1266,18 @@ class IndoorGuidanceSession {
           walkingHeadingDeg: walkingHeadingDeg,
         );
         final transition = _travelDirection.apply(routeStep);
+        if (!routeStep.previewIsAmbiguous) {
+          switch (routeStep.relation) {
+            case RouteStepRelation.forward:
+              trustedForwardDistanceM += routeStep.signedRouteDistanceM;
+            case RouteStepRelation.reverse:
+              trustedReverseDistanceM += routeStep.signedRouteDistanceM.abs();
+            case RouteStepRelation.offRoute:
+            case RouteStepRelation.ambiguous:
+            case RouteStepRelation.relocated:
+              break;
+          }
+        }
         advances.add(
           GuidanceStepAdvance(step: routeStep, transition: transition),
         );
@@ -857,14 +1372,32 @@ class IndoorGuidanceSession {
           nowMs: nowMs ?? _nowMs(),
         ) &&
         !isNearRouteBoarding;
-    final holdReason = _holdReason(previous, progress, responsiveSteps);
-    final display = holdReason == null ? progress : previous!;
+    var holdReason = _holdReason(previous, progress, responsiveSteps);
+    var display = holdReason == null ? progress : previous!;
+    if (holdReason == 'implausibleJump' && previous != null) {
+      final movingForward = progress.traveledM > previous.traveledM;
+      final movementBudgetM = movingForward
+          ? trustedForwardDistanceM
+          : _travelDirection.state == TravelDirectionState.reverseConfirmed
+          ? trustedReverseDistanceM
+          : 0.0;
+      if (movementBudgetM > 1e-6) {
+        display = moveRouteProgressToward(
+          previous: previous,
+          candidate: progress,
+          routePointsLocalM: route.pointsLocalM,
+          maxDistanceM: movementBudgetM,
+        );
+        holdReason = 'boundedReconcile';
+      }
+    }
 
     _displayProgress = display;
     _measuredProgress = progress;
-    _displayProgressHoldReason = holdReason;
     _lastTraveledM = progress.traveledM;
-    if (holdReason == null) _lastAcceptedSteps = responsiveSteps;
+    if (holdReason == null || holdReason == 'boundedReconcile') {
+      _lastAcceptedSteps = responsiveSteps;
+    }
 
     return GuidanceProgressUpdate(
       displayProgress: display,

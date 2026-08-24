@@ -53,13 +53,7 @@ extension OutdoorMapEscalator on OutdoorMapBodyState {
     // 동안의 Δ와 무장 여부가 곧 원인이라, 아무 일도 안 일어나는 구간이야말로
     // 봐야 할 구간이다.
     _escalatorDebugText.value = _debugModeController.enabled
-        ? '${describeEscalatorJudgement(
-            deltaM: _guidance.escalator.deltaM,
-            armed: _guidance.escalator.isArmed,
-            hasCandidate: _guidance.escalator.hasCandidate,
-            phase: _guidance.escalator.phase,
-            lastEvent: _lastEscalatorEvent,
-          )} · ${_describeBoardingApproach()}'
+        ? '${describeEscalatorJudgement(deltaM: _guidance.escalator.deltaM, armed: _guidance.escalator.isArmed, hasCandidate: _guidance.escalator.hasCandidate, phase: _guidance.escalator.phase, lastEvent: _lastEscalatorEvent)} · ${_describeBoardingApproach()}'
         : null;
 
     // 활강 진행률 목표를 기압으로 갱신한다. 단조 증가만 허용 — 평활 노이즈로
@@ -152,6 +146,10 @@ extension OutdoorMapEscalator on OutdoorMapBodyState {
           setState(() => _escalatorStage = null);
       }
     }
+    // 기압 단계가 고정을 걸거나 풀면 다음 걸음 snapshot을 기다리지 않고 마커
+    // 목표를 즉시 바꾼다. verticalMotionDetected 직후에는 걸음을 pause하므로,
+    // 여기서 안 쓰면 보간기가 탑승 전의 마지막 목표까지 계속 움직인다.
+    unawaited(_syncPdrCurrentLayer());
   }
 
   /// 위치에 반영하는 걸음만 멈춘다. 센서·기압·방향은 계속 흐른다.

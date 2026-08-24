@@ -447,7 +447,7 @@ extension OutdoorMapGps on OutdoorMapBodyState {
         source: estimateSource,
       ),
     );
-    unawaited(_syncPdrCurrentLayer());
+    unawaited(_syncPdrCurrentLayer(snap: true));
 
     // GPS로 건물 안임을 이미 확인했으므로 권한 게이트를 다시 두지 않는다. 세션이
     // 다른 층에서 돌고 있으면 이 층으로 옮겨야 앵커가 이 층으로 기록된다.
@@ -484,7 +484,7 @@ extension OutdoorMapGps on OutdoorMapBodyState {
       if (!mounted) return;
     }
 
-    _syncPdrCurrentLayer();
+    _syncPdrCurrentLayer(snap: true);
     unawaited(_syncDebugPdrLayers());
     // 입구에서 위치를 새로 잡았으므로, 건물에 들어오기 전에 골라둔 출발지 매장은
     // 더 이상 "지금 내가 있는 곳"이 아니다. 상위가 그 값을 버리게 알린다.

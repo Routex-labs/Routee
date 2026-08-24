@@ -3,9 +3,9 @@ import 'package:indoor_pdr_core/indoor_pdr_core.dart';
 import 'package:indoor_pdr_core/src/application/accel_preview_track.dart';
 import 'package:test/test.dart';
 
-/// 상태형 preview(4번 작업)가 "확정 배치 시간창까지의 주황 걸음"만 소비하려면,
-/// 코어가 (a) 실제 반영된 peak의 시각을 path와 정렬해 주고 (b) 확정 배치를
-/// 식별 가능하게 내보내야 한다. 이 파일은 그 계약을 고정한다.
+/// 상태형 preview가 "초록에 실제 대응된 수만큼의 주황 걸음"만 소비하려면,
+/// 코어가 (a) 실제 반영된 peak의 시각을 path와 정렬하고 (b) 누적 소비 번호를
+/// 배치와 함께 내보내야 한다. 이 파일은 그 계약을 고정한다.
 ///
 /// 네이티브 `stepPeakTimes` 원본을 그대로 쓰면 안 된다는 점이 핵심이다.
 /// AccelPreviewTrack이 간격·cadence·lead cap으로 버린 peak는 주황 경로에
@@ -303,8 +303,8 @@ void main() {
     });
   });
 
-  group('확정 시간창 기준 preview 소비', () {
-    test('spanEndMs 이하 peak만 소비하고 미래 peak는 남는다', () {
+  group('실제 적용 걸음 수 기준 preview 소비', () {
+    test('적용 걸음과 시간창 peak 수가 같으면 미래 peak만 남는다', () {
       final s = PdrSession(config: PdrSessionConfig(nowMs: () => 0));
       s.onHeading(
         const HeadingEvent(
@@ -343,7 +343,8 @@ void main() {
       // 확정 시간창 안의 주황 걸음 3개만 소비되고, 이후 3개는 선행분으로 남는다.
       expect(consumed, 3);
       expect(pending, 3);
-      // 초록 걸음 수(3)가 아니라 시간창이 기준이라는 점을 함께 고정한다.
+      expect(snapshot.lastAppliedBatch!.consumedPreviewSteps, 3);
+      expect(snapshot.lastAppliedBatch!.acknowledgedPreviewSteps, 3);
       expect(snapshot.preview.steps, 6);
       expect(snapshot.steps, 3);
       // 표시 경로는 초록 3걸음 끝에서 미래 주황 3걸음만 다시 이어진다.
@@ -355,6 +356,63 @@ void main() {
       expect(
         snapshot.reconciledPreviewPosition.northM,
         greaterThan(snapshot.position.northM),
+      );
+    });
+
+    test('초록 1걸음의 시간창에 peak가 2개여도 주황은 1개만 소비한다', () {
+      final s = PdrSession(config: PdrSessionConfig(nowMs: () => 0));
+      s.onHeading(
+        const HeadingEvent(
+          motionTimestampMs: 1000,
+          fusedHeadingDeg: 0,
+          headingStable: true,
+          headingSource: 'device_motion/xMagneticNorthZVertical',
+        ),
+      );
+      s.onAccelPeak(const AccelPeakEvent(count: 1, latestPeakMs: 1000));
+      s.onAccelPeak(const AccelPeakEvent(count: 2, latestPeakMs: 1500));
+      s.onHeading(
+        const HeadingEvent(
+          motionTimestampMs: 1750,
+          fusedHeadingDeg: 90,
+          headingStable: true,
+          headingSource: 'device_motion/xMagneticNorthZVertical',
+        ),
+      );
+      for (final (count, peakMs) in [(3, 2000), (4, 2500), (5, 3000)]) {
+        s.onAccelPeak(AccelPeakEvent(count: count, latestPeakMs: peakMs));
+      }
+      final orangeBefore = s.snapshot.preview.path;
+
+      s.onPedometerBatch(
+        const PedometerBatchEvent(
+          steps: 1,
+          stepSessionId: 1,
+          sessionStartMs: 900,
+          timestampMs: 2100,
+          distanceM: 0.7,
+          distanceAvailable: true,
+          stepPeakTimes: [1500],
+        ),
+      );
+
+      final snapshot = s.snapshot;
+      expect(snapshot.lastAppliedBatch!.appliedSteps, 1);
+      expect(snapshot.lastAppliedBatch!.consumedPreviewSteps, 1);
+      expect(snapshot.lastAppliedBatch!.acknowledgedPreviewSteps, 1);
+      expect(
+        snapshot.reconciledPreviewPath.length,
+        orangeBefore.length,
+        reason: '시간창 안의 두 번째 주황 걸음은 초록에 대응되지 않았으므로 남아야 한다',
+      );
+      expect(
+        snapshot.reconciledPreviewPosition.northM,
+        closeTo(orangeBefore.last.northM, 1e-9),
+      );
+      expect(
+        snapshot.reconciledPreviewPosition.eastM,
+        closeTo(orangeBefore.last.eastM, 1e-9),
+        reason: '초록 한 걸음도 대응된 첫 주황 peak 시각의 heading을 써야 회전각이 보존된다',
       );
     });
 
@@ -414,9 +472,15 @@ void main() {
       expect(track.deferredPeaks, 19 - cappedSteps);
       expect(track.rejectReasons[AccelPreviewTrack.deferOverflow], 0);
 
-      // 다음 confirmed 배치가 기존 accepted peak 대부분의 시간창을 덮으면
-      // 보류분이 한꺼번에 풀린다.
+      // 다음 confirmed 배치가 한 걸음을 적용하면 preview도 정확히 한 걸음만
+      // 대응시킨다. 시간창 안의 deferred 전체를 지우면 실제로 적용되지 않은
+      // 주황 이동이 사라진다.
       peakMs += 530;
+      final deferredBeforeConfirm = track.deferredPeaks;
+      final acknowledged = track.acknowledgeConfirmedBatch(
+        appliedSteps: 1,
+        spanEndMs: peakMs - 530,
+      );
       final changed = track.applyRealtimePeaks(
         AccelPeakEvent(count: 21, latestPeakMs: peakMs),
         tracking: true,
@@ -432,8 +496,10 @@ void main() {
       );
 
       expect(changed, isTrue);
-      expect(track.deferredPeaks, 0);
-      expect(track.steps, 20);
+      expect(acknowledged.accepted + acknowledged.deferred, 1);
+      expect(track.deferredPeaks, deferredBeforeConfirm);
+      expect(deferredBeforeConfirm, greaterThan(0));
+      expect(track.steps, cappedSteps + 1);
     });
   });
 }

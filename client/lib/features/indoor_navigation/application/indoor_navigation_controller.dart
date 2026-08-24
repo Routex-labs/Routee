@@ -53,6 +53,10 @@ class IndoorNavigationDriver implements IndoorNavigationController {
   final _altitudes = StreamController<AltitudeSample>.broadcast();
   final _rawMotion = StreamController<RawMotionActivity>.broadcast();
 
+  /// 화면 회전용 방향. native motion 주기(≈33Hz)로 흐른다 — 스냅샷과 나눈
+  /// 이유는 [PdrHeadingSample]에 있다.
+  final _headings = StreamController<PdrHeadingSample>.broadcast();
+
   // 원시 누적 카운터. native는 pause 여부와 무관하게 계속 보내므로 여기서만
   // 차분을 낸다(PdrSession은 pause 중 이 값을 경로에 반영하지 않는다).
   int? _lastRawAccelPeakCount;
@@ -109,6 +113,9 @@ class IndoorNavigationDriver implements IndoorNavigationController {
 
   @override
   Stream<RawMotionActivity> get rawMotion => _rawMotion.stream;
+
+  @override
+  Stream<PdrHeadingSample> get headings => _headings.stream;
 
   @override
   Map<String, Object?>? get lastPedometerFinalizeInfo =>
@@ -365,6 +372,7 @@ class IndoorNavigationDriver implements IndoorNavigationController {
     await _runtimeStatuses.close();
     await _altitudes.close();
     await _rawMotion.close();
+    await _headings.close();
   }
 
   // ── 내부 ──
@@ -389,6 +397,7 @@ class IndoorNavigationDriver implements IndoorNavigationController {
     final heading = e.heading;
     if (heading != null) {
       _session.onHeading(heading);
+      _emitHeading();
     }
     final accelPeak = e.accelPeak;
     if (accelPeak != null) {
@@ -399,6 +408,19 @@ class IndoorNavigationDriver implements IndoorNavigationController {
       _session.onPedometerBatch(pedometer);
     }
     _emitRawMotion(accelPeak, pedometer);
+  }
+
+  /// 방향만 실어 내보낸다. **스냅샷을 만들지 않는다** — 스냅샷은 궤적 목록을
+  /// 복사하고 소비자가 화면을 다시 그리므로, 이 주기(≈33Hz)로 낼 수 없다.
+  void _emitHeading() {
+    if (_headings.isClosed) return;
+    _headings.add(
+      PdrHeadingSample(
+        orientationDeg: _session.fusedHeadingDeg,
+        walkingDeg: _session.walkingHeadingDeg,
+        converged: _session.hasFusedHeading,
+      ),
+    );
   }
 
   /// pause 중에도 흐르는 원시 움직임. 위치·경로에는 반영하지 않는다.

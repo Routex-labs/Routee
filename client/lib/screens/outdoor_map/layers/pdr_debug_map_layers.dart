@@ -4,8 +4,8 @@
 /// 진단 자체를 믿을 수 없다.
 ///
 /// 세 경로는 PDR 파이프라인의 단계다 — raw(주황 점선)는 날것의 궤적, confirmed
-/// (초록)는 확정된 걸음만, matched(보라)는 그것을 그래프에 스냅한 결과. **셋이
-/// 갈라지는 지점이 어느 단계에서 틀어졌는지를 가리킨다.**
+/// (초록)는 확정된 걸음만, corrected(보라)는 실제 마커가 쓰는 복도 tracker
+/// 결과다. **셋이 갈라지는 지점이 어느 단계에서 틀어졌는지를 가리킨다.**
 library;
 
 import 'package:latlong2/latlong.dart' as ll;
@@ -27,6 +27,7 @@ const _pdrConfirmedTrailLayerId = 'outdoor-pdr-confirmed-trail-line';
 const _pdrMatchedTrailSourceId = 'outdoor-pdr-matched-trail';
 const _pdrMatchedTrailCasingLayerId = 'outdoor-pdr-matched-trail-casing';
 const _pdrMatchedTrailLayerId = 'outdoor-pdr-matched-trail-line';
+const _pdrMatchedPreviewLayerId = 'outdoor-pdr-matched-preview-line';
 
 /// 진단 소스·레이어를 스타일에 등록한다. 데이터는 전부 빈 컬렉션으로 시작하고,
 /// 이후 갱신은 [syncPdrDebugLayers]가 소스 데이터만 덮어쓴다.
@@ -169,8 +170,8 @@ Future<void> registerPdrDebugLayers(MapLibreMapController controller) async {
     enableInteraction: false,
   );
 
-  // matched: confirmed를 통행 그래프에 스냅한 결과. 셋이 갈라지는 지점이
-  // 어느 단계에서 틀어졌는지를 가리킨다.
+  // corrected: 현재 마커가 실제로 쓰는 복도 tracker 결과. 확정분은 실선,
+  // 주황 preview를 tracker가 임시로 해석한 꼬리는 점선이다.
   await controller.addSource(
     _pdrMatchedTrailSourceId,
     GeojsonSourceProperties(data: emptyGeoJsonCollection()),
@@ -185,6 +186,11 @@ Future<void> registerPdrDebugLayers(MapLibreMapController controller) async {
       lineCap: 'round',
       lineJoin: 'round',
     ),
+    filter: [
+      '==',
+      ['get', 'kind'],
+      'confirmed',
+    ],
     enableInteraction: false,
   );
   await controller.addLineLayer(
@@ -197,6 +203,29 @@ Future<void> registerPdrDebugLayers(MapLibreMapController controller) async {
       lineCap: 'round',
       lineJoin: 'round',
     ),
+    filter: [
+      '==',
+      ['get', 'kind'],
+      'confirmed',
+    ],
+    enableInteraction: false,
+  );
+  await controller.addLineLayer(
+    _pdrMatchedTrailSourceId,
+    _pdrMatchedPreviewLayerId,
+    const LineLayerProperties(
+      lineColor: '#7E57C2',
+      lineWidth: 3.25,
+      lineOpacity: 0.96,
+      lineDasharray: [1.5, 1.5],
+      lineCap: 'round',
+      lineJoin: 'round',
+    ),
+    filter: [
+      '==',
+      ['get', 'kind'],
+      'preview',
+    ],
     enableInteraction: false,
   );
 }
@@ -209,7 +238,8 @@ Future<void> syncPdrDebugLayers(
   required DebugMapOverlay overlay,
   required List<ll.LatLng> rawPath,
   required List<ll.LatLng> confirmedPath,
-  required List<ll.LatLng> matchedPath,
+  required List<List<ll.LatLng>> correctedPaths,
+  required List<ll.LatLng> correctedPreviewPath,
 }) async {
   final features = <Map<String, dynamic>>[
     for (final edge in overlay.edges)
@@ -240,8 +270,42 @@ Future<void> syncPdrDebugLayers(
 
   await _setTrail(controller, _pdrRawTrailSourceId, rawPath);
   await _setTrail(controller, _pdrConfirmedTrailSourceId, confirmedPath);
-  await _setTrail(controller, _pdrMatchedTrailSourceId, matchedPath);
+  await _setCorrectedTrails(
+    controller,
+    confirmedPaths: correctedPaths,
+    previewPath: correctedPreviewPath,
+  );
 }
+
+Future<void> _setCorrectedTrails(
+  MapLibreMapController controller, {
+  required List<List<ll.LatLng>> confirmedPaths,
+  required List<ll.LatLng> previewPath,
+}) async {
+  final features = <Map<String, dynamic>>[
+    for (final points in confirmedPaths)
+      if (points.length >= 2) _correctedTrailFeature(points, 'confirmed'),
+    if (previewPath.length >= 2) _correctedTrailFeature(previewPath, 'preview'),
+  ];
+  await controller.setGeoJsonSource(
+    _pdrMatchedTrailSourceId,
+    features.isEmpty ? emptyGeoJsonCollection() : geoJsonCollection(features),
+  );
+}
+
+Map<String, dynamic> _correctedTrailFeature(
+  List<ll.LatLng> points,
+  String kind,
+) => {
+  'type': 'Feature',
+  'properties': {'kind': kind},
+  'geometry': {
+    'type': 'LineString',
+    'coordinates': [
+      for (final point in points) [point.longitude, point.latitude],
+    ],
+  },
+};
 
 /// 점 2개 미만이면 LineString이 성립하지 않아 소스를 비운다.
 Future<void> _setTrail(

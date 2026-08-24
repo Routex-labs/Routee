@@ -33,6 +33,7 @@ class EscalatorDetectorConfig {
     this.baselineTrackAlpha = 0.02,
     this.boardingApproachRadiusM = 3.0,
     this.boardingAbandonRadiusM = 8.0,
+    this.boardingAbandonGraceMs = 15000,
     this.boardingApproachUpdates = 2,
     this.boardingPhaseTimeoutMs = 40000,
     this.minVerticalSpeedMps = 0.12,
@@ -151,11 +152,14 @@ class EscalatorDetectorConfig {
   /// 에스컬레이터에 올라서는 동작을 이탈로 오인하지 않는다.
   final double boardingAbandonRadiusM;
 
+  /// 탑승 안내 직후 tracker 걸음이 반경 밖으로 흘러도 기압이 이어받기를 기다리는 시간.
+  final int boardingAbandonGraceMs;
+
   /// 탑승점까지 거리가 줄어드는 것을 확인할 **서로 다른 걸음 갱신** 횟수.
   /// 한 프레임의 근접만으로 띄우면 옆을 스쳐 지나가는 사람에게도 뜬다.
   final int boardingApproachUpdates;
 
-  /// 배너를 띄운 뒤 수직 이동 근거 없이 기다리는 최대 시간. 넘으면 취소한다.
+  /// 배너를 띄운 뒤 아무 이동 근거 없이 기다리는 최대 시간. 넘으면 취소한다.
   final int boardingPhaseTimeoutMs;
 
   /// "지금 실제로 오르내리는 중"으로 보는 최소 수직 속도(m/s). 누적 고도가
@@ -172,12 +176,12 @@ class EscalatorDetectorConfig {
   /// 교체는 그 위에 노드 허가와 램프 일관성을 더 요구한다.
   final double visibleVerticalDeltaM;
 
-  /// 탑승점이 정해져 있어도 2차로 올리기 전에 요구하는 최소 수직 변화(m).
-  /// 속도만 보면 노이즈 한 번에 단계가 올라간다(실기기: "걸을 때 위치가 계속 뒤로
-  /// 순간이동").
+  /// 경로 탑승 후보를 처음 본 고도에서 요구하는 최소 방향성 누적 변화(m).
+  /// 순간 속도의 지속 여부와 독립적으로 먼저 도달할 수 있고, 정식 1.2m 후보 전에는
+  /// 수직 이동이 멎으면 취소되는 가역 잠금만 연다.
   final double minVisibleRiseM;
 
-  /// 노드를 못 고른 채 열린 2차 단계를 접는 "수직 속도 없음" 유지 시간.
-  /// 없으면 [boardingPhaseTimeoutMs] 40초 동안 걸음이 멈춘 채 화면이 덮여 있다.
+  /// 가역 2차 단계를 접는 복귀/정지 상태의 유지 시간. 경로 후보는 시작 고도
+  /// 근처까지 돌아온 뒤, 노드 없는 후보는 수직 속도가 멎은 뒤부터 잰다.
   final int earlyVerticalQuietMs;
 }

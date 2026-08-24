@@ -141,6 +141,57 @@ bool shouldHoldImplausibleRouteJump({
   return (candidate.traveledM - previous.traveledM).abs() > plausibleDistanceM;
 }
 
+/// 멀리 재해석된 [candidate]를 한 번에 채택하지 않고, 이번에 실제로 승인된
+/// 이동거리만큼만 경로 위에서 따라간다.
+///
+/// 위치를 두 좌표 사이 직선으로 보간하지 않는다. 코너에서 직선 보간하면 매장
+/// 안을 가로지르므로, 경로 누적거리로 새 점을 다시 만든다. 이 함수의 검증 기준은
+/// `client/test/domain/guidance/route_progress_test.dart`가 단일 출처다.
+RouteProgress moveRouteProgressToward({
+  required RouteProgress previous,
+  required RouteProgress candidate,
+  required List<LocalPoint> routePointsLocalM,
+  required double maxDistanceM,
+}) {
+  if (routePointsLocalM.length < 2 || maxDistanceM <= 0) return previous;
+  final deltaM = candidate.traveledM - previous.traveledM;
+  if (deltaM.abs() <= maxDistanceM) return candidate;
+
+  final targetM = previous.traveledM + deltaM.sign * maxDistanceM;
+  var cumulativeM = 0.0;
+  var totalM = 0.0;
+  var targetSegmentIndex = -1;
+  LocalPoint? targetPoint;
+  for (var index = 0; index < routePointsLocalM.length - 1; index++) {
+    final start = routePointsLocalM[index];
+    final end = routePointsLocalM[index + 1];
+    final dx = end.x - start.x;
+    final dy = end.y - start.y;
+    final segmentM = math.sqrt(dx * dx + dy * dy);
+    if (segmentM <= 1e-9) continue;
+    final segmentEndM = cumulativeM + segmentM;
+    if (targetPoint == null && targetM <= segmentEndM + 1e-9) {
+      final withinM = (targetM - cumulativeM).clamp(0.0, segmentM).toDouble();
+      final t = withinM / segmentM;
+      targetPoint = LocalPoint(start.x + dx * t, start.y + dy * t);
+      targetSegmentIndex = index;
+    }
+    cumulativeM = segmentEndM;
+    totalM = segmentEndM;
+  }
+  if (targetPoint == null || targetSegmentIndex < 0) return previous;
+  final boundedTraveledM = targetM.clamp(0.0, totalM).toDouble();
+  return RouteProgress(
+    traveledM: boundedTraveledM,
+    remainingM: math.max(0.0, totalM - boundedTraveledM),
+    offsetM: 0,
+    onRouteEdge: candidate.onRouteEdge,
+    reacquired: false,
+    segmentIndex: targetSegmentIndex,
+    projectedPoint: targetPoint,
+  );
+}
+
 /// 실제 역방향 걸음이 확정되기 전 **표시 진행률**의 큰 후퇴를 보류한다.
 ///
 /// 되돌아 걷는 것은 정상이라 후퇴 자체를 막으면 안 된다. 문제는 **무엇이 되돌아

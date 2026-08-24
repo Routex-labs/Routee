@@ -18,8 +18,7 @@ class PathAccumulator {
   PdrLocalPoint correctedPosition = PdrLocalPoint.zero;
   PdrLocalPoint legacyPosition = PdrLocalPoint.zero;
 
-  double get divergenceMeters =>
-      (correctedPosition - legacyPosition).distance;
+  double get divergenceMeters => (correctedPosition - legacyPosition).distance;
 
   void add({
     required double walkDeg,
@@ -52,6 +51,7 @@ class PathAccumulator {
     int? spanStartMs,
     int? spanEndMs,
     List<double>? peakTimes,
+    List<int>? exactStepTimesMs,
   }) {
     List<double>? peaksInSpan;
     if (peakTimes != null && spanStartMs != null && spanEndMs != null) {
@@ -69,6 +69,7 @@ class PathAccumulator {
       final stepTiming = _stepTiming(
         index: i,
         count: count,
+        exactStepTimesMs: exactStepTimesMs,
         spanStartMs: spanStartMs,
         spanEndMs: spanEndMs,
         peaksInSpan: peaksInSpan,
@@ -112,10 +113,14 @@ class PathAccumulator {
   static int? _stepTiming({
     required int index,
     required int count,
+    required List<int>? exactStepTimesMs,
     required int? spanStartMs,
     required int? spanEndMs,
     required List<double>? peaksInSpan,
   }) {
+    if (exactStepTimesMs != null && exactStepTimesMs.length == count) {
+      return exactStepTimesMs[index - 1];
+    }
     if (peaksInSpan != null) {
       // count개의 step을 peak 시각들 사이에 선형 보간해 배치한다.
       // round()로 최근접 peak에 스냅하면 count가 peak 수보다 많을 때 여러 step이

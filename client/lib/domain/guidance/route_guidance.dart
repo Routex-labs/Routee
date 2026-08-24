@@ -91,6 +91,16 @@ class RoutePolylineSplit {
   final List<LocalPoint> remaining;
 }
 
+/// 실내 턴바이턴 문구를 만들 위치 근거가 있는가.
+///
+/// 첫 걸음 전에는 진행률이 아직 없어도 출발 앵커가 이미 잡혀 있을 수 있다.
+/// 그 상태까지 막으면 바로 옆 층 이동 구간에서 "에스컬레이터를 탑승하세요"가
+/// 사라진다. 반대로 둘 다 없으면 아직 건물 밖일 수 있으므로 실내 안내를 숨긴다.
+bool canShowIndoorRouteGuidance({
+  required bool hasProgress,
+  required bool hasIndoorPosition,
+}) => hasProgress || hasIndoorPosition;
+
 /// 현재 투영점에서 경로를 지나온 구간과 남은 구간으로 나눈다.
 RoutePolylineSplit? splitRouteAtProgress(
   List<LocalPoint> points,

@@ -68,6 +68,71 @@ void main() {
       );
     });
 
+    test('재배치된 후보는 이번 걸음 거리만큼만 경로 위에서 따라잡는다', () {
+      const jumped = RouteProgress(
+        traveledM: 19,
+        remainingM: 1,
+        offsetM: 0,
+        onRouteEdge: true,
+        reacquired: true,
+        segmentIndex: 0,
+        projectedPoint: LocalPoint(19, 0),
+      );
+
+      final bounded = moveRouteProgressToward(
+        previous: const RouteProgress(
+          traveledM: 7,
+          remainingM: 13,
+          offsetM: 0,
+          onRouteEdge: true,
+          reacquired: false,
+          segmentIndex: 0,
+          projectedPoint: LocalPoint(7, 0),
+        ),
+        candidate: jumped,
+        routePointsLocalM: _straightRoute,
+        maxDistanceM: 0.75,
+      );
+
+      expect(bounded.traveledM, closeTo(7.75, 1e-9));
+      expect(bounded.remainingM, closeTo(12.25, 1e-9));
+      expect(bounded.projectedPoint!.x, closeTo(7.75, 1e-9));
+      expect(bounded.projectedPoint!.y, closeTo(0, 1e-9));
+      expect(bounded.reacquired, isFalse);
+    });
+
+    test('실제 유턴 후보도 승인된 거리만큼 역방향으로 움직인다', () {
+      const from = RouteProgress(
+        traveledM: 10,
+        remainingM: 10,
+        offsetM: 0,
+        onRouteEdge: true,
+        reacquired: false,
+        segmentIndex: 0,
+        projectedPoint: LocalPoint(10, 0),
+      );
+      const candidate = RouteProgress(
+        traveledM: 2,
+        remainingM: 18,
+        offsetM: 0,
+        onRouteEdge: true,
+        reacquired: false,
+        segmentIndex: 0,
+        projectedPoint: LocalPoint(2, 0),
+      );
+
+      final bounded = moveRouteProgressToward(
+        previous: from,
+        candidate: candidate,
+        routePointsLocalM: _straightRoute,
+        maxDistanceM: 1.4,
+      );
+
+      expect(bounded.traveledM, closeTo(8.6, 1e-9));
+      expect(bounded.projectedPoint!.x, closeTo(8.6, 1e-9));
+      expect(bounded.projectedPoint!.y, closeTo(0, 1e-9));
+    });
+
     test('늘어난 걸음으로 설명되는 진행은 정상 반영한다', () {
       const walked = RouteProgress(
         traveledM: 20,

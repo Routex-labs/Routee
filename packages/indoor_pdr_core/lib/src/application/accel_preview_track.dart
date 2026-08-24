@@ -71,6 +71,7 @@ class AccelPreviewTrack {
   PdrLocalPoint position = PdrLocalPoint.zero;
   int steps = 0;
   int acceptedPeaks = 0;
+  int acknowledgedSteps = 0;
   int rejectedPeaks = 0;
   int? lastStepAtMs;
   String lastRejectReason = 'none';
@@ -183,7 +184,10 @@ class AccelPreviewTrack {
 
     var applied = 0;
     String? blockedBy;
-    while (_deferredPeakTimesMs.isNotEmpty) {
+    // 한 센서 이벤트에서 새로 관측된 peak 수보다 많이 풀지 않는다. 확정 배치가
+    // 도착해 cap이 갑자기 열려도 오래 묵은 큐 전체가 한 프레임에 쏟아져 마커가
+    // 순간이동하지 않게 하는 화면 연속성 경계다.
+    while (_deferredPeakTimesMs.isNotEmpty && applied < delta) {
       blockedBy = _leadCapReason(
         stride.meters,
         confirmedSteps: confirmedSteps,
@@ -228,8 +232,69 @@ class AccelPreviewTrack {
     }
     lastStepAtMs = peakMs;
     _lastAcceptedPeakMs = peakMs;
-    lastRejectReason = _deferredPeakTimesMs.isEmpty ? 'none' : _label(leadDeferred);
+    lastRejectReason = _deferredPeakTimesMs.isEmpty
+        ? 'none'
+        : _label(leadDeferred);
     return true;
+  }
+
+  /// 초록에 실제 적용된 걸음 수만큼만 preview를 대응시킨다.
+  ///
+  /// `spanEndMs` 안의 accel peak를 전부 지우면 CMPedometer 1걸음/accel 2 peak인
+  /// 첫 배치에서 주황 한 걸음이 초록에 들어가지도 않았는데 사라진다. 여기서는
+  /// 오래된 accepted preview부터 최대 [appliedSteps]개만 소비하고, 남은 수만큼만
+  /// deferred queue에서 버린다. 시간창은 미래 peak를 소비하지 않는 상한일 뿐이다.
+  ({int accepted, int deferred}) acknowledgeConfirmedBatch({
+    required int appliedSteps,
+    required int? spanEndMs,
+  }) {
+    if (appliedSteps <= 0) return (accepted: 0, deferred: 0);
+    var eligibleAccepted = 0;
+    final firstPathStep = steps - (path.length - 1);
+    for (var index = 0; index < acceptedPeakTimesMs.length; index++) {
+      final stepId = firstPathStep + index;
+      if (stepId <= acknowledgedSteps || stepId <= 0) continue;
+      final peakMs = acceptedPeakTimesMs[index];
+      if (spanEndMs != null && peakMs != null && peakMs > spanEndMs) break;
+      eligibleAccepted += 1;
+    }
+    final accepted = math.min(appliedSteps, eligibleAccepted);
+    acknowledgedSteps += accepted;
+
+    var remaining = appliedSteps - accepted;
+    var deferred = 0;
+    while (remaining > 0 && _deferredPeakTimesMs.isNotEmpty) {
+      final peakMs = _deferredPeakTimesMs.first;
+      if (spanEndMs != null && peakMs > spanEndMs) break;
+      _deferredPeakTimesMs.removeAt(0);
+      remaining -= 1;
+      deferred += 1;
+    }
+    return (accepted: accepted, deferred: deferred);
+  }
+
+  /// 다음 초록 걸음과 1:1로 대응할, 아직 소비되지 않은 preview peak 시각.
+  ///
+  /// 초록 경로도 이 시각의 heading을 쓰면 배치 끝 시각 하나로 코너가 눌리지
+  /// 않는다. 미래 peak는 반환하지 않고, 필요한 수를 다 못 채우면 호출자가
+  /// 기존 pedometer 시간 복원으로 폴백한다.
+  List<int> pendingAcceptedPeakTimes({
+    required int maxCount,
+    required int? throughMs,
+  }) {
+    if (maxCount <= 0) return const [];
+    final output = <int>[];
+    final firstPathStep = steps - (path.length - 1);
+    for (var index = 0; index < acceptedPeakTimesMs.length; index++) {
+      final stepId = firstPathStep + index;
+      if (stepId <= acknowledgedSteps || stepId <= 0) continue;
+      final peakMs = acceptedPeakTimesMs[index];
+      if (peakMs == null) continue;
+      if (throughMs != null && peakMs > throughMs) break;
+      output.add(peakMs);
+      if (output.length == maxCount) break;
+    }
+    return output;
   }
 
   void reset({bool preserveNativePeakBaseline = false}) {
@@ -243,6 +308,7 @@ class AccelPreviewTrack {
     position = PdrLocalPoint.zero;
     steps = 0;
     acceptedPeaks = 0;
+    acknowledgedSteps = 0;
     rejectedPeaks = 0;
     lastStepAtMs = null;
     lastRejectReason = 'none';
@@ -333,15 +399,13 @@ class AccelPreviewTrack {
       if (nowMs != null && nowMs - confirmedThroughMs <= confirmedLagGraceMs) {
         return null;
       }
-      var pendingSteps = 0;
+      final pendingSteps = math.max(0, steps - acknowledgedSteps);
       var pendingDistanceM = 0.0;
-      for (var index = 1; index < acceptedPeakTimesMs.length; index++) {
-        final peakMs = acceptedPeakTimesMs[index];
-        if (peakMs == null || peakMs <= confirmedThroughMs) continue;
-        pendingSteps++;
-        if (index < path.length) {
-          pendingDistanceM += (path[index] - path[index - 1]).distance;
-        }
+      final firstPathStep = steps - (path.length - 1);
+      for (var index = 1; index < path.length; index++) {
+        final stepId = firstPathStep + index;
+        if (stepId <= acknowledgedSteps) continue;
+        pendingDistanceM += (path[index] - path[index - 1]).distance;
       }
       if (pendingSteps + 1 > maxStepLead) return stepLeadCap;
       if (pendingDistanceM + stepDistance > maxDistanceLeadMeters) {
