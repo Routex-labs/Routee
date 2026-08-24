@@ -341,19 +341,36 @@ extension OutdoorMapMap on OutdoorMapBodyState {
       case IndoorEntryTransition.enter:
         _triggerIndoorEntry();
       case IndoorEntryTransition.exit:
-        // 사용자가 건물을 벗어날 만큼 축소했으므로 오버레이를 접고 다음 확대에서
-        // 재발화할 수 있게 무장한다. 배치 대기 중이면 종료해 하단 바 표시도 함께
-        // 초기화한다.
-        _autoIndoorEntryArmed = true;
-        if (_indoorEntered) {
-          if (_placingPdrAnchor) _setPlacingAnchor(false);
-          _setIndoorEntered(false);
-        }
+        _exitIndoorByZoomOut();
       case IndoorEntryTransition.keep:
         // 히스테리시스 밴드 — 현재 상태를 그대로 유지한다.
         break;
     }
   }
+
+  /// 축소로 실내를 벗어났을 때. 다음 확대에서 재발화할 수 있게 줌 트리거는
+  /// **다시 무장한다**. 배치 대기 중이면 종료해 하단 바 표시도 함께 초기화한다.
+  ///
+  /// 실내였을 때만 GPS 자동 진입을 끈다([_exitIndoorByOutsideTap]과 같은 이유) —
+  /// 건물 안에 서서 축소한 사람은 GPS가 여전히 "안"이라 다음 좌표 한 건이 방금
+  /// 나온 사람을 그대로 되끌고 들어간다. 영구히 죽지는 않는다: 정말 걸어 나가면
+  /// "밖" 판정이 [_applyBuildingVerdict]에서 다시 무장한다.
+  ///
+  /// 이 갈래는 야외에서 축소만 해도 카메라 정지마다 불린다. 그래서 끄는 일은
+  /// 반드시 실내였던 경우 안에 둔다 — 밖에서 지도를 넓게 보던 사람의 자동 진입을
+  /// 조용히 죽인다.
+  void _exitIndoorByZoomOut() {
+    _autoIndoorEntryArmed = true;
+    if (!_indoorEntered) return;
+    if (_placingPdrAnchor) _setPlacingAnchor(false);
+    _gpsEntryArmed = false;
+    _setIndoorEntered(false);
+  }
+
+  /// 축소 이탈의 테스트 진입점. 줌 제스처는 MapLibre 플랫폼 뷰 콜백이라 위젯
+  /// 테스트에서 만들 수 없으므로, 실기기와 **같은 함수**를 부른다.
+  @visibleForTesting
+  void exitIndoorByZoomOutForTest() => _exitIndoorByZoomOut();
 
   /// GPS 현재 위치 마커. 실내에서는 [_outdoorGpsVisible]이 false라 항상 빈
   /// 소스로 밀어 넣어 마커가 지도에서 사라진다 — [_syncGpsSubscription]이

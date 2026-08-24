@@ -19,6 +19,24 @@ extension _MapShellSearch on _MapShellScreenState {
     _onCategoryChipTapped(CategorySelection(category: category));
   }
 
+  /// "찾지 못했어요"에서 **밖에서 찾아보기**를 눌렀다.
+  ///
+  /// **검색을 닫지 않는다.** 같은 검색어 그대로 실외 결과를 받는 것이 이 버튼의
+  /// 요점이라, 닫으면 사용자가 다시 쳐야 한다. 재검색을 여기서 부르지도 않는다 —
+  /// `indoorContextActive`가 뒤집히면 `SearchPanel.didUpdateWidget`이 같은
+  /// 검색어로 다시 돌린다(Y절 「나갔다/들어왔다도 재검색 신호다」). 그 자리를
+  /// 두고 여기서 또 돌리면 한 번 누른 값에 요청이 두 번 나간다.
+  ///
+  /// **[OutdoorMapBodyState.returnToOutdoorView]를 부른다.** 오버레이만 끄면
+  /// 카메라가 실내 진입 임계값(15.6) 위에 남아, 다음 카메라 정지에서 곧바로
+  /// 되끌려 들어간다(`indoor_entry_zoom.dart`). 그 함수가 축소까지 한다.
+  ///
+  /// 건물 안에 서서 눌러도 유지된다 — 그 함수가 GPS 자동 진입까지 끈다. 안 끄면
+  /// 축소해 놓아도 다음 좌표 한 건이 그대로 되끌고 들어간다.
+  Future<void> _onSearchOutsideRequested() async {
+    await _outdoorKey.currentState?.returnToOutdoorView();
+  }
+
   /// 검색 결과 거리 표시용 도달 정보를 다시 계산한다.
   ///
   /// 건물 밖(순수 야외)에서는 실내 그래프 거리가 의미가 없으므로 비운다 —
