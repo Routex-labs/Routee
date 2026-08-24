@@ -690,6 +690,12 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   /// 그대로 보였다(maplibre의 moveCamera는 우리가 보낸 순간에만 각을 바꾼다).
   Ticker? _markerGlideTicker;
 
+  /// 마커 소스에 마지막으로 **실제로 쓴** 그림. 같은 값이면 다시 쓰지 않는다.
+  ({ll.LatLng? point, double? headingDeg, bool offFloor})? _lastWrittenMarker;
+
+  /// 마커 소스를 마지막으로 쓴 시점(틱 누적 경과 기준).
+  Duration _markerSourceWriteAt = Duration.zero;
+
   /// 직전 틱의 누적 경과. 프레임 간격은 기기·부하에 따라 달라지므로 실제로 흐른
   /// 시간을 재서 [LocationMarkerGlide.advance]에 넘긴다.
   Duration _markerGlideTickAt = Duration.zero;

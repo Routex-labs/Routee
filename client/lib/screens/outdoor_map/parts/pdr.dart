@@ -209,6 +209,9 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     // 활강 중에는 잇지 않는다. 진행률이 이미 프레임마다 흐르고 있어서
     // ([_startEscalatorGlide]), 여기서 한 번 더 이으면 두 겹이 되어 마커가
     // 하차 노드에 늦게 닿는다 — 도면은 새 층인데 점은 아직 오는 중이 된다.
+    // 스타일·도면이 갈아 끼워지는 자리는 모두 snap으로 들어온다. 그때는 소스가
+    // 새로 만들어졌을 수 있으므로, 같은 값이라도 한 번은 다시 써야 한다.
+    if (snap) _lastWrittenMarker = null;
     final teleport =
         snap || _escalatorGlide != null || kind != _markerGlideKind;
     _markerGlideKind = kind;
@@ -222,11 +225,22 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
   /// 목표를 새로 받았을 때와 보간 틱마다 같은 함수로 들어온다 — 두 벌로 두면
   /// 흐린 마커의 opacity나 방향 유무가 한쪽에서만 바뀐다.
   Future<void> _writePdrMarkerSource(MapLibreMapController controller) {
-    final revision = ++_pdrMarkerRevision;
-    final data = pdrLocationData(
-      _markerGlide.point,
+    final drawn = (
+      point: _markerGlide.point,
       headingDeg: _markerGlide.headingDeg,
       offFloor: _markerGlideKind == _MarkerGlideKind.dimmed,
+    );
+    // **같은 그림이면 안 쓴다.** 스냅샷은 걸음이 아니라 모션 이벤트마다 오므로
+    // (초당 수십 건) 대부분의 호출이 직전과 똑같은 좌표를 다시 인코딩해 채널로
+    // 보내고 있었다. 그 몫이 카메라 명령을 밀어낸다.
+    if (drawn == _lastWrittenMarker) return Future<void>.value();
+    _lastWrittenMarker = drawn;
+
+    final revision = ++_pdrMarkerRevision;
+    final data = pdrLocationData(
+      drawn.point,
+      headingDeg: drawn.headingDeg,
+      offFloor: drawn.offFloor,
     );
 
     final previous = _pdrMarkerWriteQueue;
@@ -266,6 +280,7 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     }
     if (_markerGlideTicker != null) return;
     _markerGlideTickAt = Duration.zero;
+    _markerSourceWriteAt = Duration.zero;
     _markerGlideTicker = createTicker(_onMarkerGlideFrame)..start();
   }
 
@@ -280,7 +295,16 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     _markerGlideTickAt = total;
     if (elapsed <= Duration.zero) return;
 
-    if (_markerGlide.advance(elapsed)) {
+    final moved = _markerGlide.advance(elapsed);
+    // **마커 소스는 프레임마다 쓰지 않는다.** 카메라 명령은 좌표 몇 개지만 마커
+    // 쓰기는 GeoJSON 인코딩과 네이티브 파싱까지 딸려 있어, 둘을 매 프레임 같이
+    // 보내면 채널이 차서 카메라가 밀린다 — 회전이 계단으로 보이던 몫이다.
+    // 팔로우 중 마커는 화면의 같은 자리에 붙어 있고, 이 간격 동안 도면과
+    // 어긋나는 거리는 1.4m/s에서 4cm(zoom 19에서 1px 남짓)라 눈에 안 띈다.
+    if (moved &&
+        (_markerGlide.isSettled ||
+            total - _markerSourceWriteAt >= markerSourceWriteInterval)) {
+      _markerSourceWriteAt = total;
       unawaited(_writePdrMarkerSource(controller));
     }
     // 마커를 옮긴 **뒤에** 카메라를 잡는다. 카메라 목표점이 방금 옮긴 자리라,
