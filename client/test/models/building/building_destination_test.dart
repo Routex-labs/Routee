@@ -153,7 +153,12 @@ void main() {
   // 밖에서 안으로 가는 길이 사라진 것은 아니다. 목적지를 고르는 자리는 길찾기
   // 도착지 칸으로 옮겼고, 그쪽은 여전히 실내·건물·바깥을 함께 뒤진다
   // (`directions_candidates.dart`).
-  group('실외에서는 건물 안 매장을 뒤지지 않는다', () {
+  //
+  // **이 그룹이 지키는 것은 「어떤 검색어를 쳐도 왕복이 난다」의 부재다.**
+  // 되묻기를 되살린 뒤에도 그 기준은 그대로다 — 우리 건물을 가리키는 바깥
+  // 결과가 있을 때만 묻고, 없으면(여기 픽스처가 그렇다) 요청이 0건이다.
+  // 승격이 실제로 도는 쪽은 `outdoor_poi_search_test.dart`의 마지막 그룹이 잰다.
+  group('가리킬 바깥 결과가 없으면 건물 안 매장을 뒤지지 않는다', () {
     final originalBuildingRepository = buildingRepository;
     final originalDestinationRepository = destinationRepository;
     final originalPoiRepository = outdoorPoiRepository;

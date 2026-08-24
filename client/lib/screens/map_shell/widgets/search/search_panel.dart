@@ -7,6 +7,7 @@ import 'package:latlong2/latlong.dart';
 import '../../../../service_locator.dart';
 import '../../../../domain/route/dijkstra.dart';
 import '../../../../domain/search/name_siblings.dart';
+import '../../../../domain/store/indoor_store_lookup.dart';
 import '../../../../domain/store/nearest_store.dart';
 import '../../../../domain/store/outdoor_poi_ranking.dart';
 import '../../../../domain/search/reason_text.dart';
@@ -334,7 +335,9 @@ class _SearchPanelState extends State<SearchPanel> {
     }
   }
 
-  /// **지금 검색이 실외 검색인가.** 참이면 TMAP만, 거짓이면 우리 도면만 뒤진다.
+  /// **지금 검색이 실외 검색인가.** 거짓이면 우리 도면만, 참이면 TMAP을 뒤지고
+  /// **우리 건물을 가리키는 POI에 한해서만** 우리 도면에 되묻는다
+  /// ([_promoteOurBuildingPois]).
   ///
   /// 두 출처를 한 목록에 섞던 시절의 실패가 이 게터의 이유다 — 야외에서 "더현대"를
   /// 치면 우리 도면의 `현대백화점 카드(6F)`가 첫 줄에 서고, 정작 눈앞의 건물과
@@ -542,11 +545,12 @@ class _SearchPanelState extends State<SearchPanel> {
     });
   }
 
-  /// 실외 검색 한 바퀴. **우리 도면은 쳐다보지 않는다** — 밖에 서 있는 사람에게
+  /// 실외 검색 한 바퀴. **우리 도면을 먼저 뒤지지 않는다** — 밖에 서 있는 사람에게
   /// 6층 매장은 답이 아니다([_outdoorOnly]).
   ///
-  /// 건물 줄만 예외로 남긴다. 건물은 실외 지도 위에 서 있는 대상이고, 사용자가
-  /// 안으로 들어가는 입구이기도 하다.
+  /// 예외가 둘이다. 건물 줄은 실외 지도 위에 서 있는 대상이고 안으로 들어가는
+  /// 입구라 남긴다. 그리고 **바깥 결과가 우리 건물을 가리키고 있으면** 그 줄만
+  /// 우리 매장으로 바꿔 세운다([_promoteOurBuildingPois]).
   Future<void> _searchOutdoors(String query, int requestId) async {
     // 두 요청을 **나란히** 띄우고 먼저 오는 쪽부터 화면에 붙인다. 건물 목록은 첫
     // 호출에서 네트워크를 타므로, 기다리게 하면 실외의 본 결과(TMAP)가 그만큼
@@ -566,8 +570,9 @@ class _SearchPanelState extends State<SearchPanel> {
     if (!mounted || requestId != _requestId) return;
     setState(() {
       _submittedQuery = query;
-      // 실외 목록에는 우리 매장 줄이 없다. 직전 실내 검색의 잔여를 안 지우면
-      // 밖으로 나온 뒤에도 6층 매장이 첫 줄에 남는다.
+      // 실외 목록은 우리 매장 줄 **없이** 시작한다. 직전 실내 검색의 잔여를 안
+      // 지우면 밖으로 나온 뒤에도 6층 매장이 첫 줄에 남는다. 이번 검색어로
+      // 승격할 줄이 있으면 아래 [_promoteOurBuildingPois]가 다시 채운다.
       _results = const [];
       _building = null;
       _fromSemantic = false;
@@ -590,6 +595,69 @@ class _SearchPanelState extends State<SearchPanel> {
       _phase = pois.isEmpty && building == null
           ? _SearchPhase.noMatch
           : _SearchPhase.results;
+    });
+
+    // **승격 판정은 반드시 이 줄 아래다.** 두 요청은 위에서 여전히 나란히 띄우지만,
+    // 판정에 쓰는 [_buildingNames]는 [_matchingBuilding]이 돌아야 채워진다. POI가
+    // 먼저 도착하는 흔한 순서에서 위쪽에 얹으면 `mentionsBuilding`이 빈 이름
+    // 배열을 받아 "가끔 되고 가끔 안 되는" 승격이 된다. 병렬은 그대로 두고
+    // **판정 시점만** 둘 다 받은 뒤로 미룬다 — TMAP 줄은 이미 화면에 서 있으므로
+    // 이 뒷단계가 실외 결과를 늦추지 않는다.
+    await _promoteOurBuildingPois(pois, requestId);
+  }
+
+  /// 실외 목록 중 **우리 건물을 가리키는 POI**를 우리 매장 줄로 바꿔 세운다.
+  ///
+  /// 되묻는 조건이 규칙의 전부다 — 좌표나 이름으로 "이 건물 것"이 걸린 POI가
+  /// **한 건이라도** 있을 때만 우리 도면에 묻는다. 0건이면 요청을 아예 안 보내므로,
+  /// 밖에서 치는 대부분의 검색어에서는 Y절의 「실외에서는 요청 자체를 안 보낸다」가
+  /// 그대로 지켜진다(검증: `test/models/building/building_destination_test.dart`).
+  ///
+  /// 되묻기와 짝짓기는 길찾기 도착지 칸과 **같은 도메인 함수**를 쓴다
+  /// (`directions_candidates.dart`). 다만 목록에 세우는 것은 **짝이 실제로 맞은
+  /// 매장뿐**이다 — 브랜드 되묻기가 함께 끌어온 나머지(다른 층 동명 매장, 노드
+  /// 없는 매장)까지 세우면 밖에 선 사람의 목록에 6층 매장이 그대로 돌아온다.
+  Future<void> _promoteOurBuildingPois(
+    List<OutdoorPoi> pois,
+    int requestId,
+  ) async {
+    if (pois.isEmpty) return;
+    final isAt = widget.isInsideIndoorBuilding;
+    // 판정을 못 하면 좌표 신호는 없는 것으로 친다. 이름 신호만 남을 뿐이고,
+    // 잘못 합쳐 엉뚱한 매장으로 안내하지는 않는다([_mergedResults]와 같은 규칙).
+    bool isAtBuilding(OutdoorPoi poi) => isAt?.call(poi.point) ?? false;
+    final ours = [
+      for (final poi in pois)
+        if (isAtBuilding(poi) || mentionsBuilding(poi.name, _buildingNames)) poi,
+    ];
+    if (ours.isEmpty) return;
+
+    final enriched = await lookUpIndoorStoresByBrand(
+      pois: ours,
+      indoorStores: const [],
+      isAtBuilding: isAtBuilding,
+      buildingNames: _buildingNames,
+      search: (brand) =>
+          destinationRepository.searchDestinations(widget.buildingId, brand),
+    );
+    if (!mounted || requestId != _requestId) return;
+
+    // 짝이 맞은 매장만 남긴다. [matchIndoorStore]가 노드 없는 매장을 빼고, 같은
+    // 브랜드가 층마다 있으면 층 힌트 없이는 포기한다 — **그 안전장치를 낮추지
+    // 않는다.** 잘못 고르면 사용자가 엉뚱한 층에 도착한다.
+    final promoted = <PoiSearchResult>[];
+    final seen = <String>{};
+    for (final poi in ours) {
+      final store = matchIndoorStore(poi, enriched);
+      // 노드가 있는 매장만 짝이 되므로(같은 함수) nodeId를 그대로 키로 쓴다.
+      if (store != null && seen.add(store.nodeId!)) promoted.add(store);
+    }
+    if (promoted.isEmpty) return;
+    setState(() {
+      _results = promoted;
+      // 승격된 줄 자체가 결론이다. TMAP이 빈손이고 건물 줄도 없어 "찾지
+      // 못했어요"로 내려간 화면이 여기서 되살아난다.
+      _phase = _SearchPhase.results;
     });
   }
 
@@ -1208,8 +1276,15 @@ class _SearchPanelState extends State<SearchPanel> {
     // 질문이 서 있는 화면이라 질문·선택지 줄 위에 개수를 또 적으면 무엇을 먼저
     // 읽어야 할지 흐려지고, 의미 검색 결과는 유사도순이라 고를 수 있는 축이
     // 아니다(`canChooseSortOrder`).
+    //
+    // **실외 목록에도 안 얹는다.** 머리말은 우리 매장만 세는데(`_listSummary`),
+    // 승격된 줄이 두 개 이상이면 그 "검색 결과 2"가 TMAP 줄까지 포함한 목록 위에
+    // 서서 개수가 화면과 어긋난다. 실외에서 개수를 밝히는 자리는 섹션마다 따로
+    // 있다(`_outdoorHeader`). 정렬 축도 실외에서는 고를 것이 없다 — 거리는
+    // 실내 그래프에서 오고 야외에서는 비운다(`_refreshReach`).
     final canChoose =
         _discoveryMode != DiscoveryMode.clarify &&
+        !_outdoorOnly &&
         canChooseSortOrder(
           itemCount: ordered.length,
           fromSemantic: _fromSemantic,
@@ -1226,8 +1301,10 @@ class _SearchPanelState extends State<SearchPanel> {
     final sharedReasons = sharedReasonSentences(
       _discoveryMatches.map((match) => match.reason),
     );
-    // 줄에 **건물 이름을 붙이지 않는다.** 매장 줄은 실내에서만 서고, 실내에서
-    // 보고 있는 건물은 하나뿐이라 이름이 매 줄 반복되면 층만 뒤로 밀린다.
+    // 줄에 **건물 이름을 붙이지 않는다.** 매장 줄은 이 패널이 보고 있는 건물
+    // 하나([SearchPanel.buildingId])에서만 오므로 — 실외에서 승격된 줄도
+    // 마찬가지다([_promoteOurBuildingPois]) — 이름이 매 줄 반복되면 층만 뒤로
+    // 밀린다. 실외에서 그 줄이 어느 건물인지는 바로 위 건물 줄이 말한다.
     final merged = _mergedResults(building);
     for (final store in ordered) {
       final placeId = store.placeId;
