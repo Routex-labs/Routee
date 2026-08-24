@@ -20,6 +20,8 @@ CorridorTrackingResult _result({
   lastConfirmedNodeId: null,
   correctedPath: path,
   previewPosition: preview.isEmpty ? corrected : preview.last,
+  matchedPreviewPosition: preview.isEmpty ? corrected : preview.last,
+  previewUsesContinuityShadow: false,
   previewHeadingDeg: 90,
   previewPath: preview,
   previewCandidateEdgeIds: const ['edge'],

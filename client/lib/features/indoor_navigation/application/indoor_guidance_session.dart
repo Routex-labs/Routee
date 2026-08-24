@@ -503,7 +503,7 @@ class IndoorGuidanceSession {
     required PdrLocalPoint routeEndM,
     required CorridorTrackingResult result,
   }) {
-    final matchedM = result.previewPosition;
+    final matchedM = result.matchedPreviewPosition;
     final matchedDistanceM = (routeEndM - matchedM).distance;
     final config = _escalator.config;
     final sameTarget = _boardingApproachShadowNodeId == boardingNodeId;

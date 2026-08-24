@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:indoor_pdr_core/indoor_pdr_core.dart';
 
 import '../../../domain/guidance/corridor_tracking.dart';
+import '../../../domain/guidance/location_marker_continuity.dart';
 import '../../../models/building/floor_graph.dart';
 import '../contract/pdr_anchor.dart';
 import 'corridor/corridor_hypothesis.dart';
@@ -41,6 +42,7 @@ class CorridorPositionTracker {
 
   final List<PdrLocalPoint> _correctedPath = [];
   final List<PdrLocalPoint> _previewPath = [];
+  final LocationMarkerContinuity _markerContinuity = LocationMarkerContinuity();
 
   List<Hypothesis> _beam = const [];
 
@@ -71,11 +73,13 @@ class CorridorPositionTracker {
   CorridorTrackingState _state = CorridorTrackingState.uncertain;
   PdrLocalPoint _correctedPosition = PdrLocalPoint.zero;
   PdrLocalPoint _previewPosition = PdrLocalPoint.zero;
+  PdrLocalPoint _matchedPreviewPosition = PdrLocalPoint.zero;
   double _previewHeadingDeg = 0;
   List<String> _previewCandidateEdgeIds = const [];
   bool _previewIsAmbiguous = false;
   PdrLocalPoint _rawConfirmedPosition = PdrLocalPoint.zero;
   PdrLocalPoint _rawPreviewPosition = PdrLocalPoint.zero;
+  PdrLocalPoint _continuityRawPosition = PdrLocalPoint.zero;
   double _sensorHeadingDeg = 0;
   double _headingBiasDeg = 0;
   int _lastConfirmedSteps = 0;
@@ -142,6 +146,8 @@ class CorridorPositionTracker {
     lastConfirmedNodeId: _lastConfirmedNodeId,
     correctedPath: List.unmodifiable(_correctedPath),
     previewPosition: _previewPosition,
+    matchedPreviewPosition: _matchedPreviewPosition,
+    previewUsesContinuityShadow: _markerContinuity.isActive,
     previewHeadingDeg: _previewHeadingDeg,
     previewPath: List.unmodifiable(_previewPath),
     previewCandidateEdgeIds: List.unmodifiable(_previewCandidateEdgeIds),
@@ -176,6 +182,7 @@ class CorridorPositionTracker {
     _lastPreviewSteps = initialPreviewSteps;
     _rawConfirmedPosition = initialPosition;
     _rawPreviewPosition = initialPosition;
+    _continuityRawPosition = initialPosition;
     _lastConfirmedNodeId = null;
     _pendingEdgeId = null;
     _leaderEdgeId = null;
@@ -1030,6 +1037,10 @@ class CorridorPositionTracker {
       }
     }
     if (next.isEmpty) return;
+    // observation의 rawPreviewPosition이 생략된 테스트/옛 재생 입력도 있다.
+    // 실제로 optimistic cursor에 적용한 peak 좌표를 표시 연속성의 단일 기준으로
+    // 쓰면 입력 배치 형태와 무관하게 같은 이동 벡터를 얻는다.
+    _continuityRawPosition = rawPoint;
     _optimisticBeam = _prune(next);
     _electOptimisticLeader(observedHeadingDeg: observed);
     final leader = _optimisticBest!;
@@ -1168,7 +1179,20 @@ class CorridorPositionTracker {
         ? gapDeg < exitThreshold
         : gapDeg < config.ambiguousMarginDeg;
 
-    _previewPosition = leader.edge.pointAt(leader.progressM);
+    _matchedPreviewPosition = leader.edge.pointAt(leader.progressM);
+    final previewLeaderRelocated =
+        _leaderRelocated ||
+        _optimisticStepAdvances.any((step) => step.leaderRelocated);
+    _previewPosition = _markerContinuity.update(
+      matchedPosition: _matchedPreviewPosition,
+      rawPosition: _continuityRawPosition,
+      headingBiasDeg: _headingBiasDeg,
+      leaderRelocated: previewLeaderRelocated,
+      ambiguous: _previewIsAmbiguous,
+      forceMatchedPosition:
+          _lockPreferredRouteTerminal &&
+          _isPreferredRouteTerminalHypothesis(leader),
+    );
     _previewHeadingDeg = leader.edge.bearingForTravel(
       leader.progressM,
       leader.travelSign,
@@ -1221,6 +1245,11 @@ class CorridorPositionTracker {
 
   void _resetPreviewToConfirmed() {
     _previewPosition = _correctedPosition;
+    _matchedPreviewPosition = _correctedPosition;
+    _markerContinuity.reset(
+      matchedPosition: _correctedPosition,
+      rawPosition: _continuityRawPosition,
+    );
     _previewHeadingDeg = result.correctedHeadingDeg;
     _previewPath
       ..clear()

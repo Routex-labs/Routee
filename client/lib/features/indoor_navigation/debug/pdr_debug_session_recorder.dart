@@ -31,7 +31,8 @@ class PdrDebugSessionRecorder {
   // v20이 늘린 것: 진입 시각 ~ 첫 실내 위치 사이의 공백 `indoor_position_gaps`.
   // v21이 바로잡은 것: `actual_marker_position`이 tracker preview 별칭이 아니라
   // 진행률·고정까지 적용된 제품 마커 좌표를 기록한다.
-  static const schemaVersion = 21;
+  // v22가 늘린 것: 표시 좌표와 내부 graph preview, 연속성 shadow 상태를 분리한다.
+  static const schemaVersion = 22;
 
   // **표본 배열에 상한이 없다** — 품질·복도·tracker 입력·경로 진행·기압·층 전이·
   // GPS 차이는 세션이 끝날 때까지 무한히 쌓인다.
@@ -365,6 +366,10 @@ class PdrDebugSessionRecorder {
       'position_floor_local_m': _pointJson(result.correctedPosition),
       'corrected_heading_deg': result.correctedHeadingDeg,
       'preview_position_floor_local_m': _pointJson(result.previewPosition),
+      'matched_preview_position_floor_local_m': _pointJson(
+        result.matchedPreviewPosition,
+      ),
+      'preview_uses_continuity_shadow': result.previewUsesContinuityShadow,
       'preview_heading_deg': result.previewHeadingDeg,
       'preview_candidate_edge_ids': result.previewCandidateEdgeIds,
       'preview_is_ambiguous': result.previewIsAmbiguous,
@@ -472,6 +477,8 @@ class PdrDebugSessionRecorder {
         'position': _pairJson(result.correctedPosition),
         'corrected_heading_deg': result.correctedHeadingDeg,
         'preview_position': _pairJson(result.previewPosition),
+        'matched_preview_position': _pairJson(result.matchedPreviewPosition),
+        'preview_uses_continuity_shadow': result.previewUsesContinuityShadow,
         'actual_marker_position': _pairJson(
           actualMarkerPosition ?? result.previewPosition,
         ),
@@ -1020,6 +1027,11 @@ class PdrDebugSessionRecorder {
               'preview_position_floor_local_m': _pointJson(
                 corridorCorrection.previewPosition,
               ),
+              'matched_preview_position_floor_local_m': _pointJson(
+                corridorCorrection.matchedPreviewPosition,
+              ),
+              'preview_uses_continuity_shadow':
+                  corridorCorrection.previewUsesContinuityShadow,
               'actual_marker_position': _pointJson(
                 actualMarkerPosition ?? corridorCorrection.previewPosition,
               ),

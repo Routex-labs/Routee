@@ -133,6 +133,8 @@ class CorridorTrackingResult {
     required this.lastConfirmedNodeId,
     required this.correctedPath,
     required this.previewPosition,
+    required this.matchedPreviewPosition,
+    required this.previewUsesContinuityShadow,
     required this.previewHeadingDeg,
     required this.previewPath,
     required this.previewCandidateEdgeIds,
@@ -165,7 +167,18 @@ class CorridorTrackingResult {
   final String? pendingEdgeId;
   final String? lastConfirmedNodeId;
   final List<PdrLocalPoint> correctedPath;
+
+  /// 화면과 경로 진행률이 쓰는 연속성 보호 후 위치.
   final PdrLocalPoint previewPosition;
+
+  /// optimistic beam 1등의 graph 위 절대 좌표.
+  ///
+  /// 후보 재배치 중에는 [previewPosition]과 달라질 수 있다. 내부 간선 진행률은
+  /// 이 좌표를 계속 쓰고 화면만 raw PDR 이동량을 이어 간다.
+  final PdrLocalPoint matchedPreviewPosition;
+
+  /// 후보 재배치가 화면 마커에 노출되지 않도록 raw 이동을 잇고 있는지.
+  final bool previewUsesContinuityShadow;
   final double previewHeadingDeg;
   final List<PdrLocalPoint> previewPath;
   final List<String> previewCandidateEdgeIds;
