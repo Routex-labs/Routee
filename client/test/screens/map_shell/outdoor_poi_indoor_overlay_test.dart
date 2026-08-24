@@ -85,14 +85,17 @@ void main() {
     outdoorPoiRepository = originalPoiRepository;
   });
 
-  // 이 테스트가 잡는 회귀는 실제로 기능을 통째로 죽였던 것이다.
+  // **이 테스트는 한 번 뒤집힌 규칙이다.** 원래는 반대를 지켰다: "실내 도면을
+  // 보는 중이면 바깥 검색을 끈다"를 넣었더니 실기기에서 TMAP POI 검색이 한 번도
+  // 실행되지 않았다. 폰에서는 실내 진입 임계 zoom이 화면 폭에 맞춰 내려가고
+  // (indoor_entry_zoom.dart) 건물 근처에서는 GPS로도 자동 진입하므로, 그 조건이
+  // 거의 항상 참이었기 때문이다. 그래서 한동안 실내에서도 바깥을 함께 찾았다.
   //
-  // 처음에는 "실내 도면을 보는 중이면 바깥 검색을 끈다"는 조건을 뒀는데, 폰에서는
-  // 실내 진입 임계 zoom이 화면 폭에 맞춰 내려가고(indoor_entry_zoom.dart) 건물
-  // 근처에서는 GPS로도 자동 진입한다. 즉 실기기에서 그 조건이 거의 항상 참이라
-  // TMAP POI 검색이 **한 번도 실행되지 않았다.** 화면에는 그냥 "바깥 결과가 없다"로
-  // 보여서 원인을 알 수 없었다.
-  testWidgets('실내 진입 오버레이가 켜져 있어도 건물 밖 검색은 그대로 돈다', (tester) async {
+  // 지금은 다시 끈다. 섞어 놓으니 반대쪽이 깨졌다 — 밖에 서서 검색해도 건물 안
+  // 매장이 먼저 서고 주변 장소는 버튼 뒤에 접혔다(`search-result-list-ux.md` Y절).
+  // **대신 위 실패가 그대로 돌아오지 않게 하려면 밖으로 나오는 길이 있어야 한다.**
+  // 지금은 줌아웃뿐이고, 그것이 이 규칙의 남은 비용이다(같은 절 「남은 비용」).
+  testWidgets('실내 진입 오버레이가 켜져 있으면 건물 밖 검색을 하지 않는다', (tester) async {
     watchPosition = () => Stream.fromIterable([_approaching, _atEntrance]);
 
     await tester.pumpWidget(MaterialApp(theme: AppTheme.light, home: const MapShellScreen()));
@@ -101,19 +104,22 @@ void main() {
     }
     await tester.pumpAndSettle();
 
-    // 상단 검색창에 입력해 검색을 활성화한다.
-    await tester.enterText(find.byType(TextField).first, '스타벅스');
+    // 상단 검색창에 입력해 검색을 활성화한다. **목업 도면에 실제로 있는 이름**을
+    // 친다 — 아무 말이나 치면 "검색이 안 돌아서 0"과 "실내만 뒤져서 0"이 같은
+    // 결과가 되어, 이 테스트가 통과해도 아무것도 증명하지 못한다.
+    await tester.enterText(find.byType(TextField).first, '강의실');
     // **두 번 나눠 pump한다.** 첫 pump에서 비로소 SearchPanel이 트리에 들어오고
     // 그때 디바운스 타이머가 걸리므로, 같은 pump의 남은 시간으로는 그 타이머가
     // 안 지나간다. 두 번째 pump가 300ms 디바운스를 넘긴다.
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 500));
 
+    // 검색이 실제로 돌았고(우리 도면에서 찾았고), TMAP은 안 불렀다.
+    expect(find.textContaining('강의실 101'), findsOneWidget);
     expect(
       recording.callCount,
-      greaterThan(0),
-      reason: '실내 오버레이 상태에서도 바깥 POI 검색이 호출돼야 한다',
+      0,
+      reason: '실내 오버레이 상태에서는 결과를 우리 도면에서만 찾아야 한다',
     );
-    expect(recording.lastCenter, isNotNull);
   });
 }

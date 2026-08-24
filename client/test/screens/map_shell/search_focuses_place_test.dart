@@ -10,6 +10,7 @@ import 'package:navigation_client/repositories/place/destination_repository.dart
 import 'package:navigation_client/repositories/building/mock_building_repository.dart';
 import 'package:navigation_client/repositories/place/mock_destination_repository.dart';
 import 'package:navigation_client/screens/map_shell/map_shell_screen.dart';
+import 'package:navigation_client/screens/outdoor_map/outdoor_map_screen.dart';
 import 'package:navigation_client/widgets/eta_card.dart';
 import 'package:navigation_client/screens/map_shell/widgets/sheets/place_detail_sheet.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -67,7 +68,13 @@ void main() {
     watchPosition = defaultWatchPosition;
   });
 
-  Future<void> search(WidgetTester tester, String query) async {
+  /// [indoor]면 먼저 도면 안으로 들어간다. 우리 매장 줄은 실내에서만 서기
+  /// 때문이다(`search-result-list-ux.md` Y절) — 건물 줄은 실외에서도 선다.
+  Future<void> search(
+    WidgetTester tester,
+    String query, {
+    bool indoor = false,
+  }) async {
     final positions = StreamController<Position>.broadcast();
     addTearDown(positions.close);
     watchPosition = () => positions.stream;
@@ -76,6 +83,14 @@ void main() {
     await drain(tester);
     positions.add(fix());
     await drain(tester);
+
+    if (indoor) {
+      tester
+          .state<OutdoorMapBodyState>(find.byType(OutdoorMapBody))
+          // ignore: invalid_use_of_visible_for_testing_member
+          .enterIndoorForTest();
+      await drain(tester);
+    }
 
     await tester.tap(find.byType(TextField).first);
     await drain(tester);
@@ -104,7 +119,7 @@ void main() {
   });
 
   testWidgets('매장을 고르면 그 매장 정보 시트가 올라온다', (WidgetTester tester) async {
-    await search(tester, '강의실');
+    await search(tester, '강의실', indoor: true);
     await tester.tap(find.text('강의실 101').first);
     await drain(tester);
 
@@ -118,12 +133,12 @@ void main() {
     // **두 겹으로 쌓이면 화면으로는 안 보인다.** 같은 자리에 같은 모양이
     // 겹치기 때문이다. 실기기에서는 뒤로가기를 눌러도 화면이 그대로인 것으로만
     // 드러났다 — 그래서 눈이 아니라 위젯 수로 잠근다.
-    await search(tester, '강의실');
+    await search(tester, '강의실', indoor: true);
     await tester.tap(find.text('강의실 101').first);
     await drain(tester);
     expect(find.byType(PlaceDetailSheet), findsOneWidget);
 
-    await search(tester, '강의실');
+    await search(tester, '강의실', indoor: true);
     await tester.tap(find.text('강의실 101').first);
     await drain(tester);
 

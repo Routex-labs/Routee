@@ -22,6 +22,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// 없으므로, 계산까지 이어졌다는 증거는 야외 화면이 돌려주는 **"현재 위치를 아직
 /// 못 잡았습니다"** 안내다. 그 안내가 뜨면 `_startRoute`가 불렸다는 뜻이고, 아무
 /// 안내도 없으면 호출 자체가 막힌 것이다 — 이 테스트가 잡으려는 상태가 그것이다.
+///
+/// 도착지는 **길찾기 도착지 칸**에서 고른다. 실외 상단 검색은 이제 우리 도면
+/// 매장을 돌려주지 않으므로(`search-result-list-ux.md` Y절) 야외에서 매장 시트를
+/// 여는 길이 없고, 야외 장소 시트로 바꾸는 길도 막힌다 — 바깥 POI 검색은 기준점
+/// (GPS·카메라)이 필요한데 이 테스트의 전제가 바로 "GPS가 없다"이기 때문이다.
+/// 어느 문으로 들어와도 도착을 확정하는 자리는 `_setRouteDestination` 하나다.
 void main() {
   late BuildingRepository originalBuildingRepository;
   late DestinationRepository originalDestinationRepository;
@@ -52,39 +58,37 @@ void main() {
     requestStartupPermissions = defaultRequestStartupPermissions;
   });
 
-  /// 상단 검색으로 mock 매장을 찾아 매장 정보 시트를 띄운다.
-  Future<void> openStoreInfoBySearch(WidgetTester tester) async {
+  /// 길찾기 도착지 칸에서 mock 매장을 골라 도착지를 확정한다. 후보를 고르는
+  /// 순간 그 자리에서 경로 계산까지 이어지는 것이 이 화면의 계약이다.
+  Future<void> pickDestination(WidgetTester tester) async {
     await tester.pumpWidget(MaterialApp(theme: AppTheme.light, home: const MapShellScreen()));
     await drain(tester);
 
-    await tester.tap(find.byType(TextField).first);
+    await tester.tap(find.byTooltip('길찾기'));
     await drain(tester);
-    await tester.enterText(find.byType(TextField).first, '강의실');
+    await tester.enterText(
+      find.descendant(
+        of: find.byKey(const Key('route-draft-destination')),
+        matching: find.byType(TextField),
+      ),
+      '강의실',
+    );
     await drain(tester);
 
     final result = find.text('강의실 101');
     expect(
       result,
       findsWidgets,
-      reason: '테스트 전제(검색 결과에 mock 매장이 나옴)가 성립하지 않았다',
+      reason: '테스트 전제(후보 목록에 mock 매장이 나옴)가 성립하지 않았다',
     );
     await tester.tap(result.first);
     await drain(tester);
-
-    expect(
-      find.text('도착'),
-      findsOneWidget,
-      reason: '테스트 전제(매장 정보 시트 열림)가 성립하지 않았다',
-    );
   }
 
   testWidgets('출발지를 고르지 않아도 "도착"을 누르면 경로 계산으로 이어진다', (
     WidgetTester tester,
   ) async {
-    await openStoreInfoBySearch(tester);
-
-    await tester.tap(find.text('도착'));
-    await drain(tester);
+    await pickDestination(tester);
 
     // 계산까지 이어졌다는 증거. 이 안내가 없으면 "도착을 눌렀는데 아무 일도
     // 안 일어남"이고, 그게 이 테스트가 막으려는 회귀다.
@@ -104,10 +108,7 @@ void main() {
     // 접는다 — 출발지는 대부분 현재 위치라 매번 읽을 것이 없고, 그 두 줄이
     // 지도에서 가장 비싼 자리를 계속 먹었다. 잘못 알리지 않는다는 원래 요구는
     // 그대로다(placeholder가 안 뜬다).
-    await openStoreInfoBySearch(tester);
-
-    await tester.tap(find.text('도착'));
-    await drain(tester);
+    await pickDestination(tester);
 
     expect(
       find.text('출발지를 선택하세요'),

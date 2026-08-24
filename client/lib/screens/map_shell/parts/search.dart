@@ -52,12 +52,10 @@ extension _MapShellSearch on _MapShellScreenState {
     _closeSheetsUnderTopPanel();
     setState(() {
       _searchActive = true;
-      // **실내 도면을 보는 중에도 바깥을 함께 찾는다.** 실내일 때 껐더니 기능이
-      // 통째로 죽었다 — 폰에서는 진입 임계 zoom이 16.8까지 내려가고 초기 zoom이
-      // 17이라 건물 근처에서는 첫 프레임부터 오버레이가 켜져 있다.
-      //
-      // 원래 걱정은 **순서**가 이미 해결한다. 바깥 결과는 항상 실내 아래에 별도
-      // 헤더로 붙으므로, 바깥이 첫 줄이 되는 건 실내가 빈손일 때뿐이다.
+      // 바깥 검색의 기준점만 지금 떠 둔다. **실내/실외를 가르는 값이 아니다** —
+      // 그건 패널이 `indoorContextActive` 하나로 정한다(SearchPanel 주석).
+      // 검색이 열려 있는 동안은 지도가 잠기므로([_lockMaps]) 이 시점에 한 번
+      // 찍어 둔 값과 실제 화면이 어긋나지 않는다.
       _outdoorSearchCenter = _outdoorKey.currentState?.outdoorSearchCenter;
     });
     // 결과에 붙일 거리는 여기서 한 번만 준비한다. 결과가 나오기 전에 시작하므로
@@ -182,8 +180,11 @@ extension _MapShellSearch on _MapShellScreenState {
 
   /// 길찾기 두 칸에 보여 줄 후보. 매장·건물·건물 밖 장소를 한 목록으로 합친다.
   ///
-  /// 상단 검색과 **같은 재료**를 쓴다. 진입점마다 규칙이 갈리면 같은 검색어가
-  /// 어디에 치느냐에 따라 다른 곳을 찾아 주고, 실제로 그런 시기가 있었다.
+  /// 상단 검색과 **같은 재료**를 쓰되, 실내/실외를 가르지는 않는다. 상단 검색은
+  /// "지금 여기서 뭐가 있나"라 서 있는 쪽만 보여주지만(SearchPanel 주석), 목적지
+  /// 칸은 **밖에 서서 안을 고르는 것이 본업**이다 — 여기까지 가르면 야외에서
+  /// 건물 안 매장으로 가는 길을 아예 못 찍는다(walk_route_kind.dart의 「야외 →
+  /// 실내」).
   // 후보 목록 조립(경량·의미 검색, 실내/건물/바깥 섞기)은
   // directions_candidates.dart가 소유한다. 화면은 야외 지도에서 읽을 세 가지만
   // [OutdoorSearchContext]로 묶어 넘긴다.

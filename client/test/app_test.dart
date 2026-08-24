@@ -422,7 +422,18 @@ void main() {
 
   /// 새 검색 흐름: 상단 검색창에 그대로 친다. 아래에서 입력창이 하나 더 있는
   /// 시트가 올라오지 않고, 결과는 검색창 바로 밑 패널에 뜬다.
+  ///
+  /// **먼저 건물 안으로 들어간다.** 이 그룹이 보는 것은 우리 도면을 뒤지는
+  /// 경량 → 의미 2단 파이프라인인데, 그 파이프라인은 실내에서만 돈다
+  /// (`search-result-list-ux.md` Y절). 밖에서 치면 TMAP만 돌아 이 테스트들이
+  /// 조용히 무의미해진다 — 실제로 `aiQueries`가 비었다는 단언은 검색이 아예
+  /// 안 돌아도 통과한다.
   Future<void> searchFromTopBar(WidgetTester tester, String query) async {
+    tester
+        .state<OutdoorMapBodyState>(find.byType(OutdoorMapBody))
+        // ignore: invalid_use_of_visible_for_testing_member
+        .enterIndoorForTest();
+    await tester.pumpAndSettle();
     await tester.tap(find.byType(TextField));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), query);
@@ -529,6 +540,12 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    // 우리 도면을 뒤지는 2단 파이프라인은 실내에서만 돈다([searchFromTopBar]).
+    tester
+        .state<OutdoorMapBodyState>(find.byType(OutdoorMapBody))
+        // ignore: invalid_use_of_visible_for_testing_member
+        .enterIndoorForTest();
+    await tester.pumpAndSettle();
     await tester.tap(find.byType(TextField));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), '밥 먹을');
