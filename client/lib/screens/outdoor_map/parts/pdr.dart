@@ -251,8 +251,9 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
   /// 내 위치가 **지금 보고 있는 층이 아닌 다른 층**에 찍혀 있다.
   ///
   /// 이 상태에서는 마커가 흐린 점 하나로 물러나고([_offFloorIndoorMarker]) 걸음
-  /// 보정도 멈춘다. 되돌아오는 문을 띄우는 조건이자([GuidanceRecenterButton])
-  /// "위치 보정"이 층부터 되돌려야 하는 조건이다([_recalibrateIndoor]).
+  /// 보정도 멈춘다. **"위치 보정"(GPS 버튼)이 층부터 되돌려야 하는 조건**이다
+  /// ([_recalibrateIndoor]) — 돌아오는 문은 그 버튼 하나뿐이라, 이 갈래가 없으면
+  /// 다른 층을 훑어본 사용자에게 돌아올 길이 없다.
   bool get _viewingOtherFloor {
     if (!_indoorLocationVisible) return false;
     final anchorFloor = _pdrTrailState.anchor?.floorId;

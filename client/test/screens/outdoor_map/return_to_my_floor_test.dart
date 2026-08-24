@@ -24,8 +24,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// 위치는 이미 잡혀 있는데 다시 잡으라고 말하는 셈이라, 층을 훑어본 사용자에게
 /// 돌아올 문이 없었다.
 ///
+/// **그 문은 GPS 버튼 하나다.** 한동안 다른 층에서만 뜨는 화살표 버튼을 따로
+/// 두었는데, 하는 일이 같은 버튼이 화면에 둘이 되어 어느 쪽을 눌러야 내 자리로
+/// 가는지가 갈렸다. 지금은 하단 바의 "위치 보정"이 부르는 [OutdoorMapBodyState.recalibrate]
+/// 가 층부터 되돌린다 — 여기서 재는 것이 그 경로다.
+///
 /// 카메라는 여기서 확인하지 않는다(MapLibre 플랫폼 뷰가 위젯 테스트에 없다).
-/// 확인하는 것은 **층이 돌아오는가**와 **그 문이 필요할 때만 보이는가** 둘이다.
+/// 확인하는 것은 **층이 돌아오는가**와 **화면에 그 문이 하나뿐인가** 둘이다.
 void main() {
   late BuildingRepository originalBuildingRepository;
   late DestinationRepository originalDestinationRepository;
@@ -107,7 +112,15 @@ void main() {
     isPedometerPermissionGranted = defaultIsPedometerPermissionGranted;
   });
 
-  final returnButton = find.byKey(const Key('return-to-my-floor'));
+  /// 하단 바는 셸이 그린다(이 테스트는 지도만 띄운다). 그 버튼이 부르는 것이
+  /// [OutdoorMapBodyState.recalibrate]라, 그 호출을 그대로 대신한다.
+  Future<void> tapCalibrate(
+    WidgetTester tester,
+    GlobalKey<OutdoorMapBodyState> key,
+  ) async {
+    await key.currentState!.recalibrate();
+    await drain(tester);
+  }
 
   Future<GlobalKey<OutdoorMapBodyState>> openIndoorMap(
     WidgetTester tester,
@@ -172,38 +185,49 @@ void main() {
     expect(key.currentState!.currentFloor, floor);
   }
 
-  testWidgets('내 층에 있는 동안에는 돌아오는 문을 띄우지 않는다', (WidgetTester tester) async {
-    // 같은 층에서는 하단 바 "위치 보정"이 이미 그 일을 한다. 늘 띄우면 비슷하게
-    // 생긴 두 조작이 화면에 남는다.
-    final key = await openIndoorMap(tester);
-    await placeAnchorOnCurrentFloor(tester, key);
-
-    expect(returnButton, findsNothing);
-  });
-
-  testWidgets('다른 층을 열면 문이 뜨고, 누르면 내 층으로 돌아온다', (WidgetTester tester) async {
+  testWidgets('다른 층을 열고 위치 보정을 누르면 내 층으로 돌아온다', (WidgetTester tester) async {
     final key = await openIndoorMap(tester);
     await placeAnchorOnCurrentFloor(tester, key);
 
     await openFloor(tester, key, '2F');
-    expect(returnButton, findsOneWidget, reason: '흐린 점만 남은 화면에 돌아올 문이 없다');
-
-    await tester.tap(returnButton);
-    await drain(tester);
+    await tapCalibrate(tester, key);
 
     expect(key.currentState!.currentFloor, '1F');
-    // 돌아왔으면 문도 함께 사라진다 — 남으면 아무 일도 안 하는 버튼이 된다.
-    expect(returnButton, findsNothing);
   });
 
-  testWidgets('위치를 아직 안 잡았으면 다른 층에서도 문이 없다', (WidgetTester tester) async {
-    // 돌아갈 자리가 없는데 문을 띄우면 눌러도 아무 일이 없다. 그 상태의 출구는
-    // 하단 바 "위치 지정"이다.
+  testWidgets('돌아온 뒤의 위치 보정은 층을 다시 건드리지 않는다', (WidgetTester tester) async {
+    // 같은 층에서는 평소의 보정(중앙 정렬·회전)으로 돌아가야 한다 — 층 복귀는
+    // 다른 층을 보는 동안에만 앞에 끼어드는 갈래다.
+    final key = await openIndoorMap(tester);
+    await placeAnchorOnCurrentFloor(tester, key);
+
+    await openFloor(tester, key, '2F');
+    await tapCalibrate(tester, key);
+    await tapCalibrate(tester, key);
+
+    expect(key.currentState!.currentFloor, '1F');
+  });
+
+  testWidgets('내 자리로 돌아가는 버튼은 화면에 둘이 아니다', (WidgetTester tester) async {
+    // 다른 층을 보는 동안 화살표 버튼을 따로 띄우던 시절의 회귀를 막는다.
+    // 그 일은 하단 바의 GPS 버튼 하나가 한다.
+    final key = await openIndoorMap(tester);
+    await placeAnchorOnCurrentFloor(tester, key);
+    await openFloor(tester, key, '2F');
+
+    expect(find.byIcon(Icons.near_me), findsNothing);
+    expect(find.byKey(const Key('return-to-my-floor')), findsNothing);
+  });
+
+  testWidgets('위치를 아직 안 잡았으면 층도 그대로다', (WidgetTester tester) async {
+    // 돌아갈 자리가 없다. 그 상태의 출구는 하단 바 "위치 지정"이라, 보정은
+    // 그 버튼을 깜빡이고 층은 사용자가 고른 그대로 둔다.
     final key = await openIndoorMap(tester);
 
     await openFloor(tester, key, '2F');
+    await tapCalibrate(tester, key);
 
-    expect(returnButton, findsNothing);
+    expect(key.currentState!.currentFloor, '2F');
   });
 }
 

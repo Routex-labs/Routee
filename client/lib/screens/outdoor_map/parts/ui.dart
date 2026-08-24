@@ -418,16 +418,13 @@ extension OutdoorMapUi on OutdoorMapBodyState {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // 다른 층을 보는 동안에만 뜬다. 같은 층에서는 하단 바의
-                    // "위치 보정"이 이미 그 일을 하므로, 늘 띄우면 비슷하게 생긴
-                    // 두 조작이 화면에 남는다([GuidanceRecenterButton]).
-                    if (_viewingOtherFloor) ...[
-                      GuidanceRecenterButton(
-                        key: const Key('return-to-my-floor'),
-                        onPressed: () => unawaited(_returnToMyFloor()),
-                      ),
-                      const SizedBox(height: RoutexSpacing.controlGap),
-                    ],
+                    // **다른 층을 볼 때의 "돌아오는 문"은 여기 없다.** 화살표
+                    // 버튼을 따로 띄웠더니 하단 바의 "위치 보정"(GPS)과 하는 일이
+                    // 같은 버튼이 화면에 둘이 되어, 어느 쪽을 눌러야 내 자리로
+                    // 가는지가 갈렸다. 그 일은 GPS 버튼 하나가 한다 —
+                    // 다른 층을 보는 중이면 [_recalibrateIndoor]가 층부터
+                    // 되돌린다([_returnToMyFloor]).
+                    //
                     // 편의시설은 **층 선택기 바로 위**다. 둘 다 "건물 안에서 몸을
                     // 옮기는" 조작이고, 상단 카테고리 칩 줄은 엄지에서 가장 먼
                     // 자리다. 조건부인 위 버튼이 이 아래가 아니라 위에 붙는 이유는
@@ -459,26 +456,44 @@ extension OutdoorMapUi on OutdoorMapBodyState {
             ),
           ),
 
-        // 안내 중 "내 위치로" — 방금 접힌 층 선택기와 **같은 자리**에 놓는다.
-        // 안내가 시작되면 그 자리가 비고, 사용자는 이미 거기에 조작이 있다는
-        // 것을 알고 있다.
+        // 안내 중의 "위치 보정" — 안내가 시작되면 셸의 하단 바가 통째로 접히므로
+        // (그 줄의 나머지 둘은 출발점을 잡는 조작이라 걷는 중에는 쓸 일이 없다)
+        // **그 자리에 GPS 버튼만 남긴다.** 오른쪽 끝선(16)·맨 아랫줄이라 접히기
+        // 전 하단 바의 그 버튼과 같은 자리다.
         //
-        // 안내 중에만 띄우는 이유는 [GuidanceRecenterButton] 주석에 있다 —
-        // 평상시에는 하단 바의 "위치 보정"이 그 자리를 대신하므로, 둘을 같이
-        // 띄우면 비슷하게 생긴 두 조작이 화면에 남는다.
-        if (_guidanceActive && _canRecenterOnCurrentPosition)
+        // **같은 버튼이어야 한다.** 예전에는 여기에 화살표([Icons.near_me])를
+        // 띄웠는데, 하는 일("내 자리로 돌아간다")이 GPS 버튼과 같으면서 모양만
+        // 달라 안내를 시작하는 순간 버튼이 바뀐 것처럼 보였다. 하는 일이 하나면
+        // 버튼도 하나다.
+        //
+        // **하는 일은 카메라 조작이다.** 평상시의 위치 보정은 PDR 앵커를 다시
+        // 잡지만, 걷는 도중 앵커를 옮기면 진행률 기준이 그 자리에서 바뀐다.
+        // 그래서 안내 중에는 [_recenterOnCurrentPosition]만 부른다(다른 층에
+        // 있으면 층부터 되돌린다).
+        //
+        // **자리를 비우지 않는다.** 되돌릴 자리를 아직 모르는 동안에도 버튼은
+        // 그대로 두고 꺼 둔다 — 뜨고 지는 버튼은 누르려던 손이 빈자리를 짚는다.
+        if (_guidanceActive)
           AnimatedPositioned(
             duration: const Duration(milliseconds: 200),
             curve: Curves.easeOut,
-            left: 16,
+            right: RoutexSpacing.componentPadding,
             bottom:
                 floorSelectorBottomOffset +
                 (indoorRouteVisible ? bottomBarLiftPx : 0),
             child: SafeArea(
               top: false,
-              child: GuidanceRecenterButton(
+              child: RoutexMapControl(
                 key: const Key('guidance-recenter'),
-                onPressed: () => unawaited(_recenterOnCurrentPosition()),
+                label: '위치 보정',
+                icon: Icons.my_location,
+                // 접히기 전의 하단 바 버튼과 같은 tone이어야 같은 조작으로 읽힌다.
+                tone: RoutexMapControlTone.accent,
+                onPressed: _viewingOtherFloor
+                    ? () => unawaited(_returnToMyFloor())
+                    : _canRecenterOnCurrentPosition
+                    ? () => unawaited(_recenterOnCurrentPosition())
+                    : null,
               ),
             ),
           ),
