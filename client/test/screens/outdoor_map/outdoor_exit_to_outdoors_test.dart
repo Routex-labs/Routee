@@ -283,6 +283,10 @@ void main() {
     await state.showIndoorToOutdoorRouteTo(outsideDestination, label: '목적지까지');
     await drain(tester);
 
+    // **스낵바가 걷힐 때까지 기다린다.** 진입 안내 스낵바가 하단 카드와 같은
+    // 자리에 떠 있어, 그대로 누르면 탭이 스낵바에 먹힌다.
+    await tester.pump(const Duration(seconds: 5));
+    await drain(tester);
     await tester.tap(find.text('안내 시작'));
     await drain(tester);
     expect(

@@ -179,6 +179,14 @@ extension _MapShellCategory on _MapShellScreenState {
       ).showSnackBar(const SnackBar(content: Text('이 시설의 위치를 찾지 못했습니다')));
       return;
     }
+    // **에스컬레이터는 도착지가 아니다**([kNonDestinationSubcategoryValues]).
+    // 경로를 그리면 탑승구가 아니라 옆 복도 노드에서 끝나 도착지 이름이 `복도`로
+    // 뜬다. 대신 그 자리로 카메라를 옮기고 도면에 강조를 남긴다 — 이 시설에
+    // 대해 화면이 정직하게 할 수 있는 일은 어디 있는지 보여 주는 것 하나다.
+    if (isNonDestinationSubcategory(picked.subcategory)) {
+      await _outdoorKey.currentState?.focusStore(resolved);
+      return;
+    }
     await _setRouteDestination(candidateForPlace(resolved));
   }
 

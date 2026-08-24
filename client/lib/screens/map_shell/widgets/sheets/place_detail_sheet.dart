@@ -65,6 +65,17 @@ const kPlaceDetailSheetAnimationStyle = AnimationStyle(
   reverseCurve: Curves.easeInCubic,
 );
 
+/// 저장 알림("장소에 저장했습니다" · "저장을 해제했습니다")이 떠 있는 시간.
+///
+/// 디자인 시스템의 [RoutexFeedbackTiming.noticeVisibility](4초)보다 **짧게 쓴다.**
+/// 그 토큰은 "읽고 나서 손이 닿을 시간"까지 재 둔 값인데, 이 알림은 시트 아래에
+/// 떠서 본문을 가리는 동안 저장한 매장의 정보를 못 읽게 한다 — 방금 저장한
+/// 장소를 계속 보고 있는 화면이라 가리는 값이 크다.
+///
+/// **놓쳐도 되돌릴 길은 남는다.** 여기 붙은 되돌리기는 헤더 저장 토글의
+/// 지름길일 뿐이라, 사라져도 그 토글이 같은 자리에서 같은 일을 한다.
+const _saveNoticeVisibility = Duration(seconds: 2);
+
 /// 지금 떠 있는 상세 시트의 라우트. 없으면 null.
 ///
 /// **전역이지만 하나뿐이다.** 셸이 "상세 시트는 한 번에 하나"를 강제하므로
@@ -442,10 +453,7 @@ class _PlaceDetailSheetState extends State<PlaceDetailSheet> {
   void _showSaveNotice(bool saved) {
     _saveNoticeTimer?.cancel();
     setState(() => _saveNotice = saved ? '장소에 저장했습니다' : '저장을 해제했습니다');
-    _saveNoticeTimer = Timer(
-      RoutexFeedbackTiming.noticeVisibility,
-      _dismissSaveNotice,
-    );
+    _saveNoticeTimer = Timer(_saveNoticeVisibility, _dismissSaveNotice);
   }
 
   void _dismissSaveNotice() {

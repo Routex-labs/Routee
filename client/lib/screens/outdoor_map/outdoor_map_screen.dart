@@ -84,7 +84,6 @@ import 'widgets/floor_selector.dart';
 import 'widgets/map_scale_bar.dart';
 import 'widgets/nearby_store_sheet.dart';
 import 'widgets/floor_switch_escalator_motif.dart';
-import 'widgets/guidance_recenter_button.dart';
 import 'widgets/indoor_arrival_card.dart';
 import 'widgets/entry_floor_prompt.dart';
 import 'widgets/route_steps_sheet.dart';
@@ -1983,10 +1982,13 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   /// footprint가 매장보다 9 m 넓어 도면이 프레임에서 치우친다.
   ({String floor, Duration duration})? _pendingFloorFit;
 
-  /// 하단 바 '홈'으로 야외에 돌아왔을 때의 이탈. **오버레이만 끄면 부족하다** —
-  /// 확대된 채면 도면이 그대로 보인다. 카메라도 축소하고 실내 앵커 경로도 지운다.
+  /// 하단 바 '홈'·검색의 "밖에서 찾아보기"로 야외에 돌아왔을 때의 이탈.
+  /// **오버레이만 끄면 부족하다** — 확대된 채면 도면이 그대로 보인다. 카메라도
+  /// 축소하고 실내 앵커 경로도 지운다.
   ///
-  /// [_exitIndoorByOutsideTap]과 달리 **재무장한다**(축소까지 하므로 안전하다).
+  /// 줌 트리거는 **재무장한다**(축소까지 하므로 곧바로 되끌려 들어가지 않는다).
+  /// GPS 자동 진입은 이 브랜치에 없으므로 따로 끌 것이 없다 — 들어가는 것은
+  /// 사용자가 누른 순간뿐이다([_coldStartIndoorHandled]).
   Future<void> returnToOutdoorView() async {
     if (!_indoorEntered) return;
     if (_placingPdrAnchor) _setPlacingAnchor(false);

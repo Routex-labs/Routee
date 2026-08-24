@@ -930,7 +930,9 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
       await _animateCameraToFitBox(
         box,
         topChromePx: floorFitTopChromePx,
-        bottomChromePx: floorFitBottomChromePx,
+        // 아래에 판이 붙어 있으면 그 높이를 쓴다 — 규칙과 근거는
+        // [floorFitBottomChromeFor].
+        bottomChromePx: floorFitBottomChromeFor(widget.bottomOverlayLiftPx),
         duration: duration,
       );
       return;
@@ -1476,19 +1478,22 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
   /// 아래를 비우는 높이는 셸이 이미 내려 준다([OutdoorMapBody.bottomOverlayLiftPx])
   /// — 시트가 떠 있으면 그 높이가 그 값에 들어 있다. **지도가 시트를 알지 않고
   /// 높이만 값으로 받는다**는 그 필드의 계약을 여기서도 그대로 쓴다.
-  Future<void> _fitCameraToFacilityHighlight() async {
+  /// **맞출 것이 있었으면 true.** 층을 바꾼 쪽이 이 값을 보고 층 전체 fit으로
+  /// 갈지 정한다([_onFloorChipSelected]) — 고른 종류가 그 층에 없으면 여기서는
+  /// 아무 일도 일어나지 않으므로, 그때는 층 전체를 보여 주는 편이 낫다.
+  Future<bool> _fitCameraToFacilityHighlight() async {
     final plan = _floorPlan;
-    if (plan == null || !_indoorEntered) return;
+    if (plan == null || !_indoorEntered) return false;
     final polygons = facilityHighlightPolygons(
       stores: plan.stores,
       selection: widget.categorySelection,
     );
-    if (polygons.isEmpty) return;
+    if (polygons.isEmpty) return false;
     final box = routeBoxFor([
       for (final polygon in polygons) ...polygon,
     ], minSideM: facilityFitMinSideM);
-    if (box == null) return;
-    await _animateCameraToFitBox(
+    if (box == null) return false;
+    return _animateCameraToFitBox(
       box,
       topChromePx: floorFitTopChromePx,
       bottomChromePx: widget.bottomOverlayLiftPx,

@@ -368,18 +368,24 @@ extension OutdoorMapMap on OutdoorMapBodyState {
         )) {
           break;
         }
-        // 사용자가 건물을 벗어날 만큼 축소했으므로 오버레이를 접고 다음 확대에서
-        // 재발화할 수 있게 무장한다. 배치 대기 중이면 종료해 하단 바 표시도 함께
-        // 초기화한다.
-        _autoIndoorEntryArmed = true;
-        if (_indoorEntered) {
-          if (_placingPdrAnchor) _setPlacingAnchor(false);
-          _setIndoorEntered(false);
-        }
+        _exitIndoorByZoomOut();
       case IndoorEntryTransition.keep:
         // 히스테리시스 밴드 — 현재 상태를 그대로 유지한다.
         break;
     }
+  }
+
+  /// 축소로 실내를 벗어났을 때. 다음 확대에서 재발화할 수 있게 줌 트리거는
+  /// **다시 무장한다**. 배치 대기 중이면 종료해 하단 바 표시도 함께 초기화한다.
+  ///
+  /// **좌표가 되끌고 들어오는 것은 여기서 막지 않는다.** 이 브랜치에서 GPS
+  /// 자동 진입 자체가 없어졌기 때문이다 — 들어가는 것은 사용자가 누른 순간뿐이고,
+  /// 실내에서 켠 콜드스타트만 1회성으로 남아 있다([_coldStartIndoorHandled]).
+  void _exitIndoorByZoomOut() {
+    _autoIndoorEntryArmed = true;
+    if (!_indoorEntered) return;
+    if (_placingPdrAnchor) _setPlacingAnchor(false);
+    _setIndoorEntered(false);
   }
 
   /// GPS 현재 위치 마커. 실내에서는 [_outdoorGpsVisible]이 false라 항상 빈

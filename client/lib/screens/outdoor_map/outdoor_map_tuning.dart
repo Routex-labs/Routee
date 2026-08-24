@@ -3,7 +3,10 @@
 /// 숫자는 대부분 실기기에서 재보고 정한 것이라 근거를 값 옆에 짧게 남긴다.
 library;
 
+import 'dart:math' as math;
+
 import 'package:latlong2/latlong.dart' as ll;
+import 'package:routex_design_system/routex_design_system.dart';
 
 import '../../map/camera/zoom_math.dart';
 import 'entry/indoor_entry_zoom.dart' show indoorTilesMaxZoom;
@@ -205,6 +208,19 @@ const followCameraWalkingStepWindowMs = 1800;
 const floorFitTopChromePx = placingHintTopPx;
 const floorFitBottomChromePx = mapShellBottomChromePx;
 
+/// 층 도면을 맞출 때 **아래에서 실제로 비울 높이.**
+///
+/// [floorFitBottomChromePx]는 하단 바만 센 어림값이라, 지도 아래에 판이 붙는
+/// 상태(시설 시트)에서는 모자란다. 그대로 쓰면 도면이 화면 전체 기준으로
+/// 맞춰져 아래 절반이 시트 뒤로 들어가고, **층을 바꿔도 배율이 그대로인 것처럼**
+/// 보인다(시설 시트를 연 채 층 선택기를 누르면 그랬다).
+///
+/// [bottomOverlayLiftPx]는 셸이 내려 주는 그 판의 높이다
+/// ([OutdoorMapBody.bottomOverlayLiftPx]) — 시설 강조 fit이 쓰는 것과 같은 값이라,
+/// 두 fit이 같은 바닥을 본다.
+double floorFitBottomChromeFor(double bottomOverlayLiftPx) =>
+    math.max(floorFitBottomChromePx, bottomOverlayLiftPx);
+
 /// 안내 중 chrome 높이. **층 도면용 값을 그대로 쓰면 안 된다** — 안내가 시작되면
 /// 칩 줄이 접히고 상단 바도 한 줄로 줄어, 없는 줄만큼 비우면 경로가 아래로 눌린다.
 const guidanceFitTopChromePx = 92.0;
@@ -216,6 +232,22 @@ const bottomBarInnerBottomPaddingPx = 14.0;
 /// pill 하단을 하단 바 맨 아랫줄과 같은 baseline에 앉힌다. 실내 화면과 같은
 /// 계산이어야 두 화면에서 pill 위치가 어긋나지 않는다.
 const floorSelectorBottomOffset = bottomBarInnerBottomPaddingPx;
+
+/// 하단 바(`MapBottomBar`) **버튼 줄 바로 위**의 자리. 화면 아래에서 잰
+/// 논리 px이고 **안전영역은 빼고 준다** — 얹는 쪽이 제 [SafeArea]로 이미
+/// 그만큼 올라와 있다(안 감싸는 곳은 스스로 더한다).
+///
+/// 상수로 둘 수 없다. 하단 바는 탭 줄·시설 시트·이슈 다이어리 위에 얹혀
+/// 상태마다 다른 높이에 뜨고, 그 높이는 셸만 안다
+/// ([OutdoorMapBody.bottomOverlayLiftPx]가 그 값이다). 상수(112)로 두었던
+/// 축척 막대가 탭 줄이 생긴 뒤 "위치 보정" 버튼 위로 걸친 것이 그 이유다.
+///
+/// 검증은 `client/test/screens/outdoor_map/widgets/scale_bar_placement_test.dart`.
+double aboveMapBottomBarPx(double bottomOverlayLiftPx) =>
+    bottomOverlayLiftPx +
+    bottomBarInnerBottomPaddingPx +
+    RoutexMetrics.minimumTouchTarget +
+    RoutexSpacing.controlGap;
 
 /// ETA 카드가 뜨면 하단 바가 이만큼 올라간다. `_etaBarLiftHeight`와 같아야 한다.
 const bottomBarLiftPx = 92.0;
@@ -229,7 +261,14 @@ const bottomBarLiftPx = 92.0;
 /// 검증은 `test/screens/outdoor_map/widgets/pdr_control_placement_test.dart`.
 const pdrControlTopPx = placingHintTopPx + 44;
 
-/// PDR 토스트를 하단 바(+ETA 카드) 위로 띄우는 오프셋.
+/// 하단 바가 먹는 높이의 **어림값**. 도면을 맞출 때 아래에서 비우는 데만 쓴다
+/// ([floorFitBottomChromePx]).
+///
+/// 화면에 얹는 것(축척 막대·스낵바)은 이 상수를 쓰지 않는다 — 하단 바는 탭
+/// 줄·시설 시트에 따라 다른 높이에 뜨는데 상수는 그것을 못 따라가, 탭 줄이
+/// 생긴 뒤 축척 막대가 "위치 보정" 버튼 위로 걸쳤다. 그쪽은 셸이 내려 주는
+/// 값으로 그때그때 잰다(`parts/ui.dart`의 `_aboveBottomBarPx`). 카메라 fit은
+/// 몇 px 어긋나도 도면이 조금 더/덜 여유롭게 잡힐 뿐이라 어림으로 충분하다.
 const mapShellBottomChromePx = 112.0;
 
 /// 위치 지정 안내를 상단 chrome 아래에 놓는 오프셋.
