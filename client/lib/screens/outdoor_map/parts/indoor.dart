@@ -125,7 +125,7 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
             geojson?['map_calibration_version'] as String? ?? 'unversioned';
       });
       _syncCorridorTracking(_pdrTrailState.snapshot);
-      _syncPdrCurrentLayer();
+      _syncPdrCurrentLayer(snap: true);
       unawaited(_syncDebugPdrLayers());
       // 출구 핀은 도면에서만 나오므로 도면이 바뀔 때마다 다시 세운다.
       // 1F 외 층에서는 0개가 되는 것이 정상이다.
@@ -929,7 +929,7 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     unawaited(_syncCurrentLayer());
     // 위치 아이콘의 주인이 바뀌는 순간이다. 야외로 나가면 실내 위치 마커를
     // 지우고(GPS 마커가 그 역할을 받는다), 실내로 들어가면 다시 그린다.
-    unawaited(_syncPdrCurrentLayer());
+    unawaited(_syncPdrCurrentLayer(snap: true));
     _syncDimScrimLayer();
     // 외곽선은 실내 진입 상태에서만 그린다 — 이탈하면 여기서 소스가 비워진다.
     unawaited(_syncFloorOutlineLayer());

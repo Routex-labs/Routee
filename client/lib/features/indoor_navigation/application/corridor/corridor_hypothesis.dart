@@ -101,6 +101,28 @@ class Hypothesis {
   /// 모호해질 때마다 preview가 꼬리 길이만큼 뒤로 튄다.
   Hypothesis forPreview() => _copy(path: [edge.pointAt(progressM)]);
 
+  /// node 통과가 확정된 뒤 현재 간선을 새 직선 구간의 기준으로 삼는다.
+  ///
+  /// 위치·경로·누적 transition은 보존하고, 이전 간선에서 만들어진 점수와
+  /// 회전 형태 이력만 버린다. PDR 세션이나 화면 cursor를 다시 시작하는 reset과
+  /// 다르며, 직전 코너의 오차가 다음 직선 간선 순위를 계속 누르는 것만 막는다.
+  Hypothesis beginStraightEpoch({required PdrLocalPoint rawPoint}) =>
+      Hypothesis(
+        edge: edge,
+        progressM: progressM,
+        travelSign: travelSign,
+        path: path,
+        cost: 0,
+        matchedM: 0,
+        unmatchedM: 0,
+        transitions: transitions,
+        lastNodeId: lastNodeId,
+        previousOffsetM: (edge.pointAt(progressM) - rawPoint).distance,
+        stepParentHypothesisId: stepParentHypothesisId,
+        stepTraversals: stepTraversals,
+        stepCrossedNodeIds: stepCrossedNodeIds,
+      );
+
   Hypothesis advance({
     required double observedHeadingDeg,
     required double graphHeadingDeg,

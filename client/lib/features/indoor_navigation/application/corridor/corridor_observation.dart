@@ -8,10 +8,15 @@ import '../../../../domain/guidance/corridor_tracking.dart';
 /// 다시 한 번 보고돼도 optimistic cursor는 이 값으로 중복을 걸러 한 번만
 /// 전진한다. 배치 크기를 어떻게 잘라도 표시 위치 시계열이 같아지는 근거다.
 class TimedPreviewStep {
-  const TimedPreviewStep({required this.peakId, required this.rawPoint});
+  const TimedPreviewStep({
+    required this.peakId,
+    required this.rawPoint,
+    this.occurredAtMs,
+  });
 
   final int peakId;
   final PdrLocalPoint rawPoint;
+  final int? occurredAtMs;
 }
 
 class CorridorObservation {
@@ -26,8 +31,10 @@ class CorridorObservation {
     required this.hasHeading,
     this.rawConfirmedStepPositions = const [],
     this.rawPreviewTailPositions = const [],
+    this.rawPreviewTailPeakIds = const [],
     this.rawPreviewTailPeakTimesMs = const [],
     this.confirmedThroughMs,
+    this.confirmedThroughPeakId,
   });
 
   final int timestampMs;
@@ -51,15 +58,24 @@ class CorridorObservation {
   /// 확정 상태에는 반영하지 않고 화면용 preview에만 사용한다.
   final List<PdrLocalPoint> rawPreviewTailPositions;
 
+  /// [rawPreviewTailPositions]와 같은 인덱스의 세션 누적 preview 걸음 번호.
+  /// 시각이 같은 batched peak도 서로 다른 ID를 가져 중복 제거가 정확하다.
+  final List<int?> rawPreviewTailPeakIds;
+
   /// [rawPreviewTailPositions]와 **같은 인덱스**의 accepted peak 시각.
   ///
-  /// 비어 있거나 길이가 다르면 세션 안에서만 유효한 합성 식별자로 폴백한다
-  /// ([CorridorTrackingResult.previewPeakIdsSynthetic]가 true가 된다).
+  /// 발생 시각이며 식별자가 아니다. 옛 로그처럼 [rawPreviewTailPeakIds]가 없으면
+  /// 누적 preview 걸음 번호를 합성 식별자로 쓴다. 확정 시간창이 시각 ID를
+  /// 지운 뒤 같은 tail을 다시 받으면 한 걸음을 두 번 적용하기 때문이다.
   final List<int?> rawPreviewTailPeakTimesMs;
 
   /// 확정 배치가 소비한 시간창의 끝. 이 시각 이하의 preview peak는 이미
   /// 확정으로 넘어갔으므로 optimistic cursor를 다시 전진시키지 않는다.
   final int? confirmedThroughMs;
+
+  /// 초록에 실제 대응이 끝난 누적 preview 걸음 번호. 새 런타임은 이 값을 쓰고,
+  /// null인 이전 fixture만 [confirmedThroughMs]로 폴백한다.
+  final int? confirmedThroughPeakId;
 
   /// tail 직전 위치. 첫 preview 걸음의 이동 벡터 기준점이다.
   PdrLocalPoint? get previewTailOriginM =>
@@ -67,23 +83,27 @@ class CorridorObservation {
 
   /// tail을 식별자가 붙은 걸음 목록으로 편다.
   ///
-  /// 시각이 없으면 누적 preview 걸음 번호로 합성한다. 누적값이라 단조 증가하고
-  /// 배치 구성과 무관하므로, 시각이 없는 Android·옛 fixture에서도 같은 걸음이
-  /// 두 번 적용되지 않는다. 실제 시각과 섞이지 않게 음수로 만든다.
+  /// 명시 ID가 없으면 누적 preview 걸음 번호로 합성한다. 누적값이라 단조 증가하고
+  /// 배치 구성과 무관하므로, 옛 fixture에서도 같은 걸음이 두 번 적용되지 않는다.
+  /// 실제 ID와 섞이지 않게 음수로 만든다.
   List<TimedPreviewStep> get timedPreviewSteps {
     final points = rawPreviewTailPositions;
     if (points.length < 2) return const [];
     final times = rawPreviewTailPeakTimesMs.length == points.length
         ? rawPreviewTailPeakTimesMs
         : const <int?>[];
+    final ids = rawPreviewTailPeakIds.length == points.length
+        ? rawPreviewTailPeakIds
+        : const <int?>[];
     final movementCount = points.length - 1;
     return [
       for (var index = 1; index < points.length; index += 1)
         TimedPreviewStep(
           peakId:
-              (times.isEmpty ? null : times[index]) ??
-              -(previewSteps - (movementCount - index) + 1),
+              (ids.isEmpty ? null : ids[index]) ??
+              -(previewSteps - movementCount + index),
           rawPoint: points[index],
+          occurredAtMs: times.isEmpty ? null : times[index],
         ),
     ];
   }
@@ -92,9 +112,9 @@ class CorridorObservation {
   bool get hasSyntheticPreviewPeakIds {
     final points = rawPreviewTailPositions;
     if (points.length < 2) return false;
-    if (rawPreviewTailPeakTimesMs.length != points.length) return true;
+    if (rawPreviewTailPeakIds.length != points.length) return true;
     for (var index = 1; index < points.length; index += 1) {
-      if (rawPreviewTailPeakTimesMs[index] == null) return true;
+      if (rawPreviewTailPeakIds[index] == null) return true;
     }
     return false;
   }
@@ -128,6 +148,7 @@ class CorridorTrackingResult {
     required this.junctionDistanceM,
     required this.junctionCandidateEdgeIds,
     required this.leaderRelocated,
+    this.routeStraightEpochNodeId,
     this.optimisticStepAdvances = const [],
   });
 
@@ -183,6 +204,10 @@ class CorridorTrackingResult {
 
   /// 보정 위치 변화가 이번 확정 보행 거리로 설명되지 않는 대표 가설 재배치인지.
   final bool leaderRelocated;
+
+  /// 이번 update에서 이전 간선의 점수 이력을 끊고 새 직선 구간을 시작한 route node.
+  /// 발동하지 않은 프레임은 null이다.
+  final String? routeStraightEpochNodeId;
 
   /// 이번 update에서 처음 적용된 preview peak별 이동 사건.
   final List<OptimisticStepAdvance> optimisticStepAdvances;

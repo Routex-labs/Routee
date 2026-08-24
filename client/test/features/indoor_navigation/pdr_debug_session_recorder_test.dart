@@ -143,7 +143,7 @@ void main() {
     final matched = paths['map_matched_floor_local_m']! as List<Object?>;
     final finalMatched = matched.last! as Map<String, double>;
 
-    expect(json['schema_version'], 20);
+    expect(json['schema_version'], 21);
     expect(
       (json['map_context']! as Map<String, Object?>)['map_calibration_version'],
       'thehyundai-seoul-1f-svg-v1',
@@ -718,6 +718,9 @@ void main() {
         distanceM: 2.1,
         path: const [PdrLocalPoint.zero, PdrLocalPoint(4, 1)],
       );
+      recorder
+        ..recordSnapshot(snapshot)
+        ..recordCorridorCorrection(result);
 
       recorder.recordTrackerInput(
         observation: null,
@@ -731,6 +734,7 @@ void main() {
         observation: observation(timestampMs: 1000, confirmedSteps: 3),
         wasReset: false,
         result: result,
+        actualMarkerPosition: const PdrLocalPoint(3.8, 0),
         snapshot: snapshot,
         previewTailPeakTimesMs: const [900, 1100],
         at: DateTime.utc(2026, 7, 27, 9, 0, 2),
@@ -752,7 +756,25 @@ void main() {
       // 꼬리 좌표와 peak 시각의 인덱스가 맞아야 확정 시간창과 대조할 수 있다.
       expect(update['raw_preview_tail_positions'], hasLength(2));
       expect(update['raw_preview_tail_peak_times_ms'], [900, 1100]);
-      expect((update['result']! as Map<String, Object?>)['edge_id'], 'ab');
+      final recordedResult = update['result']! as Map<String, Object?>;
+      expect(recordedResult['edge_id'], 'ab');
+      expect(recordedResult['actual_marker_position'], [3.8, 0.0]);
+      expect(recordedResult['preview_position'], [4.5, 0.0]);
+
+      final json = recorder.buildJson(
+        buildingId: 'b',
+        selectedFloor: '1F',
+        mapCalibrationVersion: 'v1',
+        graph: _graph(),
+        device: const {},
+      );
+      final summary = json['summary']! as Map<String, Object?>;
+      final correction =
+          summary['corridor_correction']! as Map<String, Object?>;
+      expect(correction['actual_marker_position'], {
+        'east_m': 3.8,
+        'north_m': 0.0,
+      });
     });
 
     test('같은 batchId는 한 번만 applied_batch로 남긴다', () {
@@ -769,8 +791,11 @@ void main() {
           spanEndMs: 1500,
           appliedSteps: 3,
           appliedDistanceM: 2.1,
+          consumedPreviewSteps: 1,
+          acknowledgedPreviewSteps: 1,
         ),
         previewPeakTimesMs: const [null, 1200],
+        previewSteps: 1,
       );
 
       for (var i = 0; i < 3; i += 1) {
@@ -798,6 +823,9 @@ void main() {
       expect(batch['batch_id'], 7);
       expect(batch['span_end_ms'], 1500);
       expect(batch['applied_steps'], 3);
+      expect(batch['consumed_preview_steps'], 1);
+      expect(batch['acknowledged_preview_steps'], 1);
+      expect(batch['consumed_preview_peak_ids'], [1]);
       expect(batch['consumed_preview_peak_times_ms'], [1200]);
     });
 
@@ -885,9 +913,18 @@ void main() {
       );
       expect(missOf(recorder), isNull);
 
-      recorder.recordExitDoorMiss(reason: 'outsideReachRadius', doorDistanceM: 40);
-      recorder.recordExitDoorMiss(reason: 'trackerUncertain', doorDistanceM: 18);
-      recorder.recordExitDoorMiss(reason: 'outsideReachRadius', doorDistanceM: 25);
+      recorder.recordExitDoorMiss(
+        reason: 'outsideReachRadius',
+        doorDistanceM: 40,
+      );
+      recorder.recordExitDoorMiss(
+        reason: 'trackerUncertain',
+        doorDistanceM: 18,
+      );
+      recorder.recordExitDoorMiss(
+        reason: 'outsideReachRadius',
+        doorDistanceM: 25,
+      );
 
       final miss = missOf(recorder)!;
       expect(miss['door_distance_m'], 18);
@@ -903,7 +940,10 @@ void main() {
       recorder.recordExitDoorMiss(reason: 'noDoorDistance');
       expect(missOf(recorder)!['reason'], 'noDoorDistance');
 
-      recorder.recordExitDoorMiss(reason: 'outsideReachRadius', doorDistanceM: 30);
+      recorder.recordExitDoorMiss(
+        reason: 'outsideReachRadius',
+        doorDistanceM: 30,
+      );
       expect(missOf(recorder)!['door_distance_m'], 30);
 
       recorder.recordExitDoorMiss(reason: 'noDoorDistance');

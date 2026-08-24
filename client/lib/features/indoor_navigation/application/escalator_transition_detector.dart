@@ -56,6 +56,7 @@ class EscalatorTransitionDetector {
   String? _expectedArrivalNodeId;
   String _boardingEvidence = 'observed';
   int? _armedUntilMs;
+  bool _armBaselineRefreshPending = false;
   int _lastSteps = 0;
 
   /// 방금 확정한 이동의 목적 층. 화면이 그 층을 알려 올 때 "설명되는 층 변경"
@@ -114,6 +115,21 @@ class EscalatorTransitionDetector {
   int? _lastApproachSteps;
   _EscalatorNode? _approachBoarding;
 
+  /// 탑승 배너가 가리킨 경로의 에스컬레이터. 배너 뒤 마커가 다른 레인으로
+  /// 재해석돼도 실제 탑승 후보는 바꾸지 않는다. 취소·하차 때만 비운다.
+  _EscalatorNode? _boardingIntentLock;
+  String? _boardingIntentArrivalLock;
+
+  /// 경로 탑승 후보를 처음 본 시점의 평활 고도. 경로 탑승 시작은 순간 속도가
+  /// 아니라 이 기준에서 실제로 얼마나 이동했는지로 판단한다.
+  double? _routeApproachBaselineM;
+
+  /// 1차 수직 이동이 확인된 순간의 **경로 탑승 후보**. 이 뒤 재탐색이 새 경로를
+  /// 넣어도 실제로 올라선 에스컬레이터의 정체를 바꾸지 않는다.
+  _EscalatorNode? _verticalRouteBoardingLock;
+  String? _verticalRouteArrivalLock;
+  bool _verticalRouteImmediateTransfer = false;
+
   /// 내리자마자 다음 에스컬레이터를 타는 구간인지(안내가 알려 준다). 이때는 걸을
   /// 거리가 없어 오탐 여지도 없으므로 "얼마나 올랐는지"를 기다리지 않는다.
   bool _immediateTransfer = false;
@@ -123,13 +139,14 @@ class EscalatorTransitionDetector {
   int? _verticalMotionSinceMs;
   int _verticalMotionSign = 0;
 
-  /// 지금 걸음을 멈춘 단계가 **노드 허가 없이** 열린 것인지. 하차를 확정할
-  /// 수단이 없으므로, 수직 이동이 멎는 즉시 접어야 한다.
+  /// 지금 걸음을 멈춘 단계가 아직 1.2m 후보 전에 열린 가역 단계인지. 경로
+  /// 후보의 0.5m 누적 변화나 노드 없는 1.2m 변화가 폰 높이 변화였으면 빠르게
+  /// 접고, 정식 후보가 열리면 하차 판정까지 유지한다.
   bool _earlyVerticalMotion = false;
   int? _verticalMotionQuietSinceMs;
 
-  /// 1차 감지 — 수직 속도가 잡혔다. **화면에는 알리지 않는다.** 디버그 칩이
-  /// "왜 아직 탑승으로 안 넘어가는가"를 볼 수 있게만 내놓는다.
+  /// 1차 감지 — 수직 속도가 잡혔다. 경로 탑승 후보가 있으면 세션이 현재 표시
+  /// 위치를 붙들 수 있지만, 아직 배너·걸음 pause·층 전환은 하지 않는다.
   bool _verticalMotionObserved = false;
 
   /// 같은 방향으로 이어지는 동안 빠른 EMA 속도를 적분한 변위(m). 중앙값 delta와
@@ -152,6 +169,9 @@ class EscalatorTransitionDetector {
   /// 1차 감지가 서 있는지 — 수직 속도는 잡혔지만 아직 사용자에게 알리지 않은
   /// 상태. 진단용이다(왜 아직 탑승 단계로 안 넘어가는지 읽는다).
   bool get isVerticalMotionObserved => _verticalMotionObserved;
+  bool get hasRouteVerticalMotionLock =>
+      _verticalMotionObserved && _verticalRouteBoardingLock != null;
+  String? get verticalMotionBoardingNodeId => _verticalRouteBoardingLock?.id;
   bool get hasCandidate => _candidateStartMs != null;
   EscalatorTransition? get pendingTransition => _pendingTransition;
 
@@ -250,6 +270,7 @@ class EscalatorTransitionDetector {
       final wasArmed = _armedUntilMs != null && timestampMs <= _armedUntilMs!;
       _armedUntilMs = timestampMs + config.armHoldMs;
       if (!wasArmed) {
+        _armBaselineRefreshPending = true;
         _pushEvent(
           atMs: timestampMs,
           kind: 'armed',
@@ -270,8 +291,16 @@ class EscalatorTransitionDetector {
     required int timestampMs,
     bool immediateTransfer = false,
   }) {
+    _lastSteps = steps;
+    // 실제 수직 이동이 시작된 뒤에는 마커가 어느 복도에 스냅됐는지로 탑승
+    // 에스컬레이터를 다시 고르지 않는다. 이 시점의 새 경로는 발판 진동으로
+    // 흘러간 위치가 만든 재탐색일 수 있다.
+    if (_verticalRouteBoardingLock != null) return;
+    final intent = _boardingIntentLock;
+    if (intent != null && intent.id != expectedBoardingNodeId) return;
     final approachDistance = (positionM - routeEndM).distance;
     if (approachDistance > config.routeApproachArmRadiusM) {
+      if (_boardingAbandonGraceActive(timestampMs)) return;
       // 허가 반경 밖이면 접근 근거를 버린다. 배너까지 떠 있었다면 함께 접는다 —
       // 안 접으면 탑승점을 지나쳐 걸어간 사용자에게 배너가 타임아웃(40초)까지
       // 남는다.
@@ -285,17 +314,23 @@ class EscalatorTransitionDetector {
       _resetApproach();
       return;
     }
-    _lastSteps = steps;
-    final expected = _escalatorNodes
-        .where(
-          (node) =>
-              node.id == expectedBoardingNodeId &&
-              node.name.role == EscalatorNodeRole.boarding,
-        )
-        .firstOrNull;
+    final expected =
+        intent ??
+        _escalatorNodes
+            .where(
+              (node) =>
+                  node.id == expectedBoardingNodeId &&
+                  node.name.role == EscalatorNodeRole.boarding,
+            )
+            .firstOrNull;
     if (expected == null) return;
-    _expectedBoardingNodeId = expectedBoardingNodeId;
-    _expectedArrivalNodeId = expectedArrivalNodeId;
+    final targetChanged = _expectedBoardingNodeId != expected.id;
+    if (targetChanged) {
+      _routeApproachBaselineM = _lastSmoothedM ?? _fastAltitudeM;
+    }
+    _expectedBoardingNodeId = expected.id;
+    _expectedArrivalNodeId =
+        _boardingIntentArrivalLock ?? expectedArrivalNodeId;
     _approachBoarding = expected;
     _immediateTransfer = immediateTransfer;
     _armedNodes[expected.id] = _ArmedNode(
@@ -303,12 +338,14 @@ class EscalatorTransitionDetector {
       distanceM: approachDistance,
       atMs: timestampMs,
     );
+    final wasArmed = _armedUntilMs != null && timestampMs <= _armedUntilMs!;
     _armedUntilMs = timestampMs + config.armHoldMs;
+    if (!wasArmed) _armBaselineRefreshPending = true;
     _updateBoardingApproach(
       approachDistanceM: approachDistance,
       steps: steps,
       timestampMs: timestampMs,
-      expectedArrivalNodeId: expectedArrivalNodeId,
+      expectedArrivalNodeId: _expectedArrivalNodeId,
       boarding: expected,
     );
   }
@@ -346,6 +383,8 @@ class EscalatorTransitionDetector {
     if (_approachDecreaseUpdates < config.boardingApproachUpdates) return;
     final toFloor = boarding.name.otherFloorLabel;
     if (_floorLabels.isNotEmpty && !_floorLabels.contains(toFloor)) return;
+    _boardingIntentLock = boarding;
+    _boardingIntentArrivalLock = expectedArrivalNodeId;
     _setPhase(
       EscalatorPhase.boardingDetected,
       atMs: timestampMs,
@@ -370,6 +409,7 @@ class EscalatorTransitionDetector {
   void _foldBoardingIfAbandoned(double approachDistanceM, int atMs) {
     if (_verticalMotionObserved) return;
     if (approachDistanceM <= config.boardingAbandonRadiusM) return;
+    if (_boardingAbandonGraceActive(atMs)) return;
     _setPhase(
       EscalatorPhase.cancelled,
       atMs: atMs,
@@ -377,11 +417,20 @@ class EscalatorTransitionDetector {
     );
   }
 
+  bool _boardingAbandonGraceActive(int atMs) {
+    if (_phase != EscalatorPhase.boardingDetected) return false;
+    final since = _phaseEnteredAtMs;
+    return since != null && atMs - since < config.boardingAbandonGraceMs;
+  }
+
   void _resetApproach() {
     _lastApproachDistanceM = null;
     _lastApproachSteps = null;
     _approachDecreaseUpdates = 0;
     _approachBoarding = null;
+    _boardingIntentLock = null;
+    _boardingIntentArrivalLock = null;
+    _routeApproachBaselineM = null;
     _immediateTransfer = false;
   }
 
@@ -404,10 +453,7 @@ class EscalatorTransitionDetector {
         phase == EscalatorPhase.failed ||
         phase == EscalatorPhase.landed) {
       _resetApproach();
-      _verticalMotionSinceMs = null;
-      _verticalMotionSign = 0;
-      _verticalMotionObserved = false;
-      _fastDisplacementM = 0;
+      _clearVerticalObservation();
       _earlyVerticalMotion = false;
       _verticalMotionQuietSinceMs = null;
       _phase = EscalatorPhase.idle;
@@ -459,8 +505,19 @@ class EscalatorTransitionDetector {
     final smoothed = _pushAndSmooth(sample);
     if (smoothed == null) return null;
 
+    if (_routeApproachBaselineM == null && _approachBoarding != null) {
+      _routeApproachBaselineM = smoothed;
+    }
+
     _baselineM ??= smoothed;
     final armed = _refreshArm(sample.timestampMs);
+    if (armed) {
+      _refreshBaselineWhenNewlyArmed(
+        atMs: sample.timestampMs,
+        smoothedM: smoothed,
+        fastSpeedMps: fast.speedMps,
+      );
+    }
     final delta = smoothed - _baselineM!;
 
     if (_candidateStartMs == null && _awaitingPostConfirmQuiet) {
@@ -483,6 +540,26 @@ class EscalatorTransitionDetector {
       fast: fast,
       motion: motion,
     );
+  }
+
+  /// 허가 반경에 처음 들어온 뒤 **평지인 첫 샘플**을 탑승 고도 0점으로 쓴다.
+  ///
+  /// 허가 전에는 기상·앱 재개로 baseline이 몇 m 어긋날 수 있다. 그 상태에서
+  /// 허가가 열리면 baseline 추적이 멈춰 실제 한 층을 오른 뒤에야 후보가 열린다.
+  /// 이미 수직 속도가 난 샘플은 재기준화하지 않아 실제 상승을 지우지 않는다.
+  void _refreshBaselineWhenNewlyArmed({
+    required int atMs,
+    required double smoothedM,
+    required double? fastSpeedMps,
+  }) {
+    if (!_armBaselineRefreshPending || _verticalMotionObserved) return;
+    if (fastSpeedMps != null &&
+        fastSpeedMps.abs() >= config.minVerticalSpeedMps) {
+      return;
+    }
+    _baselineM = smoothedM;
+    _armBaselineRefreshPending = false;
+    _pushEvent(atMs: atMs, kind: 'baseline', reason: 'armedStable');
   }
 
   // ── onAltitude의 단계들 ──
@@ -531,6 +608,8 @@ class EscalatorTransitionDetector {
       _fastExitQuietSinceMs = null;
       _awaitingPostConfirmQuiet = false;
       _postConfirmQuietSinceMs = null;
+      _clearVerticalObservation();
+      _verticalMotionQuietSinceMs = null;
     }
     return timelineGap;
   }
@@ -598,6 +677,7 @@ class EscalatorTransitionDetector {
     if (!armed) {
       _armedNodes.clear();
       _observedBoardingDistances.clear();
+      _armBaselineRefreshPending = false;
     }
     return armed;
   }
@@ -645,6 +725,7 @@ class EscalatorTransitionDetector {
       speed,
       fastStepM: fast.stepM,
       deltaM: delta,
+      smoothedM: smoothed,
       hasMotionEvidence: motion.hadMotionEvidence,
     );
     _expireStalledPhase(
@@ -664,6 +745,7 @@ class EscalatorTransitionDetector {
     _candidateSign = sign;
     _candidateStartSteps = _lastSteps;
     _fastExitQuietSinceMs = null;
+    _earlyVerticalMotion = false;
     _pushEvent(
       atMs: sample.timestampMs,
       kind: 'candidate',
@@ -972,6 +1054,7 @@ class EscalatorTransitionDetector {
     _armedNodes.clear();
     _observedBoardingDistances.clear();
     _armedUntilMs = null;
+    _armBaselineRefreshPending = false;
     _setPhase(
       EscalatorPhase.landed,
       atMs: atMs,
@@ -987,28 +1070,105 @@ class EscalatorTransitionDetector {
     return transition;
   }
 
-  /// 지금 실제로 오르내리는 중인지 갱신한다. **두 겹**이다 — 1차는 조용히
-  /// [isVerticalMotionObserved]만 세우고, 2차에서 비로소 걸음이 멈추고 화면이 덮인다.
-  /// 어느 쪽이든 층은 바꾸지 않는다.
+  /// 지금 실제로 오르내리는 중인지 갱신한다. **두 겹**이다 — 1차는 경로 후보가
+  /// 있을 때 현재 표시 위치와 그 후보의 정체만 잠그고, 2차에서 걸음 pause와
+  /// 탑승 화면을 연다. 어느 쪽이든 층은 바꾸지 않는다.
   void _updateVerticalMotion(
     int atMs,
     double? fastSpeedMps, {
     required double fastStepM,
     required double deltaM,
+    required double smoothedM,
     required bool hasMotionEvidence,
   }) {
+    final routeBoarding =
+        _verticalRouteBoardingLock ?? _boardingIntentLock ?? _approachBoarding;
+    final routeBaselineM = _routeApproachBaselineM;
+    if (routeBoarding != null && routeBaselineM != null) {
+      final routeSign = routeBoarding.name.direction == EscalatorDirection.up
+          ? 1
+          : -1;
+      final routeRiseM = (smoothedM - routeBaselineM) * routeSign;
+      if (routeRiseM >= config.minVisibleRiseM) {
+        _verticalMotionObserved = true;
+        _armBaselineRefreshPending = false;
+        if (_verticalRouteBoardingLock == null) {
+          _verticalRouteBoardingLock = routeBoarding;
+          _verticalRouteArrivalLock =
+              _boardingIntentArrivalLock ??
+              (routeBoarding.id == _expectedBoardingNodeId
+                  ? _expectedArrivalNodeId
+                  : null);
+          _verticalRouteImmediateTransfer = _immediateTransfer;
+          _pushEvent(
+            atMs: atMs,
+            kind: 'verticalObserved',
+            reason: routeSign > 0 ? 'routeRiseDelta' : 'routeFallDelta',
+            group: routeBoarding.name.group,
+          );
+        }
+        final promoted = _promoteAtBoardingPoint(
+          routeBoarding,
+          atMs: atMs,
+          sign: routeSign,
+          direction: routeBoarding.name.direction,
+          risenM: routeRiseM,
+        );
+        if (promoted ||
+            _phase == EscalatorPhase.verticalMotionDetected ||
+            _phase == EscalatorPhase.midpointReached) {
+          // 느린 발판·센서 격자·손의 상하 움직임은 실제 탑승 중에도 속도를
+          // 0으로 만든다. 경로 고도가 0.5m를 넘은 뒤에는 속도로 잠금을 풀지
+          // 않고, 아래에서 탑승 기준 높이까지 실제로 되돌아왔는지만 본다.
+          if (_earlyVerticalMotion) _verticalMotionQuietSinceMs = null;
+          return;
+        }
+      }
+      final routeProvisionalLock =
+          _earlyVerticalMotion &&
+          _verticalRouteBoardingLock != null &&
+          _phase == EscalatorPhase.verticalMotionDetected;
+      if (routeProvisionalLock) {
+        // 폰을 들었다 내린 경우에만 가역 잠금을 접는다. 에스컬레이터 중간의
+        // 짧은 평탄 구간이나 손이 조금 내려간 정도로는 풀리지 않게, 시작 높이의
+        // 절반 문턱 안까지 돌아와 저속이 유지돼야 한다.
+        final speedQuiet =
+            fastSpeedMps == null ||
+            fastSpeedMps.abs() < config.minVerticalSpeedMps;
+        if (routeRiseM <= config.minVisibleRiseM * 0.5 && speedQuiet) {
+          _expireEarlyVerticalMotion(atMs);
+        } else {
+          _verticalMotionQuietSinceMs = null;
+        }
+        return;
+      }
+      // 누적 0.5m가 먼저 오면 위 갈래가 즉시 시작한다. 아직 못 왔더라도 빠른
+      // 수직 속도는 **표시 위치만** 더 일찍 붙드는 보조 신호로 아래에서 쓴다.
+      // 따라서 어느 하나가 다른 하나의 선행 조건이 되지 않는다.
+    }
     if (fastSpeedMps == null ||
         fastSpeedMps.abs() < config.minVerticalSpeedMps) {
-      _verticalMotionSinceMs = null;
-      _verticalMotionSign = 0;
-      _verticalMotionObserved = false;
-      _fastDisplacementM = 0;
+      // 한 샘플의 EMA 흔들림으로 조기 고정이 깜빡이지 않게 짧은 quiet를 둔다.
+      // 강한 단계로 이미 올라갔다면 탑승 노드 ID는 하차 확정까지 보존한다.
+      final strongPhase =
+          _phase == EscalatorPhase.verticalMotionDetected ||
+          _phase == EscalatorPhase.midpointReached;
+      if (!strongPhase && _verticalRouteBoardingLock != null) {
+        final quietSince = _verticalMotionQuietSinceMs ??= atMs;
+        if (atMs - quietSince < config.earlyVerticalQuietMs) return;
+      }
+      _clearVerticalObservation(keepRouteLock: strongPhase);
       _expireEarlyVerticalMotion(atMs);
       return;
     }
     _verticalMotionQuietSinceMs = null;
     final sign = fastSpeedMps > 0 ? 1 : -1;
     if (sign != _verticalMotionSign) {
+      // 방향이 뒤집히면 앞 방향에서 잡은 경로 후보도 더는 유효하지 않다.
+      _verticalMotionObserved = false;
+      _verticalRouteBoardingLock = null;
+      _verticalRouteArrivalLock = null;
+      _verticalRouteImmediateTransfer = false;
       _verticalMotionSign = sign;
       _verticalMotionSinceMs = atMs;
       _fastDisplacementM = fastStepM;
@@ -1022,15 +1182,36 @@ class EscalatorTransitionDetector {
     final direction = sign > 0
         ? EscalatorDirection.up
         : EscalatorDirection.down;
-    // 여기까지가 **1차 감지**다. 화면에는 아무것도 알리지 않고, 걸음도 그대로
-    // 흐른다. 아래 두 갈래 중 하나가 성립해야 2차로 올라간다.
+    // 여기까지가 **1차 감지**다. 경로 후보가 있으면 현재 표시 위치만 붙들고,
+    // 걸음 pause·배너는 아래 두 갈래 중 하나가 성립하는 2차까지 미룬다.
     _verticalMotionObserved = true;
+    _armBaselineRefreshPending = false;
+    final speedRouteBoarding = _approachBoarding;
+    if (_verticalRouteBoardingLock == null &&
+        speedRouteBoarding != null &&
+        speedRouteBoarding.name.direction == direction) {
+      _verticalRouteBoardingLock = speedRouteBoarding;
+      _verticalRouteArrivalLock =
+          speedRouteBoarding.id == _expectedBoardingNodeId
+          ? _expectedArrivalNodeId
+          : null;
+      _verticalRouteImmediateTransfer = _immediateTransfer;
+      _pushEvent(
+        atMs: atMs,
+        kind: 'verticalObserved',
+        reason: sign > 0 ? 'routeRising' : 'routeFalling',
+        group: speedRouteBoarding.name.group,
+      );
+    }
     // 중앙값 delta와 빠른 EMA 적분 중 **먼저 문턱을 넘는 쪽**을 쓴다. 둘은 같은
     // 것을 재지만 중앙값이 1초 넘게 늦고, 그 1초가 곧 발판 진동이 위치에 쌓이는
     // 시간이다.
     final risenM = math.max(deltaM.abs(), _fastDisplacementM.abs());
 
-    final boarding = _approachBoarding ?? _pickBoardingNode(direction);
+    final boarding =
+        _verticalRouteBoardingLock ??
+        _approachBoarding ??
+        _pickBoardingNode(direction);
     if (_promoteAtBoardingPoint(
       boarding,
       atMs: atMs,
@@ -1065,17 +1246,22 @@ class EscalatorTransitionDetector {
         _observedBoardingDistances[boarding.id] ??
         _armedNodes[boarding.id]?.distanceM;
     final atBoardingPoint =
+        _verticalRouteBoardingLock != null ||
         _approachBoarding != null ||
         (distanceM != null && distanceM <= config.boardingApproachRadiusM);
     // 연속 환승(내리자마자 바로 다음 에스컬레이터)에서는 최소 변화를 요구하지
     // 않는다. 걸어갈 거리가 없어 오탐 여지도 없고, 기다리면 환승마다 마커가
     // 먼저 몇 걸음 흘러간다.
-    final requiredRiseM = _immediateTransfer && _approachBoarding != null
-        ? 0.0
-        : config.minVisibleRiseM;
+    final immediateRouteTransfer = _verticalRouteBoardingLock != null
+        ? _verticalRouteImmediateTransfer
+        : _immediateTransfer && _approachBoarding != null;
+    final requiredRiseM = immediateRouteTransfer ? 0.0 : config.minVisibleRiseM;
     if (!atBoardingPoint || risenM < requiredRiseM) return false;
 
-    _earlyVerticalMotion = false;
+    // 아직 1.2m 후보가 열리기 전이면 폰을 한 번 들어 올린 것일 수 있다.
+    // 경로 후보는 시작 고도까지 되돌아오면, 노드 없는 후보는 수직 속도가
+    // 멎으면 [_expireEarlyVerticalMotion]이 되돌린다.
+    _earlyVerticalMotion = _candidateStartMs == null;
     _setPhase(
       EscalatorPhase.verticalMotionDetected,
       atMs: atMs,
@@ -1084,9 +1270,7 @@ class EscalatorTransitionDetector {
       group: boarding.name.group,
       direction: direction,
       boardingNodeId: boarding.id,
-      expectedArrivalNodeId: boarding.id == _expectedBoardingNodeId
-          ? _expectedArrivalNodeId
-          : null,
+      expectedArrivalNodeId: _expectedArrivalFor(boarding),
     );
     return true;
   }
@@ -1125,8 +1309,8 @@ class EscalatorTransitionDetector {
     );
   }
 
-  /// 노드 없이 열린 단계를 수직 이동이 멎으면 접는다. 하차를 확정할 수단이 없어
-  /// 그대로 두면 40초 동안 걸음이 멈춘 채 화면이 덮여 있다.
+  /// 정식 후보 전에 열린 가역 단계를 접는다. 호출자는 경로 후보라면 시작 고도
+  /// 근처로 복귀했는지, 노드 없는 후보라면 수직 이동이 멎었는지를 먼저 확인한다.
   void _expireEarlyVerticalMotion(int atMs) {
     if (!_earlyVerticalMotion) return;
     if (_phase != EscalatorPhase.verticalMotionDetected) return;
@@ -1160,15 +1344,13 @@ class EscalatorTransitionDetector {
     return null;
   }
 
-  /// 배너·pause 단계가 근거 없이 오래 머물면 되돌린다.
+  /// 약한 탑승 배너가 근거 없이 오래 머물면 되돌린다.
   ///
   /// 이 경로가 없으면 탑승점에 다가갔다가 그냥 지나친 사용자에게 배너가 영영
-  /// 남고, `verticalMotionDetected`로 멈춘 걸음이 다시 켜지지 않는다.
+  /// 남는다. 반면 `verticalMotionDetected`는 이미 실제 수직 변위를 확인한 강한
+  /// 단계라 시간만으로 접지 않는다. 그 단계는 후보 실패·하차·층 변경이 끝낸다.
   void _expireStalledPhase(int atMs, {required String reason}) {
-    if (_phase != EscalatorPhase.boardingDetected &&
-        _phase != EscalatorPhase.verticalMotionDetected) {
-      return;
-    }
+    if (_phase != EscalatorPhase.boardingDetected) return;
     final since = _phaseEnteredAtMs;
     if (since == null || atMs - since < config.boardingPhaseTimeoutMs) return;
     _setPhase(EscalatorPhase.cancelled, atMs: atMs, reason: reason);
@@ -1194,9 +1376,7 @@ class EscalatorTransitionDetector {
     boardingNodeName: boarding.rawName,
     boardingDistanceM: _armedNodes[boarding.id]?.distanceM ?? double.nan,
     boardingEvidence: _boardingEvidence,
-    expectedArrivalNodeId: boarding.id == _expectedBoardingNodeId
-        ? _expectedArrivalNodeId
-        : null,
+    expectedArrivalNodeId: _expectedArrivalFor(boarding),
   );
 
   /// 허가된 탑승 노드 중 방향이 맞는 가장 가까운 노드를 고른다. 활성 경로의
@@ -1205,6 +1385,13 @@ class EscalatorTransitionDetector {
   /// 반대 방향 레인을 선택하지 않는다.
   _EscalatorNode? _pickBoardingNode(EscalatorDirection direction) {
     _boardingEvidence = 'observed';
+    final locked = _verticalRouteBoardingLock;
+    if (locked != null && locked.name.direction == direction) {
+      _boardingEvidence = _observedBoardingDistances.containsKey(locked.id)
+          ? 'routeAndObserved'
+          : 'routeExpected';
+      return locked;
+    }
     final candidates = <(_EscalatorNode, double)>[];
     for (final armed in _armedNodes.values) {
       final node = _escalatorNodes
@@ -1236,6 +1423,28 @@ class EscalatorTransitionDetector {
     observedCandidates.sort((a, b) => a.$2.compareTo(b.$2));
     if (observedCandidates.isNotEmpty) return observedCandidates.first.$1;
     return null;
+  }
+
+  String? _expectedArrivalFor(_EscalatorNode boarding) {
+    final locked = _verticalRouteBoardingLock;
+    if (locked != null && boarding.id == locked.id) {
+      return _verticalRouteArrivalLock;
+    }
+    return boarding.id == _expectedBoardingNodeId
+        ? _expectedArrivalNodeId
+        : null;
+  }
+
+  void _clearVerticalObservation({bool keepRouteLock = false}) {
+    _verticalMotionSinceMs = null;
+    _verticalMotionSign = 0;
+    _verticalMotionObserved = false;
+    _fastDisplacementM = 0;
+    if (!keepRouteLock) {
+      _verticalRouteBoardingLock = null;
+      _verticalRouteArrivalLock = null;
+      _verticalRouteImmediateTransfer = false;
+    }
   }
 
   /// 빠른 EMA의 수직 속도(m/s). 직전 샘플이 아니라
@@ -1367,6 +1576,7 @@ class EscalatorTransitionDetector {
     _expectedBoardingNodeId = null;
     _expectedArrivalNodeId = null;
     _armedUntilMs = null;
+    _armBaselineRefreshPending = false;
     _candidateStartMs = null;
     _candidateSign = 0;
     _candidateBoarding = null;
@@ -1396,10 +1606,7 @@ class EscalatorTransitionDetector {
     _phase = EscalatorPhase.idle;
     _phaseEnteredAtMs = null;
     _resetApproach();
-    _verticalMotionSinceMs = null;
-    _verticalMotionSign = 0;
-    _verticalMotionObserved = false;
-    _fastDisplacementM = 0;
+    _clearVerticalObservation();
     _earlyVerticalMotion = false;
     _verticalMotionQuietSinceMs = null;
   }

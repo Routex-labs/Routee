@@ -39,6 +39,14 @@ FloorGraph _graphFor3F() => FloorGraph(
   edges: const [],
 );
 
+FloorGraph _twoUpBoardingsGraph() => FloorGraph(
+  nodes: [
+    _escalator('route-up', 'ES1-UP(TO3F)', 0, 0),
+    _escalator('other-up', 'ES2-UP(TO3F)', 8, 0),
+  ],
+  edges: const [],
+);
+
 class _Fixture {
   _Fixture({
     FloorGraph? graph,
@@ -304,6 +312,26 @@ void main() {
   });
 
   group('센서 주기 (실측 회귀)', () {
+    test('허가 진입 시 평지 샘플로 오래된 baseline을 다시 잡는다', () {
+      final fixture = _Fixture();
+      fixture.hold(atM: 4, seconds: 5);
+      // 허가 밖에서 절대 고도가 크게 변했지만 느린 drift 추적만으로는 아직
+      // 옛 0점이 남아 있다. 2026-08-24 실측은 이 차이가 3.35m였다.
+      fixture.hold(atM: 0, seconds: 5);
+      expect(fixture.detector.baselineM, greaterThan(2));
+
+      fixture.approachBoarding(remainingM: const [12]);
+      fixture.hold(atM: 0, seconds: 2);
+
+      expect(fixture.detector.deltaM, closeTo(0, 0.15));
+      fixture.ramp(fromM: 0, toM: 1.0, seconds: 4, rawPeaksPerSample: 2);
+      expect(
+        fixture.phasesOf(),
+        contains(EscalatorPhase.verticalMotionDetected),
+        reason: '옛 baseline 3m를 먼저 메우느라 실제 탑승 감지가 늦어지면 안 된다',
+      );
+    });
+
     test('iOS 1069ms 간격에서도 평활값이 나오고 확정된다', () {
       // 실측 로그(2026-07-30, iPhone 13 Pro)에서 CMAltimeter 간격은 1069ms였다.
       // 평활 창이 2000ms일 때는 창 안에 항상 2개만 들어와 최소 샘플 수를
@@ -610,11 +638,21 @@ void main() {
       );
     });
 
-    test('탑승점에서 분명히 멀어지면 배너 단계를 되돌린다', () {
+    test('탑승 직후에는 멀어져도 기압이 이어받을 시간을 준다', () {
       final fixture = _Fixture();
       fixture.hold(atM: 0, seconds: 5);
       fixture.approachBoarding(remainingM: const [12, 8, 4, 2]);
       fixture.approachBoarding(remainingM: const [6, 10]);
+
+      expect(fixture.phasesOf(), isNot(contains(EscalatorPhase.cancelled)));
+    });
+
+    test('수직 근거 없이 보호시간 뒤에도 멀어지면 배너 단계를 되돌린다', () {
+      final fixture = _Fixture();
+      fixture.hold(atM: 0, seconds: 5);
+      fixture.approachBoarding(remainingM: const [12, 8, 4, 2]);
+      fixture.hold(atM: 0, seconds: 16);
+      fixture.approachBoarding(remainingM: const [10]);
 
       expect(fixture.phasesOf(), contains(EscalatorPhase.cancelled));
     });
@@ -657,6 +695,7 @@ void main() {
       final fixture = _Fixture();
       fixture.hold(atM: 0, seconds: 5);
       fixture.approachBoarding(remainingM: const [12, 8, 4, 2]);
+      fixture.hold(atM: 0, seconds: 16);
       fixture.approachBoarding(remainingM: const [20]);
 
       expect(fixture.phasesOf(), contains(EscalatorPhase.cancelled));
@@ -793,6 +832,70 @@ void main() {
       );
     });
 
+    test('속도가 중간에 끊겨도 누적 고도가 0.5m를 넘으면 탑승을 시작한다', () {
+      final fixture = _Fixture();
+      fixture.hold(atM: 0, seconds: 5);
+      fixture.approachBoarding(remainingM: const [3, 2]);
+
+      // 걷거나 센서 격자에 걸려 매 상승 샘플 사이에 평평한 샘플이 끼는 모양.
+      // 연속 속도 조건으로는 매번 초기화되지만 실제 높이는 계속 누적된다.
+      for (final altitude in const [0.3, 0.3, 0.6, 0.6]) {
+        fixture.nowMs += fixture.sampleIntervalMs;
+        fixture.feed(altitude);
+      }
+
+      final change = fixture.phases.firstWhere(
+        (item) => item.phase == EscalatorPhase.verticalMotionDetected,
+      );
+      expect(change.reason, 'rising');
+      expect(change.boardingNodeId, 'n-up-to3f');
+    });
+
+    test('0.5m 뒤 속도가 평평해져도 탑승 잠금을 유지한다', () {
+      final fixture = _Fixture();
+      fixture.hold(atM: 0, seconds: 5);
+      fixture.approachBoarding(remainingM: const [3, 2]);
+      for (final altitude in const [0.3, 0.3, 0.6, 0.6, 0.6, 0.6]) {
+        fixture.nowMs += fixture.sampleIntervalMs;
+        fixture.feed(altitude);
+      }
+
+      expect(
+        fixture.phasesOf(),
+        contains(EscalatorPhase.verticalMotionDetected),
+      );
+      expect(fixture.phasesOf(), isNot(contains(EscalatorPhase.cancelled)));
+      expect(fixture.detector.phase, EscalatorPhase.verticalMotionDetected);
+    });
+
+    test('0.5m 폰 들기 뒤 시작 고도로 돌아와 멈추면 잠금을 되돌린다', () {
+      final fixture = _Fixture();
+      fixture.hold(atM: 0, seconds: 5);
+      fixture.approachBoarding(remainingM: const [3, 2]);
+      for (final altitude in const [0.3, 0.3, 0.6, 0.6]) {
+        fixture.nowMs += fixture.sampleIntervalMs;
+        fixture.feed(altitude);
+      }
+      expect(
+        fixture.phasesOf(),
+        contains(EscalatorPhase.verticalMotionDetected),
+      );
+
+      for (final altitude in const [0.3, 0.1, 0.0, 0.0, 0.0, 0.0]) {
+        fixture.nowMs += fixture.sampleIntervalMs;
+        fixture.feed(altitude);
+      }
+
+      expect(
+        fixture.phasesOf(),
+        containsAllInOrder([
+          EscalatorPhase.verticalMotionDetected,
+          EscalatorPhase.cancelled,
+        ]),
+      );
+      expect(fixture.detector.phase, EscalatorPhase.idle);
+    });
+
     test('연속 환승이면 최소 변화를 기다리지 않는다', () {
       // 내리자마자 두어 걸음 옆의 다음 에스컬레이터를 타는 구간. 걸어갈 거리가
       // 없으니 기다릴 이유가 없고, 기다리면 환승마다 마커가 먼저 흘러간다.
@@ -845,6 +948,69 @@ void main() {
         lessThan(1.2),
         reason: '누적 고도 갈래가 아니라 경로 지목으로 걸렸다',
       );
+    });
+
+    test('1차 수직 이동 뒤 새 경로가 들어와도 처음 탑승 후보를 바꾸지 않는다', () {
+      final fixture = _Fixture(graph: _twoUpBoardingsGraph());
+      fixture.hold(atM: 0, seconds: 5);
+      fixture.approachBoarding(
+        remainingM: const [8],
+        boardingNodeId: 'route-up',
+        arrivalNodeId: 'route-arrive',
+      );
+
+      // 1차 수직 속도는 확인되지만 강한 고정 문턱(0.5m)에는 못 미친다.
+      fixture.ramp(fromM: 0, toM: 0.45, seconds: 3, rawPeaksPerSample: 2);
+      expect(fixture.detector.isVerticalMotionObserved, isTrue);
+      expect(
+        fixture.phasesOf(),
+        isNot(contains(EscalatorPhase.verticalMotionDetected)),
+      );
+
+      // 그 사이 마커가 직진 가설로 흘러 반대편 에스컬레이터 경로가 들어온 모양.
+      fixture.approachBoarding(
+        remainingM: const [2],
+        routeEnd: const PdrLocalPoint(8, 0),
+        boardingNodeId: 'other-up',
+        arrivalNodeId: 'other-arrive',
+      );
+      fixture.ramp(fromM: 0.45, toM: 1.0, seconds: 3, rawPeaksPerSample: 2);
+
+      final change = fixture.phases.firstWhere(
+        (item) => item.phase == EscalatorPhase.verticalMotionDetected,
+      );
+      expect(change.boardingNodeId, 'route-up');
+      expect(change.expectedArrivalNodeId, 'route-arrive');
+    });
+
+    test('탑승 배너 뒤 새 경로가 들어와도 처음 지목한 레인을 유지한다', () {
+      final fixture = _Fixture(graph: _twoUpBoardingsGraph());
+      fixture.hold(atM: 0, seconds: 5);
+      fixture.approachBoarding(
+        remainingM: const [4, 3, 2],
+        boardingNodeId: 'route-up',
+        arrivalNodeId: 'route-arrive',
+      );
+      expect(fixture.phasesOf(), contains(EscalatorPhase.boardingDetected));
+
+      // 탑승 뒤 흘러간 마커가 반대 레인 경로를 만들었더라도 배너가 이미 가리킨
+      // 탑승 의도를 바꾸지 않는다.
+      fixture.approachBoarding(
+        remainingM: const [2],
+        routeEnd: const PdrLocalPoint(8, 0),
+        boardingNodeId: 'other-up',
+        arrivalNodeId: 'other-arrive',
+      );
+      for (final altitude in const [0.3, 0.3, 0.6, 0.6]) {
+        fixture.nowMs += fixture.sampleIntervalMs;
+        fixture.feed(altitude);
+      }
+
+      final change = fixture.phases.firstWhere(
+        (item) => item.phase == EscalatorPhase.verticalMotionDetected,
+      );
+      expect(change.boardingNodeId, 'route-up');
+      expect(change.expectedArrivalNodeId, 'route-arrive');
     });
   });
 

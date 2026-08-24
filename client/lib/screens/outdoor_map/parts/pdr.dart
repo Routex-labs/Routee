@@ -180,10 +180,12 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
   /// 아직 없는 동안에는 [_indoorGapGpsPoint]를 **흐리게** 그린다. 셋 중 무엇을
   /// 고르는지는 [indoorMarkerAt] 하나가 정한다 — 소스가 하나뿐이라 화면 위의
   /// 점도 항상 하나다.
-  Future<void> _syncPdrCurrentLayer() {
-    final revision = ++_pdrMarkerRevision;
+  Future<void> _syncPdrCurrentLayer({bool snap = false}) {
     final controller = _mapController;
-    if (controller == null || !_styleReady) return Future<void>.value();
+    if (controller == null || !_styleReady) {
+      _pdrMarkerRevision++;
+      return Future<void>.value();
+    }
 
     if (!_indoorLocationVisible) _lastIndoorMarker = null;
     final here = _indoorLocationVisible ? _pdrCurrentWgs84() : null;
@@ -200,10 +202,45 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     // GPS라, 지금 어디를 보고 있는지는 모른다 — 삼각형을 그리면 모르는 것을
     // 아는 척한다.
     final heading = here == null ? null : _pdrCurrentHeadingDeg;
+
+    final kind = marker == null
+        ? _MarkerGlideKind.none
+        : (marker.offFloor ? _MarkerGlideKind.dimmed : _MarkerGlideKind.here);
+    // 활강 중에는 잇지 않는다. 진행률이 이미 프레임마다 흐르고 있어서
+    // ([_startEscalatorGlide]), 여기서 한 번 더 이으면 두 겹이 되어 마커가
+    // 하차 노드에 늦게 닿는다 — 도면은 새 층인데 점은 아직 오는 중이 된다.
+    // 스타일·도면이 갈아 끼워지는 자리는 모두 snap으로 들어온다. 그때는 소스가
+    // 새로 만들어졌을 수 있으므로, 같은 값이라도 한 번은 다시 써야 한다.
+    if (snap) _lastWrittenMarker = null;
+    final teleport =
+        snap || _escalatorGlide != null || kind != _markerGlideKind;
+    _markerGlideKind = kind;
+    _markerGlide.aimAt(marker?.point, headingDeg: heading, snap: teleport);
+    _syncMarkerGlideTicker();
+    return _writePdrMarkerSource(controller);
+  }
+
+  /// 보간기가 지금 그리라는 자리를 지도 소스에 쓴다.
+  ///
+  /// 목표를 새로 받았을 때와 보간 틱마다 같은 함수로 들어온다 — 두 벌로 두면
+  /// 흐린 마커의 opacity나 방향 유무가 한쪽에서만 바뀐다.
+  Future<void> _writePdrMarkerSource(MapLibreMapController controller) {
+    final drawn = (
+      point: _markerGlide.point,
+      headingDeg: _markerGlide.headingDeg,
+      offFloor: _markerGlideKind == _MarkerGlideKind.dimmed,
+    );
+    // **같은 그림이면 안 쓴다.** 좌표가 바뀌는 것은 걸음마다지만 스냅샷은 그보다
+    // 자주 오므로, 대부분의 호출이 직전과 똑같은 좌표를 다시 인코딩해 채널로
+    // 보내고 있었다. 그 몫이 카메라 명령을 밀어낸다.
+    if (drawn == _lastWrittenMarker) return Future<void>.value();
+    _lastWrittenMarker = drawn;
+
+    final revision = ++_pdrMarkerRevision;
     final data = pdrLocationData(
-      marker?.point,
-      headingDeg: heading,
-      offFloor: marker?.offFloor ?? false,
+      drawn.point,
+      headingDeg: drawn.headingDeg,
+      offFloor: drawn.offFloor,
     );
 
     final previous = _pdrMarkerWriteQueue;
@@ -228,6 +265,59 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
       }
     }();
     return _pdrMarkerWriteQueue;
+  }
+
+  /// 보간 틱을 켜고 끈다. **마커와 팔로우 카메라가 같은 틱을 탄다** — 둘이
+  /// 따로 돌면 점과 화면이 서로 다른 프레임에서 움직여 어긋나 보인다.
+  ///
+  /// 둘 다 목표에 붙으면 끈다 — 서 있는 동안까지 초당 서른 번 네이티브를 부를
+  /// 이유가 없다. 다음 목표가 오면 [_syncPdrCurrentLayer]나
+  /// [_moveFollowCamera]가 다시 켠다.
+  void _syncMarkerGlideTicker() {
+    if (_markerGlide.isSettled && !_followCameraNeedsFrame) {
+      _stopMarkerGlideTicker();
+      return;
+    }
+    if (_markerGlideTicker != null) return;
+    _markerGlideTickAt = Duration.zero;
+    _markerSourceWriteAt = Duration.zero;
+    _markerGlideTicker = createTicker(_onMarkerGlideFrame)..start();
+  }
+
+  /// 프레임 하나. [total]은 틱이 시작된 뒤의 **누적** 경과라 직전 값과 뺀다.
+  void _onMarkerGlideFrame(Duration total) {
+    final controller = _mapController;
+    if (!mounted || controller == null || !_styleReady) {
+      _stopMarkerGlideTicker();
+      return;
+    }
+    final elapsed = total - _markerGlideTickAt;
+    _markerGlideTickAt = total;
+    if (elapsed <= Duration.zero) return;
+
+    final moved = _markerGlide.advance(elapsed);
+    // **마커 소스는 프레임마다 쓰지 않는다.** 카메라 명령은 좌표 몇 개지만 마커
+    // 쓰기는 GeoJSON 인코딩과 네이티브 파싱까지 딸려 있어, 둘을 매 프레임 같이
+    // 보내면 채널이 차서 카메라가 밀린다 — 회전이 계단으로 보이던 몫이다.
+    // 팔로우 중 마커는 화면의 같은 자리에 붙어 있고, 이 간격 동안 도면과
+    // 어긋나는 거리는 1.4m/s에서 4cm(zoom 19에서 1px 남짓)라 눈에 안 띈다.
+    if (moved &&
+        (_markerGlide.isSettled ||
+            total - _markerSourceWriteAt >= markerSourceWriteInterval)) {
+      _markerSourceWriteAt = total;
+      unawaited(_writePdrMarkerSource(controller));
+    }
+    // 마커를 옮긴 **뒤에** 카메라를 잡는다. 카메라 목표점이 방금 옮긴 자리라,
+    // 순서를 뒤집으면 화면이 한 프레임 지난 자리를 가운데 둔다.
+    _driveFollowCamera(controller, elapsed);
+    if (_markerGlide.isSettled && !_followCameraNeedsFrame) {
+      _stopMarkerGlideTicker();
+    }
+  }
+
+  void _stopMarkerGlideTicker() {
+    _markerGlideTicker?.dispose();
+    _markerGlideTicker = null;
   }
 
   /// **다른 층에 서 있을 때** 흐리게 그릴 자리. 그릴 근거가 없으면 null.
@@ -315,25 +405,38 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
         .toList(growable: false);
   }
 
-  /// confirmed 경로를 통행 간선에 스냅한 결과. 단순 스냅 점을 직선으로 잇지
-  /// 않고 간선이 바뀌는 구간은 그래프 경로로 펼친다(matchRoutedPath).
-  List<PdrLocalPoint> get _pdrMatchedFloorPath {
-    final graph = _floorGraph;
-    final confirmed = _pdrConfirmedFloorPath;
-    if (graph == null || confirmed.isEmpty) return const [];
-    return FloorMapMatcher(graph).matchRoutedPath(confirmed);
+  /// 실제 마커가 쓴 복도 tracker의 확정 궤적. 대표 가설 교체로 끊긴 구간은
+  /// 서로 직선으로 잇지 않고 별도 선분으로 유지한다.
+  List<List<PdrLocalPoint>> get _pdrCorrectedFloorPaths {
+    final floor = _activeFloor;
+    final result = _guidance.trackingResult;
+    if (floor == null || _guidance.floorId != floor || result == null) {
+      return const [];
+    }
+    final recorded = _guidanceTrailSession.segmentsForFloor(floor);
+    if (recorded.isNotEmpty) return recorded;
+    return [result.correctedPath];
+  }
+
+  /// 확정 전 주황 걸음을 복도 tracker가 해석한 임시 꼬리.
+  List<PdrLocalPoint> get _pdrCorrectedPreviewFloorPath {
+    final result = _guidance.trackingResult;
+    if (_guidance.floorId != _activeFloor || result == null) return const [];
+    return result.previewPath;
   }
 
   /// PDR이 올라타 있다고 판정된 간선들. 세션 시작 직후 원점 하나만 투영돼
   /// 아직 걷지도 않은 간선이 강조되는 것을 막으려고 실제 이동이 생긴 뒤에만
   /// 채운다.
   Set<String> get _pdrMatchedEdgeIds {
-    final graph = _floorGraph;
-    final confirmed = _pdrConfirmedFloorPath;
-    if (graph == null || !_hasMeaningfulPdrMovement(confirmed)) return const {};
-    return FloorMapMatcher(
-      graph,
-    ).matchPath(confirmed).map((point) => point.edgeId).toSet();
+    if (!_hasMeaningfulPdrMovement(_pdrRawFloorPath)) return const {};
+    final result = _guidance.trackingResult;
+    if (result == null) return const {};
+    return {
+      ?result.currentEdgeId,
+      ?result.optimisticEdgeId,
+      ...result.previewCandidateEdgeIds,
+    };
   }
 
   /// 세션 시작 직후에는 원점 한 개만 가장 가까운 간선에 투영되면서, 아직 걷지도
@@ -382,8 +485,14 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
       confirmedPath: on && debug.showConfirmedPdrPath
           ? _floorPathToWgs84(_pdrConfirmedFloorPath)
           : const [],
-      matchedPath: on && debug.showMapMatchedPdrPath
-          ? _floorPathToWgs84(_pdrMatchedFloorPath)
+      correctedPaths: on && debug.showMapMatchedPdrPath
+          ? [
+              for (final path in _pdrCorrectedFloorPaths)
+                _floorPathToWgs84(path),
+            ]
+          : const [],
+      correctedPreviewPath: on && debug.showMapMatchedPdrPath
+          ? _floorPathToWgs84(_pdrCorrectedPreviewFloorPath)
           : const [],
     );
   }
@@ -392,28 +501,51 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
   /// 아직 못 얻은 상태(예: 자북 못 잡음 + 수동 방향 보정 아직 안 함, 첫 걸음
   /// 전)에는 null을 돌려주고, 이 경우 마커도 방향 삼각형 없이 도트만 뜬다.
   /// 계산식은 실내와 동일하며 walkOffset·복도 bias를 섞지 않는다.
-  double? get _pdrCurrentHeadingDeg {
-    final snapshot = _pdrTrailState.snapshot;
-    final anchor = _pdrTrailState.anchor;
-    if (snapshot == null || anchor == null || !snapshot.hasHeading) return null;
-    final transform = FloorCoordinateTransform(anchor);
-    final orientationFloorHeading = transform.toFloorBearing(
-      snapshot.orientationHeadingDeg,
-    );
-    return transform.floorBearingToMapBearing(orientationFloorHeading);
-  }
+  double? get _pdrCurrentHeadingDeg => _mapBearingOf(
+    _liveHeading?.orientationDeg ??
+        _pdrTrailState.snapshot?.orientationHeadingDeg,
+  );
 
   /// 실제로 걸어가고 있는 방향(true north 기준). [_pdrCurrentHeadingDeg]와 **같은
   /// 변환**을 지나야 두 각을 섞을 수 있다 — 한쪽만 층 좌표계에 있으면 도면이
   /// 돌아간 건물에서 섞은 결과가 엉뚱한 데를 가리킨다.
-  double? get _pdrWalkingHeadingDeg {
-    final snapshot = _pdrTrailState.snapshot;
+  double? get _pdrWalkingHeadingDeg => _mapBearingOf(
+    _liveHeading?.walkingDeg ?? _pdrTrailState.snapshot?.walkingHeadingDeg,
+  );
+
+  /// 세션 좌표계의 각을 지도 bearing(진북 기준)으로 옮긴다. 앵커가 없거나
+  /// 방향이 아직 자리를 못 잡았으면 null — 그때는 삼각형도 카메라도 돌리지
+  /// 않는다.
+  ///
+  /// 두 heading이 **같은 변환**을 지나야 섞을 수 있다([blendedFollowBearingDeg]).
+  /// 한쪽만 층 좌표계에 있으면 도면이 돌아간 건물에서 섞은 결과가 엉뚱한 데를
+  /// 가리킨다.
+  double? _mapBearingOf(double? sessionDeg) {
     final anchor = _pdrTrailState.anchor;
-    if (snapshot == null || anchor == null || !snapshot.hasHeading) return null;
+    final hasHeading =
+        _liveHeading?.converged ?? _pdrTrailState.snapshot?.hasHeading ?? false;
+    if (sessionDeg == null || anchor == null || !hasHeading) return null;
     final transform = FloorCoordinateTransform(anchor);
     return transform.floorBearingToMapBearing(
-      transform.toFloorBearing(snapshot.walkingHeadingDeg),
+      transform.toFloorBearing(sessionDeg),
     );
+  }
+
+  /// native motion 주기(≈33Hz)로 오는 방향. **카메라와 삼각형만** 이걸 본다.
+  ///
+  /// 스냅샷은 초당 두어 번이라, 그 주기로 목표각을 갈면 한 번에 수십 도가
+  /// 도착해 화면이 확 돌고 멈추기를 반복한다. 위치·층 판정은 그대로 스냅샷이
+  /// 단일 출처다([PdrHeadingSample]).
+  void _onPdrHeading(PdrHeadingSample sample) {
+    if (!mounted || !_indoorEntered) return;
+    _liveHeading = sample;
+    // 삼각형과 카메라가 **같은 틱에** 같은 값을 받는다. 한쪽만 촘촘하면 코너에서
+    // 삼각형이 앞질렀다 되돌아온다.
+    if (_markerGlideKind == _MarkerGlideKind.here) {
+      _markerGlide.aimHeadingAt(_pdrCurrentHeadingDeg);
+    }
+    _aimFollowCamera();
+    _syncMarkerGlideTicker();
   }
 
   /// 실내 안내 카메라가 지금 사용자를 따라가도 되는 상태인지.
@@ -458,58 +590,127 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     if (until > _followCameraNextMoveAtMs) _followCameraNextMoveAtMs = until;
   }
 
-  /// 사용자를 따라 카메라를 옮긴다. 매 스냅샷마다 부르되 실제로 명령이 나가는
-  /// 것은 최소 간격·데드밴드를 지난 틱뿐이다(판정은 [nextFollowCameraBearingDeg]).
+  /// 사용자를 따라갈 **목표**를 잡는다. 카메라를 직접 돌리지는 않는다 —
+  /// 프레임 루프([_driveFollowCamera])가 이 목표를 이어서 따라간다.
+  ///
+  /// 데드밴드에 걸리면 목표를 그대로 두므로([nextFollowCameraBearingDeg]) 서 있는
+  /// 동안 나침반이 흔들려도 화면은 돌지 않는다.
   ///
   /// bearing은 **나침반 각을 그대로** 쓴다. MapLibre 카메라 bearing은 진북
   /// 기준이라 층 좌표계로 옮기면 안 된다 — [_pdrCurrentHeadingDeg]가 이미
   /// 진북으로 되돌려 주고, 마커 화살표도 같은 값을 본다.
-  Future<void> _moveFollowCamera(PdrSnapshot snapshot) async {
+  void _moveFollowCamera(PdrSnapshot snapshot) {
     _recordFollowCameraSteps(snapshot);
+    _aimFollowCamera();
+  }
+
+  /// 카메라가 **가려는** 각을 다시 잡는다. 스냅샷(위치가 바뀐 순간)과 방향
+  /// 스트림(≈33Hz) 양쪽에서 들어온다.
+  ///
+  /// **여기서 거르지 않는다.** 예전에는 데드밴드로 목표를 붙들어 뒀는데, 그러면
+  /// 목표가 8°씩 계단으로 뛰고 그 계단이 그대로 회전에 보였다. 흔들림을 거르는
+  /// 몫은 그리는 쪽 데드존으로 옮겼다([glidedFollowBearingDeg]).
+  void _aimFollowCamera() {
     if (!_indoorFollowActive) return;
-    final controller = _mapController;
-    if (controller == null || !_styleReady) return;
-    final here = _pdrCurrentWgs84();
+    if (_mapController == null || !_styleReady) return;
     final orientation = _pdrCurrentHeadingDeg;
-    if (here == null || orientation == null) return;
+    if (orientation == null) return;
 
     final nowMs = DateTime.now().millisecondsSinceEpoch;
-    final last = _followCameraTarget;
-    final bearing = nextFollowCameraBearingDeg(
-      nowMs: nowMs,
-      notBeforeMs: _followCameraNextMoveAtMs,
-      lastBearingDeg: _followCameraBearingDeg,
-      targetMoved:
-          last == null ||
-          last.latitude != here.latitude ||
-          last.longitude != here.longitude,
-      desiredBearingDeg: blendedFollowBearingDeg(
-        orientationHeadingDeg: orientation,
-        walkingHeadingDeg: _pdrWalkingHeadingDeg,
-        walking:
-            nowMs - _followCameraLastStepAtMs < followCameraWalkingStepWindowMs,
-        walkingPullWeight: followCameraWalkingPullWeight,
-      ),
-      deadbandDeg: followCameraBearingDeadbandDeg,
+    _followCameraBearingDeg = blendedFollowBearingDeg(
+      orientationHeadingDeg: orientation,
+      walkingHeadingDeg: _pdrWalkingHeadingDeg,
+      walking:
+          nowMs - _followCameraLastStepAtMs < followCameraWalkingStepWindowMs,
+      walkingPullWeight: followCameraWalkingPullWeight,
     );
-    if (bearing == null) return;
+    _syncMarkerGlideTicker();
+  }
 
-    _followCameraBearingDeg = bearing;
-    _followCameraTarget = here;
-    _followCameraNextMoveAtMs = nowMs + followCameraMinIntervalMs;
-    await controller.animateCamera(
-      CameraUpdate.newCameraPosition(
-        CameraPosition(
-          target: _toGl(_followCameraTargetFor(here, bearing)),
-          zoom: indoorFollowZoom,
-          bearing: bearing,
-          // **기울이지 않는다.** 도면 판독이 쉽고 매장 라벨이 안 가려지는 쪽을
-          // 골랐다. 3D로 눕히면 앞쪽이 더 보이는 대신 도면이 사다리꼴로 찌그러진다.
-          tilt: 0,
-        ),
-      ),
-      duration: followCameraMoveDuration,
+  /// 카메라를 한 프레임 돌린다. 실제로 명령을 냈으면 true.
+  ///
+  /// 목표점은 **마커가 지금 그려지는 자리**([_markerGlide])다. 보간 전 좌표를
+  /// 쓰면 화면은 걸음마다 튀는데 그 위의 마커만 부드럽게 흘러, 둘이 어긋난다.
+  ///
+  /// 유예 중이거나([_holdFollowCamera]) 팔로우가 꺼져 있으면 아무것도 하지
+  /// 않는다 — 그동안 카메라의 주인은 다른 쪽이고, 여기서 한 프레임이라도
+  /// 끼어들면 그쪽 애니메이션이 잘린다.
+  bool _driveFollowCamera(MapLibreMapController controller, Duration elapsed) {
+    if (!_indoorFollowActive) return false;
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    if (nowMs < _followCameraNextMoveAtMs) return false;
+    final target = _followCameraBearingDeg;
+    final here = _markerGlide.point;
+    if (target == null || here == null) return false;
+
+    // 한동안 못 잡고 있었으면 지금 카메라 각에서 이어 간다. 우리가 마지막으로
+    // 그린 각에서 이으면 다른 주인이 돌려놓은 화면이 그 각으로 한 번 튄다.
+    final resumed =
+        nowMs - _followCameraDrivenAtMs > followCameraResumeGapMs ||
+        _followCameraShownBearingDeg == null;
+    final shown = resumed
+        ? (controller.cameraPosition?.bearing ?? target)
+        : _followCameraShownBearingDeg!;
+    final next = glidedFollowBearingDeg(
+      shown: shown,
+      target: target,
+      elapsed: elapsed,
+      timeConstant: followCameraBearingTimeConstant,
+      maxRateDegPerSec: followCameraBearingMaxRateDegPerSec,
+      deadZoneDeg: followCameraBearingDeadZoneDeg,
     );
+
+    final moved = _followCameraShownPoint != here;
+    final turned = bearingGapDeg(next, shown) > 0;
+    if (!resumed && !moved && !turned) return false;
+
+    _followCameraShownBearingDeg = next;
+    _followCameraShownPoint = here;
+    // 앞 명령이 아직 안 돌아왔으면 이번 프레임은 계산만 하고 건너뛴다. 보간은
+    // 시간으로 하므로 건너뛴 프레임은 다음 명령이 그만큼 더 간 값으로 메운다.
+    if (_followCameraInFlight) return false;
+    _followCameraInFlight = true;
+    _followCameraDrivenAtMs = nowMs;
+    // **애니메이션 없이 놓는다.** 보간은 이미 우리가 하고 있어서, 여기에
+    // animateCamera를 걸면 프레임마다 새 애니메이션이 앞엣것을 잘라 되레 떤다
+    // (iOS에서 animateCamera는 곡선으로 나는 flyTo다).
+    unawaited(
+      controller
+          .moveCamera(
+            CameraUpdate.newCameraPosition(
+              CameraPosition(
+                target: _toGl(_followCameraTargetFor(here, next)),
+                zoom: indoorFollowZoom,
+                bearing: next,
+                // **기울이지 않는다.** 도면 판독이 쉽고 매장 라벨이 안 가려지는
+                // 쪽을 골랐다. 3D로 눕히면 앞쪽이 더 보이는 대신 도면이
+                // 사다리꼴로 찌그러진다.
+                tilt: 0,
+              ),
+            ),
+          )
+          .whenComplete(() => _followCameraInFlight = false),
+    );
+    return true;
+  }
+
+  /// 카메라가 아직 목표에 못 붙어 프레임이 더 필요한지.
+  ///
+  /// 유예 중에는 false다 — 그동안은 카메라를 잡지 않으므로 틱을 돌려도 아무
+  /// 일도 안 일어난다. 유예가 풀리면 다음 스냅샷이 [_moveFollowCamera]로 들어와
+  /// 다시 켠다.
+  bool get _followCameraNeedsFrame {
+    if (!_indoorFollowActive) return false;
+    if (DateTime.now().millisecondsSinceEpoch < _followCameraNextMoveAtMs) {
+      return false;
+    }
+    final target = _followCameraBearingDeg;
+    if (target == null || _markerGlide.point == null) return false;
+    final shown = _followCameraShownBearingDeg;
+    if (shown == null) return true;
+    // 데드존 안이면 그리는 쪽이 어차피 안 돈다 — 프레임을 낼 이유도 없다.
+    return bearingGapDeg(target, shown) >= followCameraBearingDeadZoneDeg ||
+        _followCameraShownPoint != _markerGlide.point;
   }
 
   /// 내 위치가 화면 아래쪽에 오도록 카메라 목표점을 **진행 방향으로 민다.**
@@ -567,6 +768,7 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
         observation: _guidance.lastObservation,
         wasReset: _guidance.lastWasReset,
         result: result,
+        actualMarkerPosition: _guidance.position?.localM,
         snapshot: snapshot,
         previewTailPeakTimesMs: _guidance.corridor.previewTailPeakTimesMs(
           snapshot,
@@ -785,7 +987,7 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     }
     if (!mounted) return;
     _setPlacingAnchor(false);
-    _syncPdrCurrentLayer();
+    _syncPdrCurrentLayer(snap: true);
     unawaited(_syncDebugPdrLayers());
     if (notifyLocationChanged) widget.onLocationAnchored?.call();
     // 배치가 끝났다는 안내는 따로 띄우지 않는다. 지도에 위치 마커가 바로
@@ -835,4 +1037,17 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
       ),
     );
   }
+}
+
+/// 마커 한 점이 지금 무슨 뜻인지. 뜻이 바뀌는 순간은 걸어서 간 이동이 아니라
+/// 그리는 근거가 바뀐 것이라 보간하지 않는다([_syncPdrCurrentLayer]).
+enum _MarkerGlideKind {
+  /// 그릴 자리가 없다 — 마커가 사라진 상태.
+  none,
+
+  /// 지금 보고 있는 층의 내 위치.
+  here,
+
+  /// 다른 층 잔상이거나 진입 직후 GPS 폴백([indoorMarkerAt]의 2·3순위).
+  dimmed,
 }

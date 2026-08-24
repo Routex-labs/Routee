@@ -23,10 +23,13 @@ class CorridorTrackerConfig {
     this.maxPathPoints = 800,
     this.maxTrackedPreviewPeaks = 512,
     this.optimisticReconcileMarginM = 2,
+    this.optimisticRelocationMaxLeadM = 2,
     this.junctionZoneRadiusM = 3.5,
     this.junctionZoneEdgeLengthRatio = 0.4,
     this.junctionShortcutPenaltyDegM = 4,
     this.junctionLeaderSwitchMarginDeg = 0.5,
+    this.routePreferenceMarginDeg = 2,
+    this.routeStraightEpochMinProgressM = 1.4,
   });
 
   /// 동시에 유지하는 가설 수. 교차점이 촘촘한 층에서 정답이 살아남을 여유.
@@ -136,6 +139,14 @@ class CorridorTrackerConfig {
   /// 더해 주는 여유(m). 노드 좌표와 보행 거리의 미세한 차이를 흡수한다.
   final double optimisticReconcileMarginM;
 
+  /// 확정·preview lineage가 갈렸을 때 즉시 재배치해도 되는 선행 거리 상한(m).
+  ///
+  /// preview가 몇 m 앞서 보이는 상태에서 배치가 일부 peak만 확정하면,
+  /// 확정점으로 즉시 rebase할 때 사용자가 계속 걷고 있어도 marker가 큰 폭으로
+  /// 뒤로 튀었다. 선행분이 이 값보다 크면 재해석은 후보로만 두고, 확정
+  /// cursor가 따라잡아 보정 폭이 한두 걸음이 됐을 때 적용한다.
+  final double optimisticRelocationMaxLeadM;
+
   /// 방향 선택이 생기는 graph node 앞뒤로 회전을 허용하는 구간의 반경(m).
   ///
   /// 사람은 node 좌표를 정확히 밟지 않는다. 넓은 코너에서는 안쪽을 잘라 2~3m
@@ -167,4 +178,18 @@ class CorridorTrackerConfig {
   /// 걸음 늦게 반영된다. 전환 구간에서 연결된 간선으로 넘어가는 경우에만
   /// 관성을 줄인다 — 연결되지 않은 평행 간선에는 여전히 원래 여유를 쓴다.
   final double junctionLeaderSwitchMarginDeg;
+
+  /// 활성 안내 경로 가설이 비경로 1등보다 이 값 안에서만 뒤지면 경로를 유지한다.
+  ///
+  /// 경로를 강제하는 값이 아니다. 센서·위치 평균 오차가 이 작은 여유보다 더
+  /// 벌어지면 비경로 간선이 그대로 이겨 실제 이탈을 표현한다. 역할은 코너를
+  /// 둥글게 잘라 걷는 짧은 구간처럼 두 설명이 사실상 동점일 때의 prior뿐이다.
+  final double routePreferenceMarginDeg;
+
+  /// 경로 node를 지난 뒤 이전 간선의 점수 이력을 끊기 전에 필요한 전진 거리(m).
+  ///
+  /// node 좌표에 닿았다는 사실만으로 리셋하면 코너를 잘라 걷는 가설이나 한 번의
+  /// 큰 배치가 잘못된 간선을 새 기준으로 확정할 수 있다. 평균 두 걸음(0.7m × 2)
+  /// 만큼 연결된 **다음 경로 간선**에서 전진한 뒤에만 새 직선 epoch를 시작한다.
+  final double routeStraightEpochMinProgressM;
 }
