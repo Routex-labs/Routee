@@ -543,7 +543,9 @@ void main() {
     testWidgets('알림은 시간이 지나면 사라진다', (tester) async {
       await pumpSaved(tester);
 
-      await tester.pump(RoutexFeedbackTiming.noticeVisibility);
+      // 상세 시트가 쓰는 시간은 디자인 시스템 토큰(4초)이 아니라 그보다 짧은
+      // 자기 값이다(`_saveNoticeVisibility`). 넉넉히 지나 보낸다.
+      await tester.pump(const Duration(seconds: 4));
       await tester.pump();
 
       expect(find.byType(RoutexInlineNotice), findsNothing);
