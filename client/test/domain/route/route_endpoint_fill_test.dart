@@ -95,6 +95,34 @@ void main() {
       expect(fixed.distanceMeters, 250);
     });
 
+    test('끝점이 도착점 코앞이어도 전체가 우회면 지름길로 자른다', () {
+      // 실측 재현(더현대 서울 진입 경로). TMAP 끝점은 문에서 10m 안(스냅
+      // 허용치 20m 이내)이라 예전 규칙은 "제대로 도착했다"로 보고 지름길을
+      // 아예 찾지 않았다 — 그래서 경로 전체가 건물을 크게 도는 사각형 루프로
+      // 남았다. 출발점부터 문까지 직선은 40m인데 실제로 걸은 길은 270m다.
+      const start = LatLng(37.52556419, 126.92870807);
+      const detourLoop = [
+        start,
+        LatLng(37.52556419, 126.92938757), // 동쪽으로 60m
+        LatLng(37.52466589, 126.92938757), // 남쪽으로 100m
+        LatLng(37.52466589, 126.92870807), // 서쪽으로 60m
+        LatLng(37.52511499, 126.92870807), // 문 쪽으로 50m 접근, 10m 못 미쳐 끝남
+      ];
+      final fixed = extendRouteToDestination(
+        DirectionsRoute(
+          points: detourLoop,
+          distanceMeters: 270,
+          durationSeconds: 210,
+        ),
+        door,
+      );
+
+      expect(fixed!.points, hasLength(2));
+      expect(fixed.points.first, start);
+      expect(fixed.points.last, door);
+      expect(fixed.distanceMeters, closeTo(40, 4));
+    });
+
     test('곧장 다가오다 끝났으면 이어 붙이기만 한다 — 이득이 없다', () {
       // 문 남쪽 도로를 따라 문 쪽으로 곧게 다가오다 35m 앞에서 끝난 경로.
       final straight = [
