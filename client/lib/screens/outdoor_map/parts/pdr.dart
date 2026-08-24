@@ -172,6 +172,16 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     await _confirmPdrAnchor(floorPoint, notifyLocationChanged: false);
   }
 
+  /// 지금 화면이 아는 **실내 위치 그 자체**. 마커의 유일한 근거라, 이 값이
+  /// null이면 도면 위에 파란 점이 없다.
+  ///
+  /// MapLibre 레이어는 위젯 트리에 없어 픽셀을 볼 수 없다. 드라이버의 보정만
+  /// 봐서는 모자란 자리가 있어 이 값이 따로 필요하다 — 나갔다 들어오는 길에서는
+  /// **드라이버는 여전히 보정됐다고 말하는데 화면에는 점이 없는** 상태가 실제로
+  /// 있었다(`_startIndoorTracking`의 [entrance] 갈래).
+  @visibleForTesting
+  ll.LatLng? get indoorMarkerPointForTest => _pdrCurrentWgs84();
+
   /// 실내 위치(PDR) 마커. 야외 상태에서는 [_indoorLocationVisible]이 false라
   /// 항상 빈 소스를 밀어 넣어 마커가 사라진다 — 야외에서는 GPS 마커
   /// ([_syncCurrentLayer])만 보이고, 실내에서는 이쪽만 보인다.

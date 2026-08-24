@@ -126,6 +126,7 @@ void main() {
     // 구독 스트림은 취소된 뒤 재구독하면 'already been listened to'로 터진다.
     // 실제 앱의 watchPosition은 호출마다 새 스트림을 준다.
     final positions = StreamController<Position>.broadcast();
+    addTearDown(positions.close);
     watchPosition = () => positions.stream;
     await tester.pumpWidget(
       MaterialApp(theme: AppTheme.light, home: const MapShellScreen()),
@@ -276,6 +277,75 @@ void main() {
       indoorNavigationDriver.currentRuntimeStatus.state,
       PdrRuntimeState.idle,
     );
+  });
+
+  testWidgets('나갔다 다시 진입하면 문 노드에 실내 위치를 **다시** 잡는다', (
+    WidgetTester tester,
+  ) async {
+    // 실측 증상: 실내→야외로 나간 뒤 다시 실내로 길찾기해 진입하면 파란 마커가
+    // 아예 안 떴다.
+    //
+    // 뿌리는 **드라이버 보정과 화면 앵커가 서로 다른 시각에 풀린다**는 것이다.
+    // 나갈 때 화면은 앵커와 추정치를 즉시 비우는데(`_dropIndoorPosition`),
+    // 드라이버 보정은 센서 세션이 실제로 멈춰야 풀린다 — 그 정지는 기다리지
+    // 않는 호출이고, 디버그 모드에서는 기록을 이으려고 세션을 아예 살려 둔다.
+    // 그 사이 `canRenderPosition`이 참인 채로 남아, 다시 들어와도 추적 시작이
+    // "이미 앵커가 있다"며 곧장 돌아섰다. 그릴 것은 아무것도 없었다.
+    //
+    // **디버그 모드로 건다** — 세션이 확실히 살아 있어 그 상태를 결정적으로
+    // 재현한다. 정지를 기다리지 않는 일반 모드도 같은 창이 열리지만, 그쪽은
+    // 정지가 언제 끝나느냐에 달려 있어 테스트가 시계에 의존하게 된다.
+    await debugModeController.setEnabled(true);
+    addTearDown(() => debugModeController.setEnabled(false));
+    await useGraphRepository();
+    await enterByButton(tester);
+    await tester.pump(const Duration(seconds: 3));
+    await drain(tester);
+    expect(
+      tester
+          .state<OutdoorMapBodyState>(find.byType(OutdoorMapBody))
+          .indoorMarkerPointForTest,
+      isNotNull,
+      reason: '테스트 전제(첫 진입에서 마커가 잡혔다)가 성립하지 않았다',
+    );
+
+    final state = tester.state<OutdoorMapBodyState>(find.byType(OutdoorMapBody));
+    // 진단 세션을 연다. 이것이 있어야 나갈 때 센서 세션을 살려 두는 갈래를 탄다
+    // (`_dropIndoorPosition`) — 사용자가 실기기에서 테스트하던 상태 그대로다.
+    // ignore: invalid_use_of_visible_for_testing_member
+    state.beginRouteRecordingSessionForTest();
+    state.exitIndoorFromGuidance();
+    await drain(tester);
+    expect(
+      indoorNavigationDriver.currentRuntimeStatus.state,
+      isNot(PdrRuntimeState.idle),
+      reason: '테스트 전제(디버그 모드는 센서 세션을 살려 둔다)가 성립하지 않았다',
+    );
+    expect(
+      state.indoorMarkerPointForTest,
+      isNull,
+      reason: '테스트 전제(나가면 실내 위치를 버린다)가 성립하지 않았다',
+    );
+    expect(
+      indoorNavigationDriver.currentCalibration.canRenderPosition,
+      isTrue,
+      reason: '이 테스트가 재현하려는 상태(드라이버 보정만 살아 있다)가 아니다',
+    );
+
+    unawaited(state.enterIndoorFromGuidance());
+    await drain(tester);
+    await tester.pump(const Duration(seconds: 3));
+    await drain(tester);
+
+    expect(
+      state.indoorMarkerPointForTest,
+      isNotNull,
+      reason: '다시 들어왔는데 그릴 위치가 없으면 사용자는 빈 도면을 본다',
+    );
+    final anchor = indoorNavigationDriver.currentCalibration.anchor!;
+    expect(anchor.floorId, '1F');
+    expect(anchor.anchorLocalM.eastM, closeTo(18, 0.01));
+    expect(anchor.anchorLocalM.northM, closeTo(22, 0.01));
   });
 
   testWidgets('출입구 데이터가 없으면 들어가지 않고 이유를 말한다', (WidgetTester tester) async {

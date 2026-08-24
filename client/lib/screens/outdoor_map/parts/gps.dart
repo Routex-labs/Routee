@@ -374,14 +374,29 @@ extension OutdoorMapGps on OutdoorMapBodyState {
   /// 그래서 사다리가 셋이다: 문 노드 → GPS 스냅 → 아는 문 좌표. [entrance]가
   /// null이면 첫 칸을 건너뛴다.
   ///
-  /// **실패 조건 셋** — 이미 확정된 앵커가 있다·층 그래프가 없다·사다리 셋이 다
-  /// 실패. 하나라도 걸리면 포기하고 수동 경로를 안내한다: 틀린 위치를 찍는
-  /// 것보다 위치가 없는 편이 낫다.
+  /// **실패 조건 둘** — 층 그래프가 없다·사다리 셋이 다 실패. 하나라도 걸리면
+  /// 포기하고 수동 경로를 안내한다: 틀린 위치를 찍는 것보다 위치가 없는 편이 낫다.
   Future<void> _startIndoorTracking({
     required Position position,
     BuildingEntrance? entrance,
   }) async {
-    if (indoorNavigationDriver.currentCalibration.canRenderPosition) return;
+    // **이미 확정된 앵커는 [entrance]를 아는 호출에서만 덮는다.**
+    //
+    // 문을 아는 호출은 사용자가 방금 「진입」을 누른 것이고, 그 문은 지금 이
+    // 사람이 서 있는 자리를 말하는 가장 새로운 근거다. 반대로 문을 모르는 호출
+    // (실내 콜드스타트)이 덮으면 GPS 스냅이 이미 잡아 둔 좋은 앵커를 밀어낸다.
+    //
+    // 이 갈래가 없으면 **나갔다 다시 들어올 때 마커가 통째로 사라진다**(실기기
+    // 증상). 나갈 때 [_dropIndoorPosition]은 화면 쪽 앵커
+    // ([DebugPdrTrailState.beginNewSession])와 추정치를 비우는데, 드라이버의
+    // 보정은 센서 세션이 실제로 멈춰야 풀린다 — 정지는 기다리지 않는 호출이고
+    // (`stopWithoutWaiting`), 디버그 모드에서는 기록을 이으려고 아예 세션을
+    // 살려 둔다. 그 사이 `canRenderPosition`은 참인 채로 남아, 다시 들어와도
+    // 여기서 곧장 돌아섰다. 앵커는 비었고 추정치도 비어 그릴 것이 없었다.
+    if (entrance == null &&
+        indoorNavigationDriver.currentCalibration.canRenderPosition) {
+      return;
+    }
 
     // 건물이 막 도착한 직후라면 층 그래프 요청이 아직 도는 중이다.
     await _floorGraphLoad;
