@@ -50,6 +50,7 @@ class SearchPanel extends StatefulWidget {
     this.isInsideIndoorBuilding,
     this.categoryEntries,
     this.onCategoryPicked,
+    this.onSearchOutside,
   });
 
   final String buildingId;
@@ -131,6 +132,21 @@ class SearchPanel extends StatefulWidget {
   /// 위 대분류를 골랐을 때. 상위가 검색을 닫고 그 카테고리의 매장 목록 시트를
   /// 연다. null이면 제안 줄을 그리지 않는다.
   final ValueChanged<String>? onCategoryPicked;
+
+  /// 실내에서 못 찾았을 때 **밖으로 나가서 같은 말로 다시 찾는다.**
+  ///
+  /// 이 건물에 없는 이름(`계양도서관`)을 실내에서 치면 화면은 "매장을 찾지
+  /// 못했어요"에서 끝난다 — 그런데 실내에서 나가는 길은 줌아웃뿐이고, 검색
+  /// 패널이 떠 있는 동안은 지도 제스처가 잠겨 그마저 막혀 있다(Y절 「남은
+  /// 비용」). 그래서 이 화면이 막다른 길이었다.
+  ///
+  /// **큰 객체가 아니라 조작 하나만 받는다**(AGENTS.md 계층 규칙). 실제로
+  /// 나가는 일은 야외 지도가 하고([OutdoorMapBodyState.returnToOutdoorView]),
+  /// 같은 검색어로 다시 검색하는 것은 `indoorContextActive`가 뒤집히면서
+  /// [didUpdateWidget]이 이미 하던 일이다 — 여기서 재검색을 또 시키지 않는다.
+  ///
+  /// null이면 버튼을 그리지 않는다. 이미 실외면 나갈 곳이 없다.
+  final VoidCallback? onSearchOutside;
 
   @override
   State<SearchPanel> createState() => _SearchPanelState();
@@ -1734,8 +1750,35 @@ class _SearchPanelState extends State<SearchPanel> {
             '다른 말로 바꿔서 다시 찾아보세요.',
             style: TextStyle(fontSize: 12.5, color: AppColors.muted),
           ),
+          _searchOutsideButton(),
           _browseCategories(),
         ],
+      ),
+    );
+  }
+
+  /// 못 찾았을 때의 탈출구 — **밖에서 찾아보기.**
+  ///
+  /// 카테고리 칩(R절)과 나란히 서지만 성격이 다르다. 칩은 "이 건물 안에서 다른
+  /// 것을 보라"이고, 이 버튼은 **"찾는 것이 이 건물에 없다"는 답**이다. 실내에서
+  /// 친 말이 건물 밖 장소일 때 화면이 줄 수 있는 유일한 답이라 칩보다 위에 둔다.
+  ///
+  /// **실외에서는 그리지 않는다** — 이미 밖이라 나갈 곳이 없고, 그 화면의
+  /// "찾지 못했어요"는 TMAP까지 뒤진 뒤의 결론이다([_emptyState]).
+  Widget _searchOutsideButton() {
+    final onPressed = widget.onSearchOutside;
+    if (onPressed == null || !widget.indoorContextActive) {
+      return const SizedBox.shrink();
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 14),
+      child: RoutexButton(
+        key: const Key('search-outside'),
+        label: '밖에서 찾아보기',
+        leadingIcon: Icons.explore_outlined,
+        variant: RoutexButtonVariant.secondary,
+        size: RoutexButtonSize.compact,
+        onPressed: onPressed,
       ),
     );
   }

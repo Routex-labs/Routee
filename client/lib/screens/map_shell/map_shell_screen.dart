@@ -1046,6 +1046,12 @@ class _MapShellScreenState extends State<MapShellScreen> {
           // 받게 되고, 두 화면의 카테고리 목록이 어긋날 수 있다.
           categoryEntries: _categoryEntriesFuture,
           onCategoryPicked: _onSearchCategoryPicked,
+          // 같은 화면의 두 번째 탈출구 — 이 건물에 없는 이름을 실내에서
+          // 쳤을 때 밖으로 나가서 다시 찾는다. 야외에서는 나갈 곳이 없어
+          // null이고, 패널도 그때는 버튼을 안 그린다(양쪽에서 막는다).
+          onSearchOutside: _indoorContextActive
+              ? () => unawaited(_onSearchOutsideRequested())
+              : null,
         ),
       ),
     );
