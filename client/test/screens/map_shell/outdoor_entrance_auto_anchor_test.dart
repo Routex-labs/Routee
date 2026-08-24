@@ -223,7 +223,6 @@ void main() {
       indoorNavigationDriver.currentRuntimeStatus.state,
       isNot(PdrRuntimeState.idle),
     );
-    expect(find.textContaining('입구를 기준으로 실내 위치를 잡았습니다'), findsOneWidget);
   });
 
   testWidgets('센서가 heading을 보고하기 전에는 앵커를 확정하지 않는다', (

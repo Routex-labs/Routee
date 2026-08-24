@@ -182,7 +182,7 @@ extension OutdoorMapGps on OutdoorMapBodyState {
   Future<void> _askEntryFloorThenTrack(Position position) async {
     // **경로를 그리는 중이면 아무것도 묻지 않는다.** "서울창업허브 → 더현대
     // 서울"처럼 목적지를 정해 두고 걸어 들어오는 길이 있는데, 그때 도착해서
-    // 층·매장을 묻는 시트가 뜨면 방금 보던 경로를 통째로 덮는다. 어디로 가는
+    // 층을 묻는 화면이 뜨면 방금 보던 경로를 통째로 덮는다. 어디로 가는
     // 중인지는 이미 화면이 말하고 있고, 위치가 필요하면 하단 바의 두 버튼이
     // 그 자리에 있다. **위치는 그대로 자동으로 잡는다** — 묻지 않는 것과
     // 추적하지 않는 것은 다르다.
@@ -203,12 +203,8 @@ extension OutdoorMapGps on OutdoorMapBodyState {
     await _startTrackingFromGpsFix(position);
     if (!mounted || !_indoorEntered) return;
     // 시작 화면은 **모든 갈래에서** 걷힌다. 위치를 잡은 시점이 곧 가릴 이유가
-    // 없어진 시점이라, 아래 근처 매장 시트를 띄우는지와는 무관하다.
+    // 없어진 시점이다.
     _notifyStartupReady();
-    if (_guidancePlanned) return;
-    // 자동으로 띄우는 것은 **진입 한 번에 한 번뿐이다**. 버튼으로 다시 여는
-    // 쪽은 이 제한을 받지 않는다.
-    await _askNearbyStoreForAnchor(once: true);
   }
 
   /// 진입 근거가 가리키는 층으로 도면을 옮긴다. 옮길 근거가 없거나 이미 그
@@ -239,11 +235,9 @@ extension OutdoorMapGps on OutdoorMapBodyState {
   /// 어림 위치조차 없으면(층 그래프가 없거나 스냅 실패) 묻지 않는다 — 거리를
   /// 잴 기준이 없어 "가까운 순"이 성립하지 않는다. 그때는 지금까지처럼 하단
   /// 바의 "위치 지정"이 출구다.
-  Future<void> _askNearbyStoreForAnchor({bool once = false}) async {
-    if (once && _nearbyStoreAsked) return;
+  Future<void> _askNearbyStoreForAnchor() async {
     final rows = _nearbyStoreRows();
     if (rows.isEmpty) return;
-    if (once) _nearbyStoreAsked = true;
     final picked = await showNearbyStoreSheet(context, rows: rows);
     if (picked == null || !mounted || !_indoorEntered) return;
     await _anchorAtNearbyStore(picked);
@@ -495,7 +489,6 @@ extension OutdoorMapGps on OutdoorMapBodyState {
     // 입구에서 위치를 새로 잡았으므로, 건물에 들어오기 전에 골라둔 출발지 매장은
     // 더 이상 "지금 내가 있는 곳"이 아니다. 상위가 그 값을 버리게 알린다.
     widget.onLocationAnchored?.call();
-    _replaceSnack('입구를 기준으로 실내 위치를 잡았습니다. 걸음 추적을 시작합니다.');
   }
 
   /// 야외 안내를 시작한다 — 카메라를 현재 위치로 확대하고, 이후 위치가 갱신될

@@ -167,10 +167,10 @@ void main() {
       return find.byType(CategoryStoresSheet).evaluate().isNotEmpty;
     },
     '상단 바 메뉴': openMenu,
-    // GPS가 건물 진입을 잡으면 **아무도 누르지 않았는데** 뜬다. 사용자가 무엇을
-    // 하고 있든 끼어들 수 있어서, 셸 시트와 겹치는 경우의 수가 가장 많다.
-    // 여기서는 GPS 대신 손으로 띄운다 — 띄우는 함수는 앱과 같은 것이다.
-    'GPS 근처 매장 시트': (tester) async {
+    // 하단 바 "가까운 매장으로 위치 지정" 버튼이 여는 시트. 그 버튼이 뜨려면
+    // 실내 앵커·도면 상태가 갖춰져 있어야 해서, 여기서는 그 조건을 갖추는
+    // 대신 띄우는 함수를 앱과 같은 것으로 직접 부른다.
+    '근처 매장 위치 지정 시트': (tester) async {
       unawaited(
         showNearbyStoreSheet(
           tester.element(find.byType(OutdoorMapBody)),
