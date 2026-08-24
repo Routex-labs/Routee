@@ -10,6 +10,8 @@ import 'package:navigation_client/repositories/place/destination_repository.dart
 import 'package:navigation_client/repositories/building/mock_building_repository.dart';
 import 'package:navigation_client/repositories/place/mock_destination_repository.dart';
 import 'package:navigation_client/screens/map_shell/map_shell_screen.dart';
+import 'package:navigation_client/screens/outdoor_map/outdoor_map_screen.dart';
+import 'package:navigation_client/screens/map_shell/widgets/search/search_panel.dart';
 import 'package:navigation_client/widgets/eta_card.dart';
 import 'package:navigation_client/screens/map_shell/widgets/sheets/place_detail_sheet.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -67,7 +69,13 @@ void main() {
     watchPosition = defaultWatchPosition;
   });
 
-  Future<void> search(WidgetTester tester, String query) async {
+  /// [indoor]면 먼저 도면 안으로 들어간다. 우리 매장 줄은 실내에서만 서기
+  /// 때문이다(`search-result-list-ux.md` Y절) — 건물 줄은 실외에서도 선다.
+  Future<void> search(
+    WidgetTester tester,
+    String query, {
+    bool indoor = false,
+  }) async {
     final positions = StreamController<Position>.broadcast();
     addTearDown(positions.close);
     watchPosition = () => positions.stream;
@@ -77,11 +85,40 @@ void main() {
     positions.add(fix());
     await drain(tester);
 
+    if (indoor) {
+      tester
+          .state<OutdoorMapBodyState>(find.byType(OutdoorMapBody))
+          // ignore: invalid_use_of_visible_for_testing_member
+          .enterIndoorForTest();
+      await drain(tester);
+    }
+
     await tester.tap(find.byType(TextField).first);
     await drain(tester);
     await tester.enterText(find.byType(TextField).first, query);
     await drain(tester);
   }
+
+  // 실기기 증상: X를 눌렀는데 키보드는 뜬 채, 결과 패널도 그대로, 포커스만
+  // 풀렸다. 원인은 두 겹이었다 — X가 글자만 지우고 검색 모드를 안 끝냈고,
+  // 그 X(IconButton)가 눌리는 순간 포커스를 가져가 `_searchFocus.unfocus()`가
+  // no-op이 됐다. 그래서 여기서는 **세 가지를 함께** 본다.
+  testWidgets('검색창 X를 누르면 검색이 끝나고 키보드도 내려간다', (WidgetTester tester) async {
+    await search(tester, '강의실', indoor: true);
+    expect(
+      tester.testTextInput.isVisible,
+      isTrue,
+      reason: '테스트 전제(키보드가 떠 있음)가 성립하지 않았다',
+    );
+    expect(find.byType(SearchPanel), findsOneWidget);
+
+    await tester.tap(find.byTooltip('검색어 지우기'));
+    await drain(tester);
+
+    expect(tester.testTextInput.isVisible, isFalse);
+    expect(find.byType(SearchPanel), findsNothing);
+    expect(find.byTooltip('검색어 지우기'), findsNothing);
+  });
 
   testWidgets('건물을 고르면 길을 찾지 않고 그 건물 이름만 띄운다', (
     WidgetTester tester,
@@ -104,7 +141,7 @@ void main() {
   });
 
   testWidgets('매장을 고르면 그 매장 정보 시트가 올라온다', (WidgetTester tester) async {
-    await search(tester, '강의실');
+    await search(tester, '강의실', indoor: true);
     await tester.tap(find.text('강의실 101').first);
     await drain(tester);
 
@@ -118,12 +155,12 @@ void main() {
     // **두 겹으로 쌓이면 화면으로는 안 보인다.** 같은 자리에 같은 모양이
     // 겹치기 때문이다. 실기기에서는 뒤로가기를 눌러도 화면이 그대로인 것으로만
     // 드러났다 — 그래서 눈이 아니라 위젯 수로 잠근다.
-    await search(tester, '강의실');
+    await search(tester, '강의실', indoor: true);
     await tester.tap(find.text('강의실 101').first);
     await drain(tester);
     expect(find.byType(PlaceDetailSheet), findsOneWidget);
 
-    await search(tester, '강의실');
+    await search(tester, '강의실', indoor: true);
     await tester.tap(find.text('강의실 101').first);
     await drain(tester);
 

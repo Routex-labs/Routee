@@ -176,16 +176,17 @@ void main() {
   });
 
   testWidgets('바깥 장소를 도착으로 골라도 길찾기 바가 뜬다', (WidgetTester tester) async {
-    // 매장 시트와 **같은 조합**을 야외 POI 시트에서 만든다. 상단 검색은 건물
-    // 안에서도 바깥 장소를 함께 돌려주므로(실내에서 지하철역을 찾는 흐름),
-    // 두 시트 중 한쪽만 고치면 같은 증상이 다른 문으로 그대로 남는다.
+    // 매장 시트와 **같은 조합**을 야외 POI 시트에서 만든다. 두 시트 중 한쪽만
+    // 고치면 같은 증상이 다른 문으로 그대로 남는다.
+    //
+    // **여기서는 실내로 들어가지 않는다.** 바깥 장소는 이제 실외에서만 검색된다
+    // (`search-result-list-ux.md` Y절) — 실내에서 지하철역을 찾던 흐름은 길찾기
+    // 도착지 칸으로 옮겼다.
     await tester.pumpWidget(MaterialApp(theme: AppTheme.light, home: const MapShellScreen()));
     await drain(tester);
-    // 바깥 검색에는 기준점이 필요하다. 판정이 서지 않는 표본이라 실내 상태는
-    // 그대로 유지된다.
+    // 바깥 검색에는 기준점이 필요하다.
     positions.add(_unclearFix());
     await drain(tester);
-    await enterIndoor(tester);
 
     await tester.tap(find.byType(TextField).first);
     await drain(tester);
@@ -194,18 +195,11 @@ void main() {
     await tester.enterText(find.byType(TextField).first, '여의도');
     await drain(tester);
 
-    // 실내에 답이 없으면 바깥은 물어본 뒤에 펼쳐진다(지하철역을 찾는 흐름).
-    final ask = find.byKey(const Key('show-outdoor'));
-    if (ask.evaluate().isNotEmpty) {
-      await tester.tap(ask);
-      await drain(tester);
-    }
-
     final row = find.text('여의도역');
     expect(
       row,
       findsWidgets,
-      reason: '테스트 전제(실내에서도 바깥 장소가 검색됨)가 성립하지 않았다',
+      reason: '테스트 전제(실외에서 바깥 장소가 검색됨)가 성립하지 않았다',
     );
     await tester.tap(row.first);
     await drain(tester);
@@ -223,7 +217,15 @@ void main() {
       findsOneWidget,
       reason: '바깥 목적지로 도착을 눌렀는데 길찾기 바가 뜨지 않았다',
     );
-    expect(find.text('여의도역'), findsOneWidget);
+    // **길찾기 바 안에서** 찾는다. 야외에서는 같은 이름이 지도 라벨에도 서므로
+    // 화면 전체를 세면 개수가 흔들린다 — 위 매장 테스트와 같은 방식이다.
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('route-planner')),
+        matching: find.text('여의도역'),
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets('야외로 나가면 실내 출발지가 칸에서도 사라진다', (WidgetTester tester) async {

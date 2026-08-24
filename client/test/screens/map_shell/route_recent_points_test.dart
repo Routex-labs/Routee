@@ -85,15 +85,24 @@ void main() {
     watchPosition = defaultWatchPosition;
   });
 
-  /// 검색으로 매장을 골라 "도착"까지 눌러 한 번 길을 찾는다.
+  /// 길찾기 도착지 칸에서 매장을 골라 한 번 길을 찾는다.
+  ///
+  /// **상단 검색창이 아니다.** 이 화면은 건물 밖에 서 있고, 실외 상단 검색은
+  /// 우리 도면 매장을 돌려주지 않는다(`search-result-list-ux.md` Y절). 밖에서
+  /// 안으로 가는 길을 찍는 자리는 이제 이 칸 하나다.
   Future<void> routeOnce(WidgetTester tester) async {
-    await tester.tap(find.byType(TextField).first);
+    await tester.tap(find.byTooltip('길찾기'));
     await drain(tester);
-    await tester.enterText(find.byType(TextField).first, '강의실');
+    await tester.enterText(
+      find.descendant(
+        of: find.byKey(const Key('route-draft-destination')),
+        matching: find.byType(TextField),
+      ),
+      '강의실',
+    );
     await drain(tester);
+    // 후보를 고르는 순간 그 자리에서 경로가 그려진다 — 따로 "도착"을 누르지 않는다.
     await tester.tap(find.text('강의실 101').first);
-    await drain(tester);
-    await tester.tap(find.text('도착'));
     await drain(tester);
   }
 

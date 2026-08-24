@@ -1034,7 +1034,7 @@ class _MapShellScreenState extends State<MapShellScreen> {
           currentFloorId: _activeIndoorFloor,
           reachByNodeId: _reachByNodeId,
           // 검색을 시작한 순간 지도에서 받아 둔 기준점. 위치도
-          // 카메라도 못 잡았으면 null이라 바깥 검색이 돌지 않는다.
+          // 카메라도 못 잡았으면 null이라 바깥 검색이 빈손으로 끝난다.
           outdoorSearchCenter: _outdoorSearchCenter,
           onOutdoorPoiPicked: (poi) => unawaited(_onSearchPoiPicked(poi)),
           // 같은 가게가 두 줄로 뜨지 않게 하는 판정. 야외 지도가

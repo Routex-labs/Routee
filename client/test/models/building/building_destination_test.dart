@@ -101,7 +101,9 @@ void main() {
         ),
       );
       await tester.pump(const Duration(milliseconds: 800));
-      await tester.pump();
+      for (var i = 0; i < 5; i++) {
+        await tester.pump();
+      }
     }
 
     testWidgets('건물 줄과 같은 곳을 가리키는 바깥 결과는 빠진다', (tester) async {
@@ -121,7 +123,8 @@ void main() {
       // 이름은 검색어 강조 때문에 Text.rich로 그려지므로 findRichText가 필요하다.
       expect(find.text('데모 건물', findRichText: true), findsOneWidget);
       expect(find.text('데모건물', findRichText: true), findsNothing);
-      expect(find.text('건물 밖 주변 장소'), findsNothing);
+      // 남길 바깥 줄이 하나도 없으므로 머리말도 서지 않는다.
+      expect(find.text('TMAP'), findsNothing);
     });
 
     testWidgets('이름이 다른 바깥 결과는 그대로 남는다', (tester) async {
@@ -136,17 +139,21 @@ void main() {
 
       await pumpPanel(tester, '데모 건물');
 
-      // 바깥 줄은 물어본 뒤에 펼쳐진다. 여기서 보는 것은 "겹치지 않는 이름이
-      // 살아남는가"이지 자동으로 뜨는가가 아니다.
-      await tester.tap(find.byKey(const Key('show-outdoor')));
-      await tester.pump();
-
-      expect(find.text('건물 밖 주변 장소'), findsOneWidget);
+      // 실외 목록은 접지 않는다 — 묻는 줄 없이 바로 선다.
+      expect(find.text('주변 장소 1곳'), findsOneWidget);
       expect(find.textContaining('스타벅스', findRichText: true), findsOneWidget);
     });
   });
 
-  group('밖에서도 건물 안 매장을 찾는다', () {
+  // **한 번 뒤집힌 그룹이다.** 예전에는 "밖에서도 건물 안 매장을 찾는다"였다 —
+  // 밖에서 "루이비통"을 치는 사람에게 층·노드까지 붙여 주자는 것이었다. 그런데
+  // 그 결과가 실외 목록의 첫 줄을 차지하면서, 눈앞의 건물과 주변 가게가 「더
+  // 보기」 뒤로 밀렸다(`search-result-list-ux.md` Y절).
+  //
+  // 밖에서 안으로 가는 길이 사라진 것은 아니다. 목적지를 고르는 자리는 길찾기
+  // 도착지 칸으로 옮겼고, 그쪽은 여전히 실내·건물·바깥을 함께 뒤진다
+  // (`directions_candidates.dart`).
+  group('실외에서는 건물 안 매장을 뒤지지 않는다', () {
     final originalBuildingRepository = buildingRepository;
     final originalDestinationRepository = destinationRepository;
     final originalPoiRepository = outdoorPoiRepository;
@@ -171,11 +178,7 @@ void main() {
       outdoorPoiRepository = originalPoiRepository;
     });
 
-    testWidgets('밖에서 매장 이름을 치면 그 매장이 층과 함께 뜬다', (tester) async {
-      // 밖에서 "루이비통"을 치는 사람은 그 매장이 목적지다. 건물만 돌려주면
-      // 건물을 고른 뒤 안에서 다시 찾아야 하는데, 정작 그 매장의 층과 노드는
-      // 우리가 이미 갖고 있다. 층·노드가 붙어 있어야 문을 경유하는 실내 안내로
-      // 이어진다.
+    testWidgets('밖에서 매장 이름을 쳐도 우리 도면에 묻지 않는다', (tester) async {
       await tester.pumpWidget(
         MaterialApp(theme: AppTheme.light, home: Scaffold(
             body: SearchPanel(
@@ -199,13 +202,11 @@ void main() {
         await tester.pump();
       }
 
-      // 화면에서 숨기는 게 아니라 요청을 실제로 보낸다.
-      expect(counting.lightCalls, 1);
-      expect(find.text('강의실 101', findRichText: true), findsOneWidget);
-      // 층이 함께 적혀야 어느 층 매장인지 읽힌다. (목업 매장에는 노드가 없어
-      // "1F · 경로 안내 불가"로 나오므로 부분 일치로 본다 — 실데이터에는 노드가
-      // 있어 층만 적힌다.)
-      expect(find.textContaining('1F'), findsOneWidget);
+      // 화면에서 숨기는 게 아니라 **요청 자체를 안 보낸다.** 숨기기만 하면
+      // 글자마다 쓸모없는 왕복이 남는다.
+      expect(counting.lightCalls, 0);
+      expect(counting.semanticCalls, 0);
+      expect(find.text('강의실 101', findRichText: true), findsNothing);
     });
   });
 }
