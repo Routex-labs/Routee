@@ -1008,6 +1008,41 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
       true,
       source: ignoreZoomArming ? 'sheetTap' : 'cameraZoom',
     );
+    // 도면만 펴는 진입이지만, GPS가 문 앞이라고 말하면 조용히 앵커까지 찍는다
+    // ([_maybeAnchorOnQuietIndoorEntry]) — 안 그러면 문 앞에서 이 길로 들어온
+    // 사람은 "OO(으)로 진입" 버튼을 다시 찾아 눌러야, 그마저 모르면 위치 마커가
+    // 진입 공백을 메우던 흐린 GPS 점([_indoorGapGpsPoint])에 영영 멈춰 있는
+    // 것처럼 보인다 — 그 공백을 닫아 줄 추적이 애초에 시작되지 않았기 때문이다.
+    unawaited(_maybeAnchorOnQuietIndoorEntry());
+  }
+
+  /// [_triggerIndoorEntry]가 도면만 편 뒤, GPS가 문 앞이라고 말하면 그 문에
+  /// 앵커를 찍고 걸음 추적을 시작한다.
+  ///
+  /// **문턱은 "OO(으)로 진입" 버튼과 같다**([indoorEntryGate]). 두 진입 경로가
+  /// "가깝다"를 다르게 재면, 어느 쪽으로 들어왔는지에 따라 같은 자리에서 한쪽만
+  /// 앵커가 찍히는 것을 사용자는 구분할 이유가 없다.
+  ///
+  /// 멀거나(게이트가 꺼져 있음) GPS·출입구 정보가 아직 없으면 아무것도 하지
+  /// 않는다 — 도면만 보여주는 원래 동작 그대로다. 이미 다른 경로로 앵커가
+  /// 찍혀 있으면([canRenderPosition]) 덮지 않는다 — 시트를 다시 열었다고 걷던
+  /// 위치를 문 앞으로 되돌릴 이유는 없다.
+  Future<void> _maybeAnchorOnQuietIndoorEntry() async {
+    if (!mounted || !_indoorEntered) return;
+    if (indoorNavigationDriver.currentCalibration.canRenderPosition) return;
+    final position = _position;
+    if (position == null || !indoorEntryGate.enabled) return;
+    final entrance = nearestEntrance(
+      _groundEntrances,
+      ll.LatLng(position.latitude, position.longitude),
+    );
+    final floor = _groundEntranceFloor;
+    if (entrance == null || floor == null) return;
+    if (_activeFloor != floor) {
+      await _switchOverlayFloor(floor);
+      if (!mounted || !_indoorEntered) return;
+    }
+    await _startIndoorTracking(entrance: entrance, position: position);
   }
 
   /// 실내 모드에서 건물 바깥을 탭했을 때의 이탈.
