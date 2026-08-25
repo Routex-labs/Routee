@@ -5,6 +5,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'core/api_config.dart';
 import 'features/debug_mode/debug_mode_controller.dart';
 import 'features/indoor_navigation/application/indoor_navigation_controller.dart';
+import 'features/indoor_navigation/debug/elevator_altitude_probe.dart';
 import 'features/indoor_navigation/application/indoor_location_estimate.dart';
 import 'features/indoor_navigation/contract/indoor_navigation_contract.dart';
 import 'features/indoor_navigation/platform/android_pdr_motion_source.dart';
@@ -27,6 +28,7 @@ import 'routing/place_link_inbox.dart';
 import 'state/favorites_controller.dart';
 import 'state/recent_route_points_controller.dart';
 import 'state/recent_searches_controller.dart';
+import 'state/vertical_preference_controller.dart';
 
 /// 앱 전체에서 공유하는 PDR 센서 소스와 세션 드라이버다. 화면이 바뀌어도
 /// 센서 세션을 다시 만들지 않도록 singleton으로 유지한다.
@@ -65,6 +67,11 @@ final IndoorLocationEstimateController indoorLocationEstimateController =
 /// 위와 같은 이유로 final이다. 테스트에서 바꿔야 하면 인스턴스를 교체하지 말고
 /// [DebugModeController.reload]를 쓴다.
 final DebugModeController debugModeController = DebugModeController();
+
+/// 층별 고도표를 실측으로 모으는 디버그 도구. 기압 샘플을 받는 자리가 지도
+/// 화면이고 값을 보는 자리가 디버그 시트라, 둘 다 닿는 전역에 둔다
+/// ([debugModeController]와 같은 이유).
+final ElevatorAltitudeProbe elevatorAltitudeProbe = ElevatorAltitudeProbe();
 
 /// 실내 지도·목적지 검색·경로 안내가 전부 백엔드 그래프로 동작한다. 오프라인으로
 /// 확인할 땐 이 한 줄만 `MockBuildingRepository()`로 되돌린다(테스트도 같은 방법).
@@ -118,6 +125,11 @@ RecentSearchesController recentSearchesController = RecentSearchesController();
 /// 누르면 바로 경로가 선다. 마찬가지로 기기 밖으로 나가지 않는다.
 RecentRoutePointsController recentRoutePointsController =
     RecentRoutePointsController();
+
+/// 층을 옮길 때 무엇을 타고 싶은지. 층 간 경로를 뽑는 모든 자리가 이 값을 서버
+/// 질의에 실어, 목록에 적힌 거리와 실제로 그려지는 경로가 같은 정책을 쓴다.
+VerticalPreferenceController verticalPreferenceController =
+    VerticalPreferenceController();
 
 /// 걸음 센서(PDR)에 필요한 권한. iOS는 Motion & Fitness, Android는
 /// ActivityRecognition이며 가속도·자력계 원시값은 권한이 필요 없다.

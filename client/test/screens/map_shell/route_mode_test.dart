@@ -153,18 +153,11 @@ void main() {
     await drain(tester);
 
     expect(find.byType(EtaCard), findsOneWidget);
+    // 선이 그려지면 지도 위 chrome은 카드만 남는다. 하단 탭 줄이 접히는
+    // 이유와 그때의 카드 위치는 `tab_bar_folds_when_route_drawn_test.dart`.
     expect(find.byType(MapBottomBar), findsNothing);
     expect(find.byType(MapOverlayScrollRow), findsNothing);
-    // 한동안 이 줄은 **화면 바닥**(= Scaffold 높이)을 기대했다. 그 값이 곧
-    // 버그였다 — 시작을 누르기 전에는 탭 줄도 바닥에 있어서, 카드가 화면 끝까지
-    // 내려가면 지표 줄과 버튼 모서리가 그 줄 뒤로 들어간다. 카드가 붙을 바닥은
-    // 화면이 아니라 **탭 줄의 윗변**이다
-    // (`eta_card_clears_tab_bar_test.dart`가 겹침 자체를 못 박는다).
-    expect(
-      tester.getBottomLeft(find.byType(EtaCard)).dy,
-      tester.getTopLeft(find.byType(MapTabBar)).dy,
-      reason: '안내 시작 전 경로 요약은 탭 줄 위에 붙어야 한다',
-    );
+    expect(find.byType(MapTabBar), findsNothing);
     // 고른 값이 그 칸에 그대로 남아, 다시 눌러 고칠 수 있다.
     expect(find.byKey(const Key('route-draft-destination')), findsNothing);
     expect(find.text('강의실 101'), findsWidgets);

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:routex_design_system/routex_design_system.dart';
 
 import '../../../domain/guidance/route_guidance.dart';
-import '../../../widgets/eta_card.dart';
+import '../../../widgets/route_steps_view.dart';
 
 /// 안내 배너를 탭했을 때 올라오는 **경로 전체 단계 목록** 시트.
 ///
@@ -55,26 +55,9 @@ class _RouteStepsSheet extends StatelessWidget {
             RoutexSpacing.controlGap,
       ),
       child: SingleChildScrollView(
-        child: RoutexStepList(
-          steps: [
-            for (final step in steps)
-              () {
-                final parts = routeStepParts(step);
-                return RoutexStep(
-                  // 도착 행은 어디에 도착하는지까지 말한다 — "도착" 한 단어는
-                  // 목록의 마지막 줄로는 심심하다.
-                  instruction: step.action == RouteGuidanceAction.arrived
-                      ? '$destinationName 도착'
-                      : parts.instruction,
-                  // 걷는 중 배너와 같은 매핑 — 이유는 [routeGuidanceIcon]에.
-                  icon: routeGuidanceIcon(step.action),
-                  distance: parts.distance,
-                  detail: parts.detail,
-                );
-              }(),
-          ],
-          // 지금 어느 단계인지는 아직 세지 않는다. 계약상 null은 "아직 출발하지
-          // 않았다"는 뜻이고, 이 목록을 여는 자리가 대부분 그 상태다.
+        child: RouteStepsView(
+          steps: steps,
+          destinationName: destinationName,
         ),
       ),
     ),

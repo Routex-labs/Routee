@@ -49,7 +49,9 @@ class FloorTransitionScrim extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final transition = state;
+    // 층 라벨 둘을 다 알아야 카드를 세운다. 경로 없이 탄 엘리베이터는 도착 층을
+    // 확정 뒤에야 알고, 그동안은 세로로 세울 라벨이 한쪽뿐이라 배경만 덮는다.
+    final transition = state?.hasFloorLabels ?? false ? state : null;
     final scheme = Theme.of(context).colorScheme;
     return IgnorePointer(
       ignoring: opacity < _inputBlockingOpacity,
@@ -70,6 +72,8 @@ class FloorTransitionScrim extends StatelessWidget {
               child: Center(
                 child: _FloorTransitionCard(
                   state: transition,
+                  fromFloorLabel: transition.fromFloorLabel!,
+                  toFloorLabel: transition.toFloorLabel!,
                   photoAssets: photoAssets,
                   // 걷힌 뒤에도 카드는 트리에 남는다(페이드 아웃 때문에).
                   // 애니메이션까지 남겨 두면 보이지도 않는 위젯이 매 프레임
@@ -94,11 +98,18 @@ class FloorTransitionScrim extends StatelessWidget {
 class _FloorTransitionCard extends StatefulWidget {
   const _FloorTransitionCard({
     required this.state,
+    required this.fromFloorLabel,
+    required this.toFloorLabel,
     required this.animating,
     this.photoAssets = const [],
   });
 
   final FloorTransitionUiState state;
+
+  /// 세로로 세울 두 층 라벨. [FloorTransitionUiState]에서는 모를 수 있는 값이라
+  /// **아는 경우만** 이 카드가 만들어진다.
+  final String fromFloorLabel;
+  final String toFloorLabel;
 
   /// 도착 층 사진들. 비어 있으면 이 카드는 라벨과 점만 그린다.
   final List<String> photoAssets;
@@ -218,10 +229,12 @@ class _FloorTransitionCardState extends State<_FloorTransitionCard>
     final scheme = Theme.of(context).colorScheme;
     final state = widget.state;
     // 출발 층이 늘 **점이 떠나는 쪽**이다. 내려갈 때는 위, 올라갈 때는 아래.
-    final topLabel = state.goingUp ? state.toFloorLabel : state.fromFloorLabel;
+    final topLabel = state.goingUp
+        ? widget.toFloorLabel
+        : widget.fromFloorLabel;
     final bottomLabel = state.goingUp
-        ? state.fromFloorLabel
-        : state.toFloorLabel;
+        ? widget.fromFloorLabel
+        : widget.toFloorLabel;
 
     // 점이 도착 쪽에 가까워질수록 강조가 넘어간다. 라벨 색이 이동과 함께
     // 변해야 "지금 어디로 가는 중"이 한 그림으로 읽힌다.

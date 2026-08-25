@@ -1,7 +1,7 @@
 # `lib/state` — 지속되는 사용자 상태
 
 화면 하나보다 오래 유지되고 앱 재실행 뒤에도 복원해야 하는 사용자 상태를 둔다.
-현재는 즐겨찾기와 최근 검색어, 최근 출발지·목적지를 관리한다.
+현재는 즐겨찾기와 최근 검색어, 최근 출발지·목적지, 수직 이동 선호를 관리한다.
 
 ## 구성 파일
 
@@ -10,13 +10,20 @@
 | [`favorites_controller.dart`](favorites_controller.dart) | 즐겨찾기 로드·추가·삭제·토글·순서 변경과 저장 |
 | [`recent_searches_controller.dart`](recent_searches_controller.dart) | 최근 검색어 로드·추가(최신순)·개별/전체 삭제와 저장 |
 | [`recent_route_points_controller.dart`](recent_route_points_controller.dart) | 길찾기에서 실제로 쓴 최근 출발지·목적지 |
+| [`vertical_preference_controller.dart`](vertical_preference_controller.dart) | 층을 옮길 때 무엇을 탈지(자동·에스컬레이터·엘리베이터) |
 
 **최근 검색어와 최근 출발지·목적지는 다른 목록이다.** 앞은 사용자가 친 글자라
 다시 누르면 검색을 다시 돌지만, 뒤는 노드·층까지 든 `DirectionsCandidate`라 누르면
 곧바로 그 지점으로 확정된다. 저장 훅은 `MapShellScreen._startRoute` **한 곳**이다 —
 모든 길찾기가 그 함수를 지나므로 시트·검색·지도 탭 어느 문으로 들어와도 남는다.
 
-둘 다 `ChangeNotifier`이며 `SharedPreferences`의 JSON 문자열에 목록을 저장한다
+수직 이동 선호만 목록이 아니라 **값 하나**다. 서버가 이미 정책 파라미터를 받으므로
+(`GET /buildings/{id}/graph?vertical=`) 여기서는 고른 값을 보관만 하고, 층 간 경로를
+뽑는 화면이 그 값을 질의에 싣는다. 타입과 서버 값 매핑은
+[`../domain/route/vertical_preference.dart`](../domain/route/vertical_preference.dart)가
+단일 출처다.
+
+나머지 셋은 `ChangeNotifier`이며 `SharedPreferences`의 JSON 문자열에 목록을 저장한다
 (즐겨찾기는 `FavoritePlace` 배열, 최근 검색어는 문자열 배열). 즐겨찾기의 앱 전역
 인스턴스는 [`../service_locator.dart`](../service_locator.dart)에 있다.
 

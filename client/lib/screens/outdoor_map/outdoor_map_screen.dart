@@ -36,10 +36,15 @@ import '../../domain/guidance/location_marker_glide.dart';
 import '../../features/debug_mode/debug_mode.dart';
 import '../../domain/route/dijkstra.dart';
 import '../../domain/route/route_endpoint_fill.dart';
+import '../../domain/route/vertical_preference.dart';
 import '../../domain/guidance/route_guidance.dart';
 import '../../features/indoor_navigation/application/corridor_position_tracker.dart';
+import '../../domain/floor/floor_altitude_table.dart';
+import '../../domain/guidance/elevator_ride.dart';
 import '../../domain/guidance/escalator_ride.dart';
 import '../../domain/floor/floor_concept_photo.dart';
+import '../../features/indoor_navigation/application/elevator_arrival.dart';
+import '../../features/indoor_navigation/application/elevator_transition_detector.dart';
 import '../../features/indoor_navigation/application/escalator_arrival.dart';
 import '../../features/indoor_navigation/application/escalator_node_naming.dart';
 import '../../features/indoor_navigation/application/escalator_transition_detector.dart';
@@ -60,6 +65,7 @@ import '../../models/building/building.dart';
 import '../../models/building/building_graph.dart';
 import '../../models/route/directions_route.dart';
 import '../../widgets/directions_route_options_panel.dart';
+import '../../widgets/vertical_preference_bar.dart';
 import '../../widgets/transit_style.dart' show formatTransitFare;
 import '../../models/building/floor_graph.dart';
 import '../../models/building/floor_plan.dart';
@@ -72,7 +78,9 @@ import '../../map/label/store_label_anchor.dart';
 import '../../map/camera/zoom_math.dart';
 import '../../map/label/store_label_fit.dart';
 import '../../map/label/store_label_priority.dart';
+import '../../features/debug_mode/elevator_altitude_sheet.dart';
 import '../../widgets/eta_card.dart';
+import '../../widgets/route_steps_view.dart';
 import 'widgets/transit_summary_card.dart';
 import '../../models/place/store_index_entry.dart';
 import '../../map/camera/floor_camera_bounds.dart';
@@ -124,6 +132,7 @@ import 'transition/indoor_transition_overlay.dart';
 import 'transition/indoor_transition_timeline.dart';
 
 part 'parts/escalator.dart';
+part 'parts/elevator.dart';
 part 'parts/pdr.dart';
 part 'parts/route.dart';
 part 'parts/guidance.dart';
@@ -424,6 +433,10 @@ class OutdoorMapBody extends StatefulWidget {
 /// 덮개 카드의 점은 이 값을 보간해 프레임 단위로 부드럽게 그린다.
 const _escalatorGlideFrame = escalatorGlideSampleInterval;
 
+/// 엘리베이터 활강도 같은 틱으로 돈다. 주기를 정하는 것은 어느 판정기냐가 아니라
+/// **기압 샘플 간격**(기기에 따라 0.18~1.07초)이라, 두 값이 갈릴 이유가 없다.
+const _elevatorGlideFrame = escalatorGlideSampleInterval;
+
 /// 건물 로드 실패 시 다시 시도하는 간격 사다리(약 1분간 6번). 이 로드는 initState
 /// 한 번뿐이라 실패하면 영영 복구되지 않았다. **무한 재시도는 안 한다** — 백엔드
 /// 없는 환경에서 배터리만 태운다.
@@ -560,6 +573,14 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   /// 문 경유 안내가 쓰는 건물 그래프. 문이 바뀔 때마다 서버에 다시 묻지 않으려고
   /// 들고 있는다 — 신호가 나쁜 건물 앞에서 정확히 실패하기 때문이다.
   BuildingGraph? _journeyBuildingGraph;
+
+  /// 그래프를 받을 때 실을 수직 이동 정책([VerticalPreference]).
+  ///
+  /// **그래프를 받는 자리는 전부 이 값을 쓴다.** 정책은 캐시 키의 일부라
+  /// (`http_building_repository.dart`) 한 화면 안에서 값이 갈리면 같은 건물
+  /// 그래프를 두 벌 받는다. 게다가 목록에 적는 도달 거리와 실제로 그려지는
+  /// 경로가 다른 간선 집합 위에서 계산돼, 눌러 보면 거리가 달라진다.
+  String get _verticalQuery => verticalPreferenceController.value.wireValue;
 
   /// 건물에 들어가면 그릴 실내 구간과 그 목적지. 진입이 판정되면
   /// [_activatePendingIndoorRoute]가 실제 실내 경로 상태로 옮긴다.
@@ -888,7 +909,21 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   EscalatorPhaseChange? _escalatorStage;
 
   /// 탑승 때문에 걸음 적용을 멈춘 상태인지. pause/resume 짝을 한 곳에서 센다.
+  ///
+  /// **에스컬레이터와 엘리베이터가 이 하나를 같이 쓴다.** 근거는 재개 쪽에 있다
+  /// ([OutdoorMapElevator._resumeStepsAfterRide]).
   bool _stepsPausedForRide = false;
+
+  /// 엘리베이터 층 이동 판정기. 에스컬레이터 판정기(`_guidance.escalator`)와
+  /// **따로 둔다** — 확정 근거가 다르고(에스컬레이터는 반 층, 엘리베이터는
+  /// 내려서 걷기 시작한 순간), 한 상태기에 섞으면 어느 쪽이 걸음을 멈췄는지
+  /// 알 수 없다.
+  final ElevatorTransitionDetector _elevator = ElevatorTransitionDetector();
+
+  /// 호기별 정차 층과 그것을 센 건물 그래프. 그래프가 바뀔 때만 다시 센다.
+  Map<String, Set<String>>? _elevatorServedFloors;
+
+  BuildingGraph? _elevatorServedFloorsSource;
 
   /// 전환 직전 상태. 되돌리기와 취소 복원이 이 값을 쓴다.
   String? _preTransferFloor;
@@ -954,6 +989,48 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   /// 에스컬레이터 그룹별 실측 층고(|확정 Δ|). 세션 동안만 산다 — 같은 건물을
   /// 도는 동안 두 번째 탑승부터 진행률이 실측 높이로 정규화된다.
   final Map<String, double> _escalatorGroupHeightM = {};
+
+  /// 엘리베이터 탑승 중 마커가 흐르는 구간(탑승 노드 → 도착 노드, WGS84).
+  ///
+  /// 에스컬레이터 활강과 **상태를 섞지 않는다.** 진행률의 분모가 다르고(고도표의
+  /// 총 Δ 대 층고 어림값), 도면을 갈아 끼우는 시점도 다르다. 한 필드로 합치면
+  /// 어느 쪽이 흐르는 중인지 화면이 알 수 없다. 근거는 `parts/elevator.dart`.
+  ElevatorGlide? _elevatorGlide;
+
+  Timer? _elevatorGlideTimer;
+
+  /// 활강 진행률(0 = 탑승 노드, 1 = 하차 노드). 객체 정체성이 유지돼야 셸이 매
+  /// 프레임 다시 그리지 않는다.
+  final ValueNotifier<double> _elevatorGlideProgress = ValueNotifier(0);
+
+  /// 기압이 정하는 활강 진행률 목표. 표시값([_elevatorGlideProgress])은 매 틱
+  /// 이 값을 지수 평활로 따라간다. 노이즈로 뒤로 가지 않게 단조 증가만 허용하고,
+  /// 1.0은 하차 확정만 채운다.
+  double _elevatorRideTargetProgress = 0;
+
+  /// 시작 층 → 도착 층 총 Δ(m). 진행률의 **분모**이고, 부호가 이동 방향이다.
+  double _elevatorRideTotalGapM = 0;
+
+  /// 활강이 잡은 시작 층·도착 층. 시작 층은 도면을 미리 갈아 끼운 뒤에도 판정기에
+  /// 계속 알릴 층이고(`parts/elevator.dart`의 컨텍스트 고정), 도착 층은 미리 열
+  /// 도면이다.
+  String? _elevatorRideFromFloor;
+
+  String? _elevatorRideToFloor;
+
+  /// 도착 층 도면을 **미리** 갈아 끼웠나. 확정이 넘겨받으면 false가 되고, 그 전에
+  /// 탑승이 끝나면 이 값이 "탄 층으로 되돌려야 한다"를 말한다.
+  bool _elevatorMapSwapped = false;
+
+  /// 탑승 중 배너의 근거가 된 단계. `riding`에서 채우고 **모든 출구**에서 비운다
+  /// ([OutdoorMapElevator._endElevatorRide]). 활강([_elevatorGlide])과 따로 두는
+  /// 이유는 활강이 경로와 고도표를 둘 다 요구해서다 — 그것 없이 탄 사람에게도
+  /// 배너는 떠야 한다.
+  ElevatorPhaseChange? _elevatorRideStage;
+
+  /// 배너에 적을 이동 방향. 아직 못 정했으면 null이고 배너도 안 뜬다.
+  /// 정하는 규칙은 [elevatorRideGoingUp]이 소유한다.
+  bool? _elevatorRideGoingUp;
 
   // 사람 조작 층 전환이 오래 걸릴 때 뜨는 에스컬레이터 모티프. 아무것도 덮지
   // 않는다 — 이전 층 도면이 그대로 보이는 위에 카드 하나만 뜬다. 언제
@@ -1161,9 +1238,14 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
     _pdrAltitudeSub = indoorNavigationDriver.altitudeSamples.listen(
       _onAltitudeSample,
     );
-    _pdrRawMotionSub = indoorNavigationDriver.rawMotion.listen(
-      _guidance.onRawMotion,
-    );
+    // **두 판정기가 같은 원시 움직임을 본다.** 걸음 정지 중에는 스냅샷의 걸음
+    // 수가 안 늘어(`pdr_session.dart`의 pause), 이 신호가 없으면 엘리베이터에서
+    // "내려서 걷기 시작했다"를 영영 볼 수 없다 — 확정이 20초 폴백으로만 나서
+    // 내린 뒤에도 마커가 그동안 활강 끝점에 붙어 있었다.
+    _pdrRawMotionSub = indoorNavigationDriver.rawMotion.listen((activity) {
+      _guidance.onRawMotion(activity);
+      _elevator.onRawMotion(activity);
+    });
     // 방향만 오는 스트림. 스냅샷과 달리 setState도, 경로·마커 소스 쓰기도 걸지
     // 않는다 — 목표각만 갈아 끼우고 그리는 것은 프레임 루프가 한다.
     _pdrHeadingSub = indoorNavigationDriver.headings.listen(_onPdrHeading);
@@ -1242,11 +1324,13 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
     _pdrRawMotionSub?.cancel();
     _pdrHeadingSub?.cancel();
     _escalatorGlideTimer?.cancel();
+    _elevatorGlideTimer?.cancel();
     _markerGlideTicker?.dispose();
     _arrivalRouteClearTimer?.cancel();
     _floorSwapVeilTimer?.cancel();
     _debugRideCompletionTimer?.cancel();
     _escalatorGlideProgress.dispose();
+    _elevatorGlideProgress.dispose();
     // 탑승 중 화면이 닫히면 걸음이 멈춘 채로 전역 PDR 세션이 남는다. 다음
     // 화면에서 아무리 걸어도 위치가 갱신되지 않는다.
     if (_stepsPausedForRide) {
@@ -1331,14 +1415,6 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   /// (`returnToOutdoorView`)는 같은 자리에 그대로 있어서, 다시 펼 때마다 묻는
   /// 것은 답을 아는 질문을 되묻는 것이다.
   bool _entryFloorAsked = false;
-
-  /// 이번 진입에서 "근처 매장에서 골라주세요"를 이미 띄웠는지.
-  ///
-  /// **건물을 실제로 나갈 때만 되돌린다.** 도면만 접은 경우
-  /// (`returnToOutdoorView`)는 같은 자리에 그대로 있어서, 다시 펼 때마다 시트가
-  /// 올라오면 지도를 훑을 수가 없다. 다시 고르고 싶으면 하단 바의 "가까운
-  /// 매장으로 위치 지정"이 그 자리에 있다.
-  bool _nearbyStoreAsked = false;
 
   /// GPS 구독을 [_gpsTrackingWanted] 상태에 맞춘다. 구독 시작/해제의 유일한
   /// 진입점이라 중복 구독이나 해제 누락이 생기지 않는다.
@@ -1632,7 +1708,10 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
     // 들어가면 목적지까지 갈 수 있는가"가 확정된다.
     final graph =
         _journeyBuildingGraph ??
-        await buildingRepository.getBuildingGraph(building.id);
+        await buildingRepository.getBuildingGraph(
+          building.id,
+          vertical: _verticalQuery,
+        );
     if (!mounted) return;
     // 실내 구간은 문 **노드**가 아니라 문에서 시작한다 — 안쪽 노드에서 시작하면
     // 야외 구간이 끝나는 문 앞까지 7~12 m가 선 없이 남는다. 꿰매지 못한 출구는
@@ -1714,7 +1793,10 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
     final exitBuilding = _building;
     final exitGraph = exitBuilding == null
         ? null
-        : await buildingRepository.getBuildingGraph(exitBuilding.id);
+        : await buildingRepository.getBuildingGraph(
+            exitBuilding.id,
+            vertical: _verticalQuery,
+          );
     if (!mounted) return;
 
     // 그래프가 없거나 시작 노드를 못 찾으면(냉초기 등) 목적지 기준 최근접으로
@@ -2010,7 +2092,10 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
     final buildingId = _building?.id;
     if (anchor == null || buildingId == null) return null;
 
-    final graph = await buildingRepository.getBuildingGraph(buildingId);
+    final graph = await buildingRepository.getBuildingGraph(
+      buildingId,
+      vertical: _verticalQuery,
+    );
     if (!mounted || graph == null || graph.nodes.isEmpty) return null;
 
     // 경로 계산과 **같은 시작 노드**를 쓴다. 여기서 다른 규칙으로 고르면 목록에
@@ -2504,9 +2589,9 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
     await controller.animateCamera(CameraUpdate.newLatLng(_toGl(entrance)));
   }
 
-  /// 하단 바 "가까운 매장으로 위치 지정" 버튼 진입점.
+  /// 하단 바 "가까운 매장으로 위치 지정" 버튼 진입점 — 이 목록을 여는 유일한
+  /// 자리다.
   ///
-  /// 들어올 때 한 번 띄웠던 목록을 다시 연다. 규칙은 그때와 **완전히 같다** —
   /// 기준점이 없으면 조용히 아무 일도 하지 않는다([_askNearbyStoreForAnchor]).
   /// 버튼을 띄울지는 [canPickNearbyStore]가 미리 가른다.
   Future<void> pickNearbyStoreForAnchor() => _askNearbyStoreForAnchor();

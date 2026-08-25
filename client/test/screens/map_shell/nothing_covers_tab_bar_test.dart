@@ -23,12 +23,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// 탭 줄은 늘 바닥에 있고([MapTabBar]) 셸 Stack의 위층이라, 아래로 자라는 표면은
 /// 무엇이든 그 줄만큼 자리를 비켜야 한다. 안 비키면 잘린 쪽은 조용히 사라진다 —
 /// 실기기에서 ETA 카드의 지표 줄("1.2km · 거리")이 통째로 없어졌고 `안내 시작`
-/// 버튼의 아래 모서리가 잘렸다. 겹치는 구간은 **카드가 뜬 뒤 시작을 누르기
-/// 전까지 전부**다: 탭 줄이 접히는 조건은 "안내를 시작했는가"라, 그 전에는 늘
-/// 둘 다 바닥에 있다.
+/// 버튼의 아래 모서리가 잘렸다. 지금 그 구간이 남은 자리는 **길찾기 후보
+/// 목록**이다 — 경로 요약 카드는 선이 그려지는 순간 줄이 접혀 둘이 같은 화면에
+/// 서지 않는다(`tab_bar_folds_when_route_drawn_test.dart`).
 ///
-/// 같은 규칙을 지키는 자리가 둘이라 한 파일에 둔다 — 바닥에 도킹하는 카드와,
-/// 자리가 있는 만큼 늘어나는 후보 목록. 값의 단일 출처는 셸의 `_tabBarLiftPx`다.
+/// 카드 쪽은 반대 방향으로 남긴다: 비켜설 줄이 없어졌으면 띄워 둔 자리도
+/// 반납해야 한다. 접는 조건과 높이를 더하는 조건의 단일 출처는 셸의
+/// `_tabBarVisible`이다.
 ///
 /// 재는 것은 높이도 리프트 값도 아니라 **두 상자가 겹치지 않는가** 하나다. 값으로
 /// 재면 카드가 한 줄 늘어나는 날 테스트만 통과한다.
@@ -120,30 +121,7 @@ void main() {
     await drain(tester);
   }
 
-  testWidgets('안내 시작 카드는 탭 줄 위에 앉는다', (WidgetTester tester) async {
-    await pumpPlannedRoute(tester);
-
-    expect(
-      find.byType(EtaCard),
-      findsOneWidget,
-      reason: '테스트 전제(도착을 누르면 경로가 그려짐)가 성립하지 않았다',
-    );
-    expect(
-      find.byType(MapTabBar),
-      findsOneWidget,
-      reason: '테스트 전제(시작을 누르기 전에는 탭 줄이 있음)가 성립하지 않았다',
-    );
-
-    expect(
-      tester.getBottomLeft(find.byType(EtaCard)).dy,
-      lessThanOrEqualTo(tester.getTopLeft(find.byType(MapTabBar)).dy),
-      reason: '탭 줄이 카드 아래를 덮으면 지표 줄과 버튼 모서리가 잘린다',
-    );
-  });
-
-  testWidgets('안내를 시작해 탭 줄이 접히면 카드가 바닥까지 내려온다', (
-    WidgetTester tester,
-  ) async {
+  testWidgets('안내 중에도 카드가 바닥까지 내려와 있다', (WidgetTester tester) async {
     await pumpPlannedRoute(tester);
     await tester.tap(find.text('안내 시작'));
     await drain(tester);

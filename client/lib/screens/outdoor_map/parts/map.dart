@@ -396,6 +396,11 @@ extension OutdoorMapMap on OutdoorMapBodyState {
     }
   }
 
+  /// 축소 이탈의 테스트 진입점. 줌 제스처는 MapLibre 플랫폼 뷰 콜백이라 위젯
+  /// 테스트에서 만들 수 없으므로, 실기기와 **같은 함수**를 부른다.
+  @visibleForTesting
+  void exitIndoorByZoomOutForTest() => _exitIndoorByZoomOut();
+
   /// GPS 현재 위치 마커. 실내에서는 [_outdoorGpsVisible]이 false라 항상 빈
   /// 소스로 밀어 넣어 마커가 지도에서 사라진다 — [_syncGpsSubscription]이
   /// `_position`을 비우는 것과 이중으로 막아, 어느 경로로 들어와도 건물 안에서

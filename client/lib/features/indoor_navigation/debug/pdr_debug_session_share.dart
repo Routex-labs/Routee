@@ -7,12 +7,17 @@ import 'package:share_plus/share_plus.dart';
 class PdrDebugSessionShare {
   const PdrDebugSessionShare();
 
+  /// [filenamePrefix]로 산출물을 가른다. PDR 주행 세션과 층별 고도표는 분석하는
+  /// 사람도 도구도 달라서, 받은 사람이 파일 이름만으로 구분할 수 있어야 한다.
   Future<void> share(
     Map<String, Object?> session, {
     Rect? sharePositionOrigin,
+    String filenamePrefix = 'pdr-debug',
+    String subject = 'PDR debug session',
+    String text = 'PDR 실측 디버그 세션 JSON입니다.',
   }) async {
     final startedAt = session['started_at_utc']?.toString() ?? 'unknown';
-    final filename = 'pdr-debug-${_filenameTimestamp(startedAt)}.json';
+    final filename = '$filenamePrefix-${_filenameTimestamp(startedAt)}.json';
     final json = const JsonEncoder.withIndent('  ').convert(session);
     await Share.shareXFiles(
       [
@@ -22,8 +27,8 @@ class PdrDebugSessionShare {
           name: filename,
         ),
       ],
-      subject: 'PDR debug session',
-      text: 'PDR 실측 디버그 세션 JSON입니다.',
+      subject: subject,
+      text: text,
       sharePositionOrigin: sharePositionOrigin,
       fileNameOverrides: [filename],
     );

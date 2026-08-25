@@ -16,11 +16,20 @@ import 'debug_mode_controller.dart';
 ///
 /// 실제 PDR 버튼과 진단 레이어는 여기서 [DebugModeController.enabled]를 켰을
 /// 때만 지도에 나타난다.
-Future<void> showDebugModeSettingsSheet(
+/// 이 시트가 닫히면서 부르는 쪽에 넘기는 후속 동작.
+enum DebugModeAction {
+  /// 층별 고도표 측정 화면을 연다.
+  elevatorAltitudeProbe,
+}
+
+/// **시트는 고른 항목만 돌려주고 실제 동작은 부르는 쪽이 한다.** 여기서 바로 다음
+/// 시트를 띄우면 이미 닫히는 중인 `context`로 띄우게 되고 두 장이 겹친다
+/// (`AppMenuSheet`와 같은 규칙).
+Future<DebugModeAction?> showDebugModeSettingsSheet(
   BuildContext context,
   DebugModeController controller,
 ) {
-  return showModalBottomSheet<void>(
+  return showModalBottomSheet<DebugModeAction>(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
@@ -155,6 +164,17 @@ class _AdvancedDebugOptions extends StatelessWidget {
         ),
         const Divider(height: 20),
         _HeadingOffsetKnob(controller: controller),
+        const Divider(height: 20),
+        ListTile(
+          key: const ValueKey('debug-elevator-altitude-probe'),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+          leading: const Icon(Icons.elevator_outlined),
+          title: const Text('엘리베이터 고도 측정'),
+          subtitle: const Text('층마다 서서 찍어 층별 고도표를 만듭니다'),
+          trailing: const Icon(Icons.chevron_right_rounded),
+          onTap: () =>
+              Navigator.of(context).pop(DebugModeAction.elevatorAltitudeProbe),
+        ),
       ],
     );
   }

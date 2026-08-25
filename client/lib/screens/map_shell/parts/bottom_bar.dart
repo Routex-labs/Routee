@@ -78,10 +78,14 @@ extension _MapShellBottomBar on _MapShellScreenState {
         // 디버그 설정은 메인 지도에서 걷어냈으므로 이 메뉴가 유일한 진입점이다.
         // 시트 안에서 토글하면 지도 두 화면이 전역 컨트롤러의 알림을 받아
         // 알아서 다시 그린다.
-        await _withMapsLocked<bool>(() async {
-          await showDebugModeSettingsSheet(context, debugModeController);
-          return true;
-        });
+        final next = await _withMapsLocked<DebugModeAction?>(
+          () => showDebugModeSettingsSheet(context, debugModeController),
+        );
+        if (!mounted || next == null) return;
+        switch (next) {
+          case DebugModeAction.elevatorAltitudeProbe:
+            await _outdoorKey.currentState?.openElevatorAltitudeProbe();
+        }
     }
   }
 

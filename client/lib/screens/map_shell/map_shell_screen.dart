@@ -18,6 +18,7 @@ import '../../domain/store/nearby_stores.dart';
 import '../../domain/store/nearest_store.dart';
 import '../../domain/route/route_endpoint_fill.dart';
 import '../../domain/route/route_endpoint_swap.dart';
+import '../../domain/route/vertical_preference.dart';
 import '../../core/single_flight.dart';
 import '../../domain/search/store_suggestions.dart';
 import '../../domain/route/transit_walk_fill.dart';
@@ -167,9 +168,11 @@ class _MapShellScreenState extends State<MapShellScreen> {
     if (banner != null && _searchActive) {
       _closeSearch();
     }
-    final photos = banner == null
+    // 도착 층을 모르는 탑승(경로 없이 탄 엘리베이터)에는 구울 사진이 없다.
+    final toFloorLabel = banner?.toFloorLabel;
+    final photos = toFloorLabel == null
         ? const <String>[]
-        : floorConceptPhotos(banner.toFloorLabel);
+        : floorConceptPhotos(toFloorLabel);
     // **탑승이 잡힌 순간 미리 굽는다.** 덮개가 짙어지는 그 프레임은 도면을 갈아
     // 끼우는 중이라 이미 제일 바쁘다 — 그때 사진을 처음 디코드하면 거기서 한 번
     // 끊기고, 하필 사용자가 화면을 볼 수밖에 없는 구간이다.
@@ -794,7 +797,7 @@ class _MapShellScreenState extends State<MapShellScreen> {
           if (!_floorTransitionCovers) _buildTopOverlays(context),
           if (!_floorTransitionCovers && !_guidanceActive && !_routeMode)
             _buildBottomBar(routeVisible),
-          if (!_floorTransitionCovers && !_guidanceActive) _buildTabBar(),
+          if (!_floorTransitionCovers && _tabBarVisible) _buildTabBar(),
           _buildFloorScrim(),
           IgnorePointer(
             child: AnimatedSwitcher(
@@ -1236,6 +1239,14 @@ class _MapShellScreenState extends State<MapShellScreen> {
     );
   }
 
+  /// 그래프를 받을 때 실을 수직 이동 정책([VerticalPreference]).
+  ///
+  /// 이 화면이 그래프를 쓰는 자리는 매장 도달거리 계산뿐이라 정책이 결과를
+  /// 바꾸는 곳과 안 바꾸는 곳이 섞여 있다. 그래도 **전부 같은 값을 싣는다** —
+  /// 정책이 캐시 키의 일부라(`http_building_repository.dart`) 값이 갈리면 같은
+  /// 건물 그래프를 두 벌 받는다. 야외 지도의 `_verticalQuery`와 한 규칙이다.
+  String get _verticalQuery => verticalPreferenceController.value.wireValue;
+
   /// 상단 **바**가 끝나는 y(논리 px). 못 재면 0.
   ///
   /// 경로 전체를 담을 때 위로 비울 높이다. 상수로 두면 안 되는 이유는 높이가
@@ -1255,11 +1266,24 @@ class _MapShellScreenState extends State<MapShellScreen> {
     return box.localToGlobal(Offset.zero).dy + box.size.height;
   }
 
+  /// 지금 탭 줄을 그리는가. **높이를 더하는 조건도 반드시 이 값이다** —
+  /// 그리는 조건과 세는 조건이 갈리면 위에 얹힌 것들이 빈 자리에 떠 있거나
+  /// 줄 뒤로 들어간다(이벤트 판이 안 뜨는데 높이만 반영돼 ETA 카드의 거리
+  /// 표시가 튀던 것이 그 경우다). [_tabBarLiftPx]·[_bottomOverlayLiftPx]가
+  /// 이 getter 하나만 보게 두는 것이 그 재발을 막는 방법이다.
+  ///
+  /// **경로선이 그려진 순간부터 접는다.** `_routeMode`(상단이 두 칸이 된 것)가
+  /// 아니라 그려진 선을 기준으로 삼는 이유는, 도착지를 고르는 동안에는 아직
+  /// 지도를 둘러보는 중이라 지도·이벤트·저장으로 빠질 문이 필요해서다. 선이
+  /// 그려지면 화면의 일이 "이 경로를 본다" 하나로 좁혀지고, 되돌아갈 문은 상단
+  /// 길찾기 바의 X가 된다([_clearRouteDraft] — 선과 두 칸을 함께 걷는다).
+  bool get _tabBarVisible => !_guidanceActive && !_outdoorRouteVisible;
+
   /// 탭 줄이 먹는 높이. 안전영역까지 합친 값이라 위에 얹히는 것들이 이만큼
   /// 띄우면 정확히 탭 줄 위에 앉는다.
-  double _tabBarLiftPx(BuildContext context) => _guidanceActive
-      ? 0
-      : kMapTabBarHeight + MediaQuery.paddingOf(context).bottom;
+  double _tabBarLiftPx(BuildContext context) => _tabBarVisible
+      ? kMapTabBarHeight + MediaQuery.paddingOf(context).bottom
+      : 0;
 
   /// 지도가 자기 것(층 선택기·시설 버튼)을 밀어 올려야 할 높이.
   ///
@@ -1279,7 +1303,7 @@ class _MapShellScreenState extends State<MapShellScreen> {
     if (facilities > 0) {
       return math.max(0, facilities - MediaQuery.paddingOf(context).bottom);
     }
-    return (_guidanceActive ? 0 : kMapTabBarHeight) +
+    return (_tabBarVisible ? kMapTabBarHeight : 0) +
         (_issueDiaryVisible ? IssueDiaryPanel.peekHeight : 0);
   }
 
@@ -1342,7 +1366,20 @@ class _MapShellScreenState extends State<MapShellScreen> {
 
   /// 이벤트 탭. 하단 판을 켜고 끈다. 이 탭은 건물 안에서만 서므로
   /// ([_visibleTabs]) 여기에 야외 갈래는 없다.
+  ///
+  /// **길찾기 중이면 먼저 경로를 취소한다.** 판은 안내 중엔 그려지지 않는데
+  /// ([_buildBottomBar]가 `_routeMode`를 건너뛴다) 이 토글은 그 사실을 몰라,
+  /// 눌러도 판은 안 뜨고 [_bottomOverlayLiftPx]만 `_issueDiaryDismissed`를
+  /// 그대로 반영해 ETA 카드의 남은 거리 표시만 누른 만큼 튀었다(실기기
+  /// 확인). 판을 실제로 보여 주려면 경로부터 지운다 — 지도에 그려진 선까지
+  /// 걷는다는 점에서 [_forgetRouteDraft]가 아니라 X 버튼과 같은
+  /// [_clearRouteDraft]를 쓴다.
   void _onEventsTab() {
+    if (_routeMode) {
+      _clearRouteDraft();
+      setState(() => _issueDiaryDismissed = false);
+      return;
+    }
     setState(() => _issueDiaryDismissed = !_issueDiaryDismissed);
   }
 

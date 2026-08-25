@@ -11,6 +11,7 @@ FloorTransitionUiState _state(
   String to = '1F',
   bool goingUp = true,
 }) => FloorTransitionUiState(
+  vehicle: FloorTransitionVehicle.escalator,
   stage: stage,
   fromFloorLabel: from,
   toFloorLabel: to,
@@ -451,6 +452,7 @@ void main() {
         fadeOut: Duration.zero,
         photoAssets: photos,
         state: FloorTransitionUiState(
+          vehicle: FloorTransitionVehicle.escalator,
           stage: FloorTransitionStage.swapping,
           fromFloorLabel: '5F',
           toFloorLabel: '6F',
@@ -538,6 +540,7 @@ void main() {
             fadeOut: Duration.zero,
             photoAssets: ['assets/floors/b2.webp'],
             state: FloorTransitionUiState(
+              vehicle: FloorTransitionVehicle.escalator,
               stage: FloorTransitionStage.swapping,
               fromFloorLabel: 'B1',
               toFloorLabel: 'B2',
@@ -567,6 +570,7 @@ void main() {
             fadeOut: Duration.zero,
             photoAssets: five,
             state: FloorTransitionUiState(
+              vehicle: FloorTransitionVehicle.escalator,
               stage: FloorTransitionStage.swapping,
               fromFloorLabel: '5F',
               toFloorLabel: '6F',
@@ -617,6 +621,7 @@ void main() {
             fadeOut: Duration.zero,
             photoAssets: photos,
             state: FloorTransitionUiState(
+              vehicle: FloorTransitionVehicle.escalator,
               stage: FloorTransitionStage.swapping,
               fromFloorLabel: '5F',
               toFloorLabel: '6F',

@@ -116,6 +116,19 @@ RoutePolylineSplit? splitRouteAtProgress(
 }
 
 /// 현재 위치 뒤에서 첫 의미 있는 회전이나 층 이동을 찾아 한 줄 안내를 만든다.
+///
+/// **남은 거리가 [arrivalThresholdM] 안이면 도착이 회전을 이긴다.** 실내 경로는
+/// 대개 `복도 노드 → 매장 진입 노드`로 끝나 마지막 모퉁이가 곧 목적지 문 앞이고,
+/// 사람은 매장 안이 아니라 그 문 앞에서 멈춘다. 거기서 회전을 내면 진행률이 앞
+/// 세그먼트에 묶인 채([computeRouteProgress]는 offset이 동률이면 앞을 고른다)
+/// 도착 판정이 영영 안 선다 — 도착 카드·경로 자동 종료·도착지 강조가 통째로
+/// 죽는다.
+///
+/// **층 이동 탑승구([transferMode])만 예외다.** 탑승구 바로 앞에서 꺾는 도면이
+/// 실제로 있어(지하 2층 구호플러스 옆 엘리베이터 · 실기기 확인) 그쪽까지 회전을
+/// 접으면, 아직 모퉁이를 못 돈 사용자가 "탑승하세요"만 보고 서 있게 된다. 탑승은
+/// 도착과 달리 여기서 한 번 늦는다고 죽는 것이 없다 — 층 전이 감지는 이 안내가
+/// 아니라 세그먼트의 `transferModeToNext`를 직접 본다.
 RouteGuidanceInstruction buildRouteGuidance({
   required List<LocalPoint> localPoints,
   required List<LatLng> wgs84Points,
@@ -133,7 +146,20 @@ RouteGuidanceInstruction buildRouteGuidance({
     );
   }
   final remainingM = progress?.remainingM ?? _polylineLength(localPoints);
-  if (remainingM <= arrivalThresholdM) {
+  final nearEnd = remainingM <= arrivalThresholdM;
+
+  // 끝에 닿았으면 회전을 접는다 — 마지막 모퉁이가 곧 목적지 문 앞이라서다.
+  // 탑승구만 예외로 계속 찾는다. 두 규칙의 근거는 이 함수의 doc 주석에 있다.
+  if (!nearEnd || transferMode != null) {
+    final turn = _nextTurn(
+      localPoints: localPoints,
+      wgs84Points: wgs84Points,
+      progress: progress,
+    );
+    if (turn != null) return turn;
+  }
+
+  if (nearEnd) {
     if (transferMode == 'escalator') {
       return const RouteGuidanceInstruction(
         action: RouteGuidanceAction.escalator,
@@ -162,40 +188,6 @@ RouteGuidanceInstruction buildRouteGuidance({
     );
   }
 
-  if (progress != null &&
-      localPoints.length == wgs84Points.length &&
-      localPoints.length >= 3) {
-    var distanceM = _distance(
-      progress.projectedPoint ?? localPoints[progress.segmentIndex],
-      localPoints[(progress.segmentIndex + 1).clamp(0, localPoints.length - 1)],
-    );
-    for (
-      var vertex = progress.segmentIndex + 1;
-      vertex < localPoints.length - 1;
-      vertex++
-    ) {
-      final beforeM = _distance(localPoints[vertex - 1], localPoints[vertex]);
-      final afterM = _distance(localPoints[vertex], localPoints[vertex + 1]);
-      if (beforeM >= 1.5 && afterM >= 1.5) {
-        final incoming = _bearing(wgs84Points[vertex - 1], wgs84Points[vertex]);
-        final outgoing = _bearing(wgs84Points[vertex], wgs84Points[vertex + 1]);
-        final turn = _signedTurn(outgoing - incoming);
-        if (turn.abs() >= 35 && turn.abs() <= 150) {
-          final right = turn > 0;
-          final actionText = right ? '우회전' : '좌회전';
-          return RouteGuidanceInstruction(
-            action: right
-                ? RouteGuidanceAction.turnRight
-                : RouteGuidanceAction.turnLeft,
-            primaryText: _actionDistanceText(distanceM, actionText),
-            distanceToActionM: distanceM,
-          );
-        }
-      }
-      distanceM += afterM;
-    }
-  }
-
   if (transferMode == 'escalator') {
     return RouteGuidanceInstruction(
       action: RouteGuidanceAction.escalator,
@@ -216,6 +208,56 @@ RouteGuidanceInstruction buildRouteGuidance({
     primaryText: '$rounded미터 직진',
     distanceToActionM: remainingM,
   );
+}
+
+/// 진행점 뒤에서 첫 의미 있는 회전을 찾는다. 없으면 null.
+///
+/// **목적지 직전 꼭짓점까지 본다**(`vertex < length - 1`). 그래서 이 함수를 언제
+/// 부를지는 부르는 쪽이 가른다 — 규칙은 [buildRouteGuidance]에 있다.
+///
+/// 앞뒤 변이 1.5m 미만인 꼭짓점은 건너뛴다. 간선을 이어 붙이면서 생긴 잔가지라
+/// 사람이 "꺾었다"고 느끼지 않는다. 각도도 35°~150°만 회전으로 본다 — 그보다
+/// 작으면 완만한 곡선이고, 크면 되돌아가는 U턴이라 "우회전"이 거짓말이 된다.
+RouteGuidanceInstruction? _nextTurn({
+  required List<LocalPoint> localPoints,
+  required List<LatLng> wgs84Points,
+  required RouteProgress? progress,
+}) {
+  if (progress == null ||
+      localPoints.length != wgs84Points.length ||
+      localPoints.length < 3) {
+    return null;
+  }
+  var distanceM = _distance(
+    progress.projectedPoint ?? localPoints[progress.segmentIndex],
+    localPoints[(progress.segmentIndex + 1).clamp(0, localPoints.length - 1)],
+  );
+  for (
+    var vertex = progress.segmentIndex + 1;
+    vertex < localPoints.length - 1;
+    vertex++
+  ) {
+    final beforeM = _distance(localPoints[vertex - 1], localPoints[vertex]);
+    final afterM = _distance(localPoints[vertex], localPoints[vertex + 1]);
+    if (beforeM >= 1.5 && afterM >= 1.5) {
+      final incoming = _bearing(wgs84Points[vertex - 1], wgs84Points[vertex]);
+      final outgoing = _bearing(wgs84Points[vertex], wgs84Points[vertex + 1]);
+      final turn = _signedTurn(outgoing - incoming);
+      if (turn.abs() >= 35 && turn.abs() <= 150) {
+        final right = turn > 0;
+        final actionText = right ? '우회전' : '좌회전';
+        return RouteGuidanceInstruction(
+          action: right
+              ? RouteGuidanceAction.turnRight
+              : RouteGuidanceAction.turnLeft,
+          primaryText: _actionDistanceText(distanceM, actionText),
+          distanceToActionM: distanceM,
+        );
+      }
+    }
+    distanceM += afterM;
+  }
+  return null;
 }
 
 String _actionDistanceText(double distanceM, String action) {

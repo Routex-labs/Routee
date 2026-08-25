@@ -67,6 +67,7 @@ void main() {
     // 겹쳤다. 이제 네 상태가 같은 자리를 나눠 쓰고 우선순위가 하나뿐이다.
 
     FloorTransitionUiState riding() => const FloorTransitionUiState(
+      vehicle: FloorTransitionVehicle.escalator,
       stage: FloorTransitionStage.swapping,
       fromFloorLabel: 'B2',
       toFloorLabel: 'B1',

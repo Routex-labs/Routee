@@ -26,6 +26,12 @@ extension OutdoorMapEscalator on OutdoorMapBodyState {
       graph: _floorGraph,
       floorLabels: _building?.floors ?? const [],
     );
+    // 층별 고도표 측정이 켜져 있으면 같은 샘플을 그쪽에도 넘긴다. 녹화 중이
+    // 아니면 probe가 스스로 버리므로 여기서 가르지 않는다.
+    elevatorAltitudeProbe.onSample(sample);
+    // 엘리베이터 판정은 같은 샘플을 따로 본다. 두 판정기가 같은 시계열을 보되
+    // 상태는 섞지 않는다(`parts/elevator.dart`).
+    _onElevatorAltitude(sample);
     final outcome = _guidance.onAltitude(sample);
     final recorder = _pdrDebugRecorder;
     if (recorder != null) {
@@ -154,8 +160,7 @@ extension OutdoorMapEscalator on OutdoorMapBodyState {
     if (mounted) return;
     // pause Future가 끝나기 직전에 화면이 닫히면 dispose는 pause된 사실을 볼 수
     // 없다. 여기서 직접 되돌려 전역 PDR 세션을 살려 둔다.
-    _stepsPausedForRide = false;
-    await indoorNavigationDriver.resumeStepTracking();
+    await _resumeStepsAfterRide();
   }
 
   /// 탑승 상태를 끝낸다. 걸음 누적을 다시 켜고 배너·스크림을 지운다.
@@ -170,18 +175,20 @@ extension OutdoorMapEscalator on OutdoorMapBodyState {
         _floorSwapVeil == 0) {
       return;
     }
-    _stepsPausedForRide = false;
-    await indoorNavigationDriver.resumeStepTracking();
-    if (!mounted) return;
-    _stopEscalatorGlide();
-    _floorSwapVeilTimer?.cancel();
-    _floorSwapVeilTimer = null;
-    setState(() {
-      _escalatorRide = null;
-      _escalatorStage = null;
-      _floorSwapVeil = 0;
-    });
-    _guidance.clearBoardingHold();
+    if (mounted) {
+      _stopEscalatorGlide();
+      _floorSwapVeilTimer?.cancel();
+      _floorSwapVeilTimer = null;
+      setState(() {
+        _escalatorRide = null;
+        _escalatorStage = null;
+        _floorSwapVeil = 0;
+      });
+      _guidance.clearBoardingHold();
+    }
+    // 걸음 재개가 **맨 마지막**인 이유: 공유 출구가 "아직 타는 중인 판정기"를
+    // 세는데, 이 판정의 탑승 상태를 먼저 비워야 자기 자신에 걸리지 않는다.
+    await _resumeStepsAfterRide();
   }
 
   /// 탑승 중에 목적 층 도면으로 갈아탄다.
@@ -428,6 +435,17 @@ extension OutdoorMapEscalator on OutdoorMapBodyState {
       // 판정 중에 사용자가 층 선택기로 다른 층을 열었다. 어느 층 기준인지
       // 모호해졌으므로 적용하지 않는다.
       return;
+    }
+    // 엘리베이터 탑승이 살아 있으면 **먼저 접는다.** 활강 둘이 동시에 돌면
+    // 화면은 에스컬레이터만 보여 주고 엘리베이터는 안 보이는 채로 도면 교체를
+    // 큐에 밀어 서로 덮는다. 반대 방향 가드는 `_beginElevatorGlide`에 있다.
+    //
+    // **조건을 붙여 부른다.** 무조건 부르면 엘리베이터가 아무것도 안 하고 있을
+    // 때도 공유 걸음 플래그를 건드려, 에스컬레이터가 방금 멈춘 걸음이 이 자리에서
+    // 다시 켜질 수 있다.
+    if (_elevatorGlide != null || _elevatorRideStage != null) {
+      await _endElevatorRide();
+      if (!mounted) return;
     }
 
     _applyingFloorTransition = true;

@@ -29,7 +29,13 @@ extension _MapShellSheets on _MapShellScreenState {
   /// **여기서 하는 이유**는 그래프와 매장 색인을 이 화면이 이미 들고 있어서다. 시트가
   /// 직접 받아 오면 데이터가 두 벌이 되고, 시트 테스트에 그래프부터 필요해진다.
   Future<List<NearbyStore>> _loadNearbyStores(String entranceNodeId) async {
-    final graph = await buildingRepository.getBuildingGraph(_buildingId);
+    // 이쪽은 간선을 실제로 밟는다([reachableFrom]). 정책을 안 실으면 목록에
+    // 적힌 거리와 그 매장으로 길찾기를 눌렀을 때의 거리가 서로 다른 간선 집합
+    // 위에서 나온다.
+    final graph = await buildingRepository.getBuildingGraph(
+      _buildingId,
+      vertical: _verticalQuery,
+    );
     final index = await buildingRepository.getStoreIndex(_buildingId);
     if (graph == null || index == null || graph.nodes.isEmpty) return const [];
 

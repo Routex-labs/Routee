@@ -108,21 +108,78 @@ enum FloorTransitionStage {
   swapping,
 }
 
+/// 안내 한 자리에 들어갈 배너를 고른다. **셋 중 하나만 그린다.**
+///
+/// 겹침은 실제로 일어난다 — 에스컬레이터 판정기의 "노드 없는 수직 이동" 갈래는
+/// 엘리베이터를 타는 동안에도 발화하고, 그때 도착 층을 **이웃 층으로 짐작한다**.
+/// 다섯 층을 올라가는 중에 "1F → 2F"가 뜨는 셈이라, 실제 엘리베이터 노드나 경로
+/// 구간이 근거인 [elevatorRide]가 [escalatorApproach]를 이긴다.
+///
+/// [escalatorRide]만 그 위다. 그쪽은 이미 도면을 갈아 끼우는 중이고 덮개 카드가
+/// **이 값으로 같은 문장**을 그린다 — 배너와 덮개가 다른 층을 말하면 한 화면
+/// 안에서 말이 갈린다.
+FloorTransitionUiState? mergeFloorTransitionUiState({
+  required FloorTransitionUiState? escalatorRide,
+  required FloorTransitionUiState? elevatorRide,
+  required FloorTransitionUiState? escalatorApproach,
+}) => escalatorRide ?? elevatorRide ?? escalatorApproach;
+
+/// 층을 옮기는 수단. 배너의 아이콘과 문구가 이 값으로 갈린다.
+///
+/// 판정기를 둘로 나눈 것과 같은 이유다 — 근거도 다르고 사용자가 보는 것도
+/// 다르다. 화면은 이 값만 보고 그린다.
+enum FloorTransitionVehicle { escalator, elevator }
+
 class FloorTransitionUiState {
   const FloorTransitionUiState({
     required this.stage,
+    required this.vehicle,
     required this.fromFloorLabel,
     required this.toFloorLabel,
     required this.goingUp,
   });
 
+  /// 엘리베이터를 타는 동안의 배너. 방향([goingUp])은 **측정 Δ의 부호**가 정한다.
+  ///
+  /// 단계를 안 받는다 — 에스컬레이터와 달리 사용자가 보는 것이 단계마다 갈리지
+  /// 않는다. 문이 닫힌 칸 안에서는 도면이 갈리는 것도, 남의 층에 서는 것도
+  /// 안 보이고, 일어나는 일은 "오르내리는 중" 하나뿐이다.
+  ///
+  /// 층 라벨은 **알 때만 넘긴다.** 경로 없이 타면 도착 층은 하차 확정 뒤에야
+  /// 나오고, 그때까지 지어낸 층을 적느니 방향만 적는 편이 낫다.
+  ///
+  /// 남은 층 수도 진행률도 안 적는다. 둘 다 고도표와 도착 층이 있어야 나오는데,
+  /// 그 조건이 갖춰진 탑승은 마커가 이미 활강으로 진행을 보여 준다
+  /// (`domain/guidance/elevator_ride.dart`). 조건이 없는 탑승에서는 아예 못 적고,
+  /// 층고가 3.23~7.11 m로 달라 "N층 남음"은 고르지 않은 폭으로 뛴다.
+  const FloorTransitionUiState.elevatorRiding({
+    required this.fromFloorLabel,
+    required this.toFloorLabel,
+    required this.goingUp,
+  }) : stage = FloorTransitionStage.moving,
+       vehicle = FloorTransitionVehicle.elevator;
+
   final FloorTransitionStage stage;
-  final String fromFloorLabel;
-  final String toFloorLabel;
+  final FloorTransitionVehicle vehicle;
+
+  /// 출발 층 · 도착 층. **모르면 null이다.** 둘 다 알 때만 `{출발} → {도착}`을
+  /// 적을 수 있고, 한쪽이라도 없으면 배너도 덮개도 층을 말하지 않는다.
+  final String? fromFloorLabel;
+  final String? toFloorLabel;
+
   final bool goingUp;
 
+  /// 두 층을 다 아는가. 배너의 큰 줄과 덮개 카드가 이 값으로 갈린다.
+  bool get hasFloorLabels => fromFloorLabel != null && toFloorLabel != null;
+
   /// 안내 배너의 큰 줄. 남은거리가 서는 자리라 **가는 곳**을 적는다.
-  String get headline => '$fromFloorLabel → $toFloorLabel';
+  ///
+  /// 층을 모르면 그 자리에 방향을 적는다 — 비워 두면 배너가 반쪽이 되고,
+  /// 방향은 층을 몰라도 잰 값이라 지어내는 것이 아니다.
+  String get headline =>
+      hasFloorLabels ? '$fromFloorLabel → $toFloorLabel' : _direction;
+
+  String get _direction => goingUp ? '올라가는 중' : '내려가는 중';
 
   /// 지금 사용자에게 일어나는 일. 안내 배너의 작은 줄과 스크림 캡션이 **같은
   /// 문장**을 쓴다 — 한 사건을 두 표면이 다르게 부르면 화면 안에서 말이 갈린다.
@@ -130,22 +187,29 @@ class FloorTransitionUiState {
   /// 도면을 갈아 끼우는 구간(`swapping`)도 "에스컬레이터로 이동 중"이다. 지도가
   /// 전환된다는 것은 앱의 사정이고, 그 사람에게 일어나는 일은 층 이동 하나다.
   ///
-  /// 층 라벨은 넣지 않는다 — 배너는 [headline]이, 스크림은 큰 글씨가 따로 그려서
-  /// 넣으면 같은 글자가 한 카드에 두 번 나온다.
-  String get detail => switch (stage) {
-    FloorTransitionStage.boarding => '에스컬레이터 탑승을 감지했습니다',
-    FloorTransitionStage.moving ||
-    FloorTransitionStage.swapping => '에스컬레이터로 이동 중',
+  /// **방향은 한 줄에만 적는다.** 층을 알면 [headline]이 가는 곳을, 이 줄이
+  /// 방향을 맡는다. 층을 모르면 [headline]이 방향을 이미 적었으므로 여기서는
+  /// 탑승 사실만 말한다 — 같은 말이 한 카드에 두 번 나오면 안 된다.
+  String get detail => switch (vehicle) {
+    FloorTransitionVehicle.escalator => switch (stage) {
+      FloorTransitionStage.boarding => '에스컬레이터 탑승을 감지했습니다',
+      FloorTransitionStage.moving ||
+      FloorTransitionStage.swapping => '에스컬레이터로 이동 중',
+    },
+    FloorTransitionVehicle.elevator =>
+      hasFloorLabels ? '엘리베이터로 $_direction' : '엘리베이터 탑승 중',
   };
 
   @override
   bool operator ==(Object other) =>
       other is FloorTransitionUiState &&
       other.stage == stage &&
+      other.vehicle == vehicle &&
       other.fromFloorLabel == fromFloorLabel &&
       other.toFloorLabel == toFloorLabel &&
       other.goingUp == goingUp;
 
   @override
-  int get hashCode => Object.hash(stage, fromFloorLabel, toFloorLabel, goingUp);
+  int get hashCode =>
+      Object.hash(stage, vehicle, fromFloorLabel, toFloorLabel, goingUp);
 }
