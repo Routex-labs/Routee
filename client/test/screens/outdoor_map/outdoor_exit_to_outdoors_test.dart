@@ -12,6 +12,7 @@ import 'package:navigation_client/service_locator.dart';
 import 'package:navigation_client/models/building/building.dart';
 import 'package:navigation_client/models/building/building_graph.dart';
 import 'package:navigation_client/models/route/indoor_route.dart';
+import 'package:navigation_client/models/route/transit_route.dart';
 import 'package:navigation_client/repositories/building/building_repository.dart';
 import 'package:navigation_client/repositories/place/destination_repository.dart';
 import 'package:navigation_client/repositories/place/mock_destination_repository.dart';
@@ -309,6 +310,77 @@ void main() {
       find.text('남은 시간'),
       findsOneWidget,
       reason: '야외 구간을 이어받았으면 안내 중 카드가 그 자리를 받는다',
+    );
+  });
+
+  testWidgets('나가기 버튼은 대중교통 승차 여정의 안내도 끊지 않는다', (WidgetTester tester) async {
+    // 실측 증상: 실내에서 대중교통(버스 등) 목적지로 안내를 걸고 건물을 나가면
+    // 도보 여정과 달리 `안내 시작` 버튼이 다시 떴다.
+    //
+    // 뿌리는 도보 여정과 같다 — [_dropIndoorPosition]이 여정이 문 밖에서
+    // 이어지는지를 [_pendingOutdoorDestination]만으로 판정하는데, 대중교통
+    // 승차 구간은 그 값을 예약하지 않는다(`showIndoorLegToTransitBoarding`이
+    // 야외 구간을 처음부터 통째로 그려서). 그래서 대중교통으로 나가는 사람은
+    // 언제나 세션이 끊겼다.
+    final positions = StreamController<Position>.broadcast();
+    await enterIndoorByButton(tester, positions);
+    await settleSensorWarmup(tester);
+
+    final state = tester.state<OutdoorMapBodyState>(find.byType(OutdoorMapBody));
+    final boardingOrigin = await state.showIndoorLegToTransitBoarding(
+      wellOutside,
+    );
+    await drain(tester);
+    expect(
+      boardingOrigin,
+      isNotNull,
+      reason: '테스트 전제(승차 구간의 실내 안내가 문까지 그려졌다)가 성립하지 않았다',
+    );
+
+    await state.showTransitRoute(
+      TransitItinerary(
+        totalTimeSeconds: 300,
+        totalWalkTimeSeconds: 300,
+        totalDistanceMeters: 50,
+        transferCount: 0,
+        legs: [
+          TransitLeg(
+            mode: TransitMode.walk,
+            sectionTimeSeconds: 300,
+            distanceMeters: 50,
+            points: [boardingOrigin!, wellOutside],
+          ),
+        ],
+      ),
+      destination: outsideDestination,
+      label: '정류장까지',
+      origin: boardingOrigin,
+    );
+    await drain(tester);
+
+    // 승차 구간 도보 위에 선 것으로 만든다 — 안내 시작은 지금 위치가 그려진
+    // 경로 위에 있어야 통과한다([canStartGuidanceFrom]).
+    positions.add(fix(boardingOrigin, 8));
+    await tester.pump(const Duration(milliseconds: 50));
+    await drain(tester);
+
+    await state.startGuidanceForPickedRoute();
+    await drain(tester);
+    expect(
+      find.text('안내 시작'),
+      findsNothing,
+      reason: '테스트 전제(대중교통 승차 여정의 안내를 시작했다)가 성립하지 않았다',
+    );
+
+    await leaveIndoorByButton(tester);
+    await drain(tester);
+    await settleSensorWarmup(tester);
+
+    expect(find.byType(FloorSelector), findsNothing, reason: '테스트 전제(야외로 나갔다)');
+    expect(
+      find.text('안내 시작'),
+      findsNothing,
+      reason: '대중교통을 타러 나간 사람에게 다시 안내를 시작하라고 하면 같은 여정이 두 번 시작된다',
     );
   });
 

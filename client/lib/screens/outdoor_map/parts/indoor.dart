@@ -67,7 +67,17 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     // 기본값대로 세션까지 끝내면 곧이어 도는 [_activatePendingOutdoorRoute]가
     // `_guidanceStarted`를 이미 false로 읽어, 이어받을 안내가 없다고 판단한다 —
     // 출구에서 `안내 시작` 버튼이 다시 뜨던 화면이 이것이다(실기기 증상).
-    _clearIndoorRoute(endGuidance: _pendingOutdoorDestination == null);
+    //
+    // **대중교통 승차 구간도 같은 값으로 본다.** 그쪽은 야외 구간을 예약하지
+    // 않고 안내를 걸 때 통째로 그려 두므로([showIndoorLegToTransitBoarding])
+    // [_pendingOutdoorDestination]이 끝까지 비어 있다. 그 값만 보면 대중교통으로
+    // 나가는 사람은 항상 세션이 끝나 정류장까지 가는 길에 `안내 시작`이 다시
+    // 뜬다 — 지금 실내 구간이 나가는 문으로 향하고 있는지([_exitEntranceOfIndoorRoute],
+    // `_clearIndoorRoute`가 지우기 **전에** 읽어야 한다)로 한 번 더 본다.
+    final continuesOutdoors =
+        _pendingOutdoorDestination != null ||
+        (_transitItinerary != null && _exitEntranceOfIndoorRoute != null);
+    _clearIndoorRoute(endGuidance: !continuesOutdoors);
     final recorder = _pdrDebugRecorder;
     if (_debugModeController.enabled && recorder != null) {
       // 방금 [_clearIndoorRoute]가 'routeEnded'를 찍었으므로 **그 뒤에** 덮는다.
