@@ -1720,7 +1720,11 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
     // 그래프가 없거나 시작 노드를 못 찾으면(냉초기 등) 목적지 기준 최근접으로
     // 물러선다 — 방향이 어긋날 수 있는 문이라도 아예 없는 것보다 낫다.
     final exit =
-        _nearestReachableEntrance(graph: exitGraph, origin: origin) ??
+        _nearestReachableEntrance(
+          graph: exitGraph,
+          origin: origin,
+          destination: destination,
+        ) ??
         nearestEntrance(_groundEntrances, destination);
     if (exit == null) {
       if (origin != null) {
@@ -1807,7 +1811,11 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
     if (!mounted) return null;
 
     final exit =
-        _nearestReachableEntrance(graph: boardingGraph, origin: origin) ??
+        _nearestReachableEntrance(
+          graph: boardingGraph,
+          origin: origin,
+          destination: boardingPoint,
+        ) ??
         nearestEntrance(_groundEntrances, boardingPoint);
     if (exit == null) return null;
 
@@ -1830,18 +1838,21 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   }
 
   /// [showIndoorToOutdoorRouteTo]·[showIndoorLegToTransitBoarding]이 함께 쓰는
-  /// 출구 선택. **목적지·정류장까지의 직선거리가 아니라, 지금 있는 곳(또는
-  /// [origin])에서 실내 그래프를 따라 가장 짧게 닿는 문**을 고른다.
+  /// 출구 선택. **실내 복도 거리와 [destination]까지의 야외 직선거리를 더한
+  /// 총 이동거리**가 가장 작은 문을 고른다([nearestEntranceByTotalJourney]).
   ///
-  /// 직선거리로 고르면 지도상 가까워 보이는 문이 실제로는 복도가 반대편으로
-  /// 돌아 나가는 문일 수 있어, 나가는 순간 실내에서 아낀 거리를 야외에서 훨씬
-  /// 크게 물게 된다(실측: 더현대 서울).
+  /// 실내 거리만 보면 지도상 반대편(목적지에서 먼 쪽) 문이 실내에서만 살짝
+  /// 가까워도 뽑혀, 나가는 순간 실내에서 아낀 거리를 야외에서 훨씬 크게 물게
+  /// 된다(실측: 더현대 서울). 반대로 목적지까지의 직선거리만 보면(예전 규칙)
+  /// 지도상 가까워 보이는 문이 실제로는 복도가 반대편으로 돌아 나가는 문일 수
+  /// 있다. 두 값을 더해야 실제로 걷는 총 거리에 가깝다.
   ///
   /// [graph]가 없거나 시작 노드를 못 찾으면(냉초기·앵커 없음 등) null — 호출부가
   /// 목적지 기준 최근접([nearestEntrance])으로 물러선다.
   BuildingEntrance? _nearestReachableEntrance({
     required BuildingGraph? graph,
     required PoiSearchResult? origin,
+    required ll.LatLng destination,
   }) {
     if (graph == null || _groundEntrances.isEmpty) return null;
     final originNodeId = origin?.nodeId;
@@ -1867,16 +1878,12 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
       return null;
     }
 
-    BuildingEntrance? best;
-    var bestDistance = double.infinity;
-    for (final entrance in _groundEntrances) {
-      final nodeId = entranceRouteNodeId(graph.nodes, entrance);
-      final distance = reach[nodeId]?.distanceM;
-      if (distance == null || distance >= bestDistance) continue;
-      bestDistance = distance;
-      best = entrance;
-    }
-    return best;
+    final reachable = <({BuildingEntrance entrance, double indoorDistanceM})>[
+      for (final entrance in _groundEntrances)
+        if (reach[entranceRouteNodeId(graph.nodes, entrance)] case final r?)
+          (entrance: entrance, indoorDistanceM: r.distanceM),
+    ];
+    return nearestEntranceByTotalJourney(reachable, destination);
   }
 
   /// 이 화면에 그려진 안내를 **전부** 지운다 — 야외 도보 구간과 실내 구간까지.

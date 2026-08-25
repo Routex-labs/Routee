@@ -177,6 +177,39 @@ void main() {
     });
   });
 
+  group('nearestEntranceByTotalJourney', () {
+    test('후보가 없으면 null', () {
+      expect(nearestEntranceByTotalJourney(const [], _center), isNull);
+    });
+
+    test('실내에서 더 가까운 문이라도 야외로 훨씬 멀면 고르지 않는다', () {
+      // 실측 증상 재현: 목적지(정류장)는 서쪽 문 바로 앞인데, 실내 복도로는
+      // 동쪽 문이 20 m 더 가깝다고 하자. 실내 거리만 보면 동쪽 문을 고르지만
+      // (예전 버그), 총 이동거리로 보면 서쪽 문이 훨씬 짧다.
+      final destination = LatLng(
+        _west.latitude,
+        _west.longitude - 0.00002, // 서쪽 문 바로 옆(약 2 m)
+      );
+      final picked = nearestEntranceByTotalJourney([
+        (entrance: _entrance('east', _northEast), indoorDistanceM: 10.0),
+        (entrance: _entrance('west', _west), indoorDistanceM: 30.0),
+      ], destination);
+
+      expect(picked!.id, 'west');
+    });
+
+    test('실내 거리 차가 야외 거리 차보다 크면 실내가 가까운 문을 고른다', () {
+      // 두 문 다 목적지에서 비슷하게 멀 때는 실내 복도가 짧은 쪽이 총 거리도
+      // 짧다 — 이 함수가 실내 거리를 무시하지 않는다는 것을 확인한다.
+      final picked = nearestEntranceByTotalJourney([
+        (entrance: _entrance('near', _south), indoorDistanceM: 5.0),
+        (entrance: _entrance('far', _southEast), indoorDistanceM: 200.0),
+      ], _center);
+
+      expect(picked!.id, 'near');
+    });
+  });
+
   group('entranceDirectionLabel', () {
     test('건물 중심 기준 방위를 이름 앞에 붙인다', () {
       expect(entranceDirectionLabel(_entrance('s', _south), _center), '남쪽 출구');

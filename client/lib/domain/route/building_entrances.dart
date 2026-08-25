@@ -121,6 +121,39 @@ BuildingEntrance? nearestEntrance(
   return heldDistance - bestDistance > switchMarginMeters ? best : held;
 }
 
+/// 실내 복도 거리와 목적지까지의 야외 직선거리를 더한 **총 이동거리**가 가장
+/// 작은 문을 고른다. 후보가 없으면 null.
+///
+/// [reachable]은 실내 그래프로 실제 닿을 수 있는 문과 그 복도 거리만 담아야
+/// 한다 — 못 닿는 문은 호출자가 애초에 넣지 않는다.
+///
+/// **실내 거리만으로 고르면 안 되는 이유.** 실내에서 살짝 더 가까운 문이라도
+/// 목적지가 반대편이면 그 문으로 나가는 순간 아낀 거리보다 훨씬 큰 우회가
+/// 야외에 생긴다. 반대로 목적지까지의 직선거리만 보면(예전 규칙) 복도가 실제로
+/// 그 문까지 안 닿거나 훨씬 돌아가는 경우를 놓친다. 두 거리를 더해야 실제로
+/// 걷는 총 거리에 가장 가까운 값으로 문을 고를 수 있다.
+///
+/// 야외 구간은 직선이 아니라 도로를 따라 걷지만, 문을 고르는 시점에는 아직
+/// TMAP을 부르지 않았으므로(문마다 호출하면 후보 수만큼 API가 나간다) 직선
+/// 거리를 대리 지표로 쓴다 — [nearestEntrance]가 목적지 기준으로 문을 고를
+/// 때와 같은 근사다.
+BuildingEntrance? nearestEntranceByTotalJourney(
+  List<({BuildingEntrance entrance, double indoorDistanceM})> reachable,
+  LatLng destination,
+) {
+  BuildingEntrance? best;
+  var bestTotal = double.infinity;
+  for (final candidate in reachable) {
+    final outdoorM = wgs84DistanceMeters(candidate.entrance.point, destination);
+    final total = candidate.indoorDistanceM + outdoorM;
+    if (total < bestTotal) {
+      bestTotal = total;
+      best = candidate.entrance;
+    }
+  }
+  return best;
+}
+
 /// 사용자에게 보일 문 이름을 만든다(예: "남쪽 출구").
 ///
 /// 원본 이름이 5개 모두 "출구"라 그대로 쓰면 어느 문인지 알 수 없다. 건물
