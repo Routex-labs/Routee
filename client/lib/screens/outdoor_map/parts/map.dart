@@ -87,6 +87,10 @@ extension OutdoorMapMap on OutdoorMapBodyState {
     // 현재 층 외곽선. 경로선 다음이어야 하는 이유는 그 함수 doc에 있다.
     await registerFloorOutlineLayer(controller);
 
+    // 위치 마커 비트맵. **GPS 마커도 이 심볼을 쓰므로 그 레이어보다 먼저다** —
+    // 예전에는 PDR 마커 전용이라 훨씬 뒤에서 구웠다.
+    await registerLocationMarkerImages(controller);
+
     // 현재 위치(GPS)와 야외 목적지 핀. 등록 순서가 곧 쌓임 순서다.
     await registerCurrentLocationLayers(controller);
     await registerDestinationLayer(controller);
@@ -96,9 +100,7 @@ extension OutdoorMapMap on OutdoorMapBodyState {
     await registerGateLayers(controller);
     await registerHighlightLayers(controller);
 
-    // PDR 마커 비트맵을 먼저 굽고, 진단 레이어를 그 사이에 끼운 뒤 마커를
-    // 얹는다 — 순서의 근거는 각 함수 doc에 있다.
-    await registerPdrLocationImages(controller);
+    // 진단 레이어를 끼운 뒤 PDR 마커를 얹는다 — 순서의 근거는 각 함수 doc에 있다.
     await registerPdrDebugLayers(controller);
     await registerPdrLocationLayer(controller);
 
@@ -414,21 +416,29 @@ extension OutdoorMapMap on OutdoorMapBodyState {
   @visibleForTesting
   void exitIndoorByZoomOutForTest() => _exitIndoorByZoomOut();
 
-  /// GPS 현재 위치 마커. 실내에서는 [_outdoorGpsVisible]이 false라 항상 빈
-  /// 소스로 밀어 넣어 마커가 지도에서 사라진다 — [_syncGpsSubscription]이
-  /// `_position`을 비우는 것과 이중으로 막아, 어느 경로로 들어와도 건물 안에서
-  /// GPS 기반 위치가 보이지 않게 한다.
+  /// GPS 현재 위치 마커. 실내 위치가 화면의 주인일 때는 [_outdoorGpsVisible]이
+  /// false라 항상 빈 소스로 밀어 넣어 마커가 지도에서 사라진다 —
+  /// [_syncGpsSubscription]이 `_position`을 비우는 것과 이중으로 막아, 어느
+  /// 경로로 들어와도 실내 마커와 GPS 마커가 함께 뜨지 않게 한다.
+  ///
+  /// 방향은 [_outdoorHeadingDeg]가 정한다. null이면 삼각형 없이 도트만 그려진다.
   Future<void> _syncCurrentLayer() async {
+    // 실내 마커 쪽이 이 값을 보고 "GPS 마커도 다시 써야 하는가"를 가린다
+    // ([_syncPdrCurrentLayer]). 컨트롤러가 없어 되돌아가는 길에서도 맞춰 둬야,
+    // 지도가 붙는 순간의 첫 쓰기가 빠지지 않는다.
+    _outdoorGpsMarkerShown = _outdoorGpsVisible;
     final controller = _mapController;
     if (controller == null || !_styleReady) {
       _pendingCenterOnPosition = _outdoorGpsVisible && _position != null;
       return;
     }
     final pos = _outdoorGpsVisible ? _position : null;
-    await syncPointSource(
-      controller,
+    await controller.setGeoJsonSource(
       kOutdoorCurrentSourceId,
-      pos == null ? null : ll.LatLng(pos.latitude, pos.longitude),
+      locationMarkerData(
+        pos == null ? null : ll.LatLng(pos.latitude, pos.longitude),
+        headingDeg: pos == null ? null : _outdoorHeadingDeg,
+      ),
     );
   }
 

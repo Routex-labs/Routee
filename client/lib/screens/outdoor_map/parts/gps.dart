@@ -50,8 +50,10 @@ extension OutdoorMapGps on OutdoorMapBodyState {
     if (!mounted) return;
     setState(() => _position = null);
     // 구독이 끊긴 동안 사용자는 어디로든 갈 수 있다. 옛 기준점을 들고 있으면
-    // 돌아왔을 때 옳은 좌표를 거른다.
+    // 돌아왔을 때 옳은 좌표를 거른다. 방향도 함께 잊는다 — 좌표를 버리는 자리라,
+    // 남겨 두면 돌아온 첫 마커가 끊기기 전 방향을 가리킨다.
     _gpsJumpFilter = const GpsJumpFilterState();
+    _outdoorHeading.reset();
     _syncCurrentLayer();
   }
 
@@ -61,6 +63,7 @@ extension OutdoorMapGps on OutdoorMapBodyState {
     // 구독이 끊긴 동안 사용자는 어디로든 갈 수 있다. 옛 기준점을 들고 있으면
     // 돌아왔을 때 옳은 좌표를 거른다.
     _gpsJumpFilter = const GpsJumpFilterState();
+    _outdoorHeading.reset();
     _syncCurrentLayer();
   }
 
@@ -101,6 +104,14 @@ extension OutdoorMapGps on OutdoorMapBodyState {
         return;
       }
     }
+    // 방향은 **받아들인 좌표에서만** 뽑는다. 거른 좌표(위에서 이미 return한 것)
+    // 로 방향을 갱신하면, 그리지도 않는 자리로 튄 각이 삼각형에 남는다.
+    _outdoorHeading.track(
+      headingDeg: position.heading,
+      headingAccuracyDeg: position.headingAccuracy,
+      speedMps: position.speed,
+      at: position.timestamp,
+    );
     // 실내에서도 좌표는 **들고 있는다.** 진입/이탈 판정의 유일한 입력이고,
     // 화면에 그릴지는 [_outdoorGpsVisible]이 따로 가른다([_syncCurrentLayer]).
     setState(() => _position = position);

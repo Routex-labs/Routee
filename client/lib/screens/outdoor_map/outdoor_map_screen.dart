@@ -106,6 +106,7 @@ import '../../map/icon/place_pin.dart';
 import 'widgets/map_overlay_tap_guard.dart';
 import 'entry/anchor_corridor_axis.dart';
 import 'entry/floor_outline.dart';
+import 'gps/gps_heading_policy.dart';
 import 'gps/gps_jump_filter.dart';
 import 'entry/heading_debug.dart';
 import 'entry/heading_log.dart';
@@ -632,6 +633,21 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
 
   /// 도약 거르기가 들고 있는 기준점. 규칙은 [stepGpsJumpFilter].
   GpsJumpFilterState _gpsJumpFilter = const GpsJumpFilterState();
+
+  /// 야외 마커의 방향 삼각형이 볼 값. 규칙과 상수는 [OutdoorHeadingTracker].
+  final OutdoorHeadingTracker _outdoorHeading = OutdoorHeadingTracker();
+
+  /// 지금 GPS 마커에 그릴 방향(진북 기준). null이면 삼각형 없이 도트만 그린다 —
+  /// 서 있거나 기기가 방향을 못 주는 동안이다.
+  double? get _outdoorHeadingDeg => _outdoorHeading.headingDeg;
+
+  /// GPS 마커를 마지막으로 **그리기로 한** 상태.
+  ///
+  /// 실내 마커 쪽이 이 값을 보고 자기 갱신에 GPS 마커 갱신을 함께 태울지 가른다
+  /// ([_syncPdrCurrentLayer]). 둘은 서로의 반대쪽이라, 앵커가 잡히는 순간처럼
+  /// 한쪽만 다시 그리는 자리에서 이 짝을 안 맞추면 마커가 둘 다 뜨거나 둘 다
+  /// 사라진다.
+  bool _outdoorGpsMarkerShown = false;
 
   /// 지금 그려진 대중교통 안내. null이면 대중교통 경로가 없다.
   TransitItinerary? _transitItinerary;
