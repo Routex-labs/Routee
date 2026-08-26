@@ -204,8 +204,6 @@ class IndoorGuidanceSession {
   int? _boardingApproachLastPeakId;
   int? _boardingApproachLastConfirmedSteps;
   double? _boardingApproachLastDistanceM;
-  int _boardingVestibuleEvidencePeaks = 0;
-  double? _boardingVestibuleLastDistanceM;
 
   /// 마지막으로 신뢰한 graph 위치에서 원시 PDR의 **이동 벡터만** 이어 붙인
   /// 탑승 접근 그림자. 화면에는 그리지 않고, 열린 공간에서 경로 간선을 잘라
@@ -214,10 +212,6 @@ class IndoorGuidanceSession {
   PdrLocalPoint? _boardingApproachShadowLastRawM;
   String? _boardingApproachShadowNodeId;
   double? _boardingApproachShadowHeadingBiasDeg;
-  int _boardingApproachShadowEvidencePeaks = 0;
-  int? _boardingApproachShadowLastPeakId;
-  int? _boardingApproachShadowLastConfirmedSteps;
-  double? _boardingApproachShadowLastDistanceM;
 
   bool get isAttached => _attached;
   String? get buildingId => _buildingId;
@@ -307,12 +301,6 @@ class IndoorGuidanceSession {
     _boardingApproachLastPeakId = null;
     _boardingApproachLastConfirmedSteps = null;
     _boardingApproachLastDistanceM = null;
-    _boardingVestibuleEvidencePeaks = 0;
-    _boardingVestibuleLastDistanceM = null;
-    _boardingApproachShadowEvidencePeaks = 0;
-    _boardingApproachShadowLastPeakId = null;
-    _boardingApproachShadowLastConfirmedSteps = null;
-    _boardingApproachShadowLastDistanceM = null;
   }
 
   void _clearBoardingApproachShadow() {
@@ -554,11 +542,10 @@ class IndoorGuidanceSession {
   /// 탑승 직후 Δ가 0인 몇 초 동안 걸음이 옆 복도로 스냅되지 않게 한다. 임계값과
   /// 실측 근거의 단일 출처는 `docs/client/escalator-thresholds.md`다.
   /// - **재탐색 차단**: `routeApproachArmRadiusM`(16m). 틀려도 몇 초 늦을 뿐이다.
-  /// - **가시 고정 후보**: 판정기의 `boardingApproachRadiusM`(3m) 안에서 활성
-  ///   경로를 따라 전진하는 서로 다른 peak를 센다.
+  /// - **가시 고정 후보**: 활성 경로를 따라 실제 탑승 노드
+  ///   [boardingApproachVisibleSnapRadiusM]m 안으로 들어온 서로 다른 peak를 센다.
   /// - **위치 고정**: 후보가 [boardingApproachVisiblePeakCount]번 이어지거나 탑승
-  ///   노드를 실제 통과하면 건다. 노드에서 [boardingApproachVisibleSnapRadiusM]
-  ///   안일 때만 노드에 붙이고, 아니면 그 순간 보이던 위치를 붙든다.
+  ///   노드를 실제 통과하면 건다. 이때는 실제 탑승 노드에 붙인다.
   ///
   /// 짧은 기압 인계 유예 뒤 `boardingAbandonRadiusM`에서 풀리고,
   /// 반경 안에서도 새 걸음 없이 `boardingPhaseTimeoutMs`(40초)가 지나면 접는다.
@@ -664,32 +651,11 @@ class IndoorGuidanceSession {
     }
     final previousConfirmedSteps = _boardingApproachLastConfirmedSteps;
     _boardingApproachLastConfirmedSteps = confirmedSteps;
-    final vestibule = _boardingVestibule(
-      route: route,
-      graph: graph,
-      boardingNodeId: boardingNodeId,
-    );
     var sawNewOptimisticStep = false;
-    int? latestPeakId;
     for (final optimisticStep in result.optimisticStepAdvances) {
       if (_boardingApproachLastPeakId == optimisticStep.peakId) continue;
       sawNewOptimisticStep = true;
-      latestPeakId = optimisticStep.peakId;
       _boardingApproachLastPeakId = optimisticStep.peakId;
-      if (vestibule != null &&
-          _optimisticStepReachedBoardingVestibule(
-            step: optimisticStep,
-            route: route,
-            graph: graph,
-            vestibuleNodeId: vestibule.nodeId,
-          )) {
-        _holdBoardingApproach(
-          holdPoint: holdPoint,
-          currentM: optimisticStep.position,
-          atMs: atMs,
-        );
-        return;
-      }
       final routeStep = adaptOptimisticStepToRoute(
         step: optimisticStep,
         graph: graph,
@@ -704,20 +670,6 @@ class IndoorGuidanceSession {
       if (!trustedForward) {
         _rejectBoardingApproachEvidence();
         continue;
-      }
-      if (vestibule != null &&
-          _acceptBoardingVestibuleEvidence(
-            markerDistanceM: (vestibule.pointM - marker).distance,
-            crossedVestibule: routeStep.crossedRouteWaypointIds.contains(
-              vestibule.nodeId,
-            ),
-          )) {
-        _holdBoardingApproach(
-          holdPoint: holdPoint,
-          currentM: marker,
-          atMs: atMs,
-        );
-        return;
       }
       final markerDistanceM = (holdPoint - marker).distance;
       final crossedBoarding = routeStep.crossedRouteWaypointIds.contains(
@@ -735,44 +687,9 @@ class IndoorGuidanceSession {
         return;
       }
     }
-    if (_acceptBoardingApproachShadowEvidence(
-      result: result,
-      confirmedSteps: confirmedSteps,
-      latestPeakId: latestPeakId,
-      holdPoint: holdPoint,
-    )) {
-      _holdBoardingApproach(
-        holdPoint: holdPoint,
-        currentM: result.previewPosition,
-        atMs: atMs,
-      );
-      return;
-    }
     final hasNewConfirmedStep =
         previousConfirmedSteps != null &&
         confirmedSteps > previousConfirmedSteps;
-    if (!sawNewOptimisticStep &&
-        hasNewConfirmedStep &&
-        vestibule != null &&
-        _isConfirmedForwardOnRouteEdge(
-          route: route,
-          graph: graph,
-          result: result,
-          edgeIndex: route.edgeIds.length - 2,
-          allowJunctionAmbiguity: true,
-        ) &&
-        _acceptBoardingVestibuleEvidence(
-          markerDistanceM:
-              (vestibule.pointM - result.correctedPosition).distance,
-          crossedVestibule: false,
-        )) {
-      _holdBoardingApproach(
-        holdPoint: holdPoint,
-        currentM: result.correctedPosition,
-        atMs: atMs,
-      );
-      return;
-    }
     if (sawNewOptimisticStep || !hasNewConfirmedStep) {
       return;
     }
@@ -795,120 +712,6 @@ class IndoorGuidanceSession {
         atMs: atMs,
       );
     }
-  }
-
-  /// 짧은 마지막 간선으로 에스컬레이터에 직접 붙는 직전 노드.
-  ///
-  /// 이 노드에서는 사람이 graph의 마지막 직각을 정확히 밟지 않고 눈앞의 발판을
-  /// 탈 수 있다. 마지막 간선이 기존 물리 허가 반경(6m) 안일 때만 전실로 인정해,
-  /// 긴 일반 복도 초입에서 마커가 멈추는 실패를 막는다.
-  ({String nodeId, PdrLocalPoint pointM})? _boardingVestibule({
-    required IndoorRoute route,
-    required FloorGraph graph,
-    required String boardingNodeId,
-  }) {
-    if (route.nodeIds.length < 3 || route.edgeIds.length < 2) return null;
-    if (route.nodeIds.last != boardingNodeId) return null;
-    final vestibuleNodeId = route.nodeIds[route.nodeIds.length - 2];
-    final edge = graph.edges
-        .where((item) => item.id == route.edgeIds.last)
-        .firstOrNull;
-    if (edge == null || edge.lengthM > _escalator.config.armRadiusM) {
-      return null;
-    }
-    final directlyConnected =
-        (edge.fromNodeId == vestibuleNodeId &&
-            edge.toNodeId == boardingNodeId) ||
-        (edge.toNodeId == vestibuleNodeId && edge.fromNodeId == boardingNodeId);
-    if (!directlyConnected) return null;
-    final node = graph.nodes
-        .where((item) => item.id == vestibuleNodeId)
-        .firstOrNull;
-    if (node == null) return null;
-    return (nodeId: node.id, pointM: PdrLocalPoint(node.xM, node.yM));
-  }
-
-  bool _optimisticStepReachedBoardingVestibule({
-    required OptimisticStepAdvance step,
-    required IndoorRoute route,
-    required FloorGraph graph,
-    required String vestibuleNodeId,
-  }) {
-    if (step.leaderRelocated ||
-        step.previewIsAmbiguous ||
-        !step.crossedNodeIds.contains(vestibuleNodeId)) {
-      return false;
-    }
-    final incomingIndex = route.edgeIds.length - 2;
-    final edgeId = route.edgeIds[incomingIndex];
-    final edge = graph.edges.where((item) => item.id == edgeId).firstOrNull;
-    if (edge == null) return false;
-    final routeFrom = route.nodeIds[incomingIndex];
-    final expectedSign =
-        edge.fromNodeId == routeFrom && edge.toNodeId == vestibuleNodeId
-        ? 1
-        : edge.toNodeId == routeFrom && edge.fromNodeId == vestibuleNodeId
-        ? -1
-        : 0;
-    if (expectedSign == 0) return false;
-    return step.traversals.any(
-      (item) => item.edgeId == edgeId && item.edgeDirectionSign == expectedSign,
-    );
-  }
-
-  bool _acceptBoardingVestibuleEvidence({
-    required double markerDistanceM,
-    required bool crossedVestibule,
-  }) {
-    final wasApproaching =
-        _boardingVestibuleLastDistanceM == null ||
-        markerDistanceM <= _boardingVestibuleLastDistanceM! + 0.1;
-    _boardingVestibuleLastDistanceM = markerDistanceM;
-    if (!crossedVestibule &&
-        (markerDistanceM > boardingApproachVisibleSnapRadiusM ||
-            !wasApproaching)) {
-      _boardingVestibuleEvidencePeaks = 0;
-      return false;
-    }
-    _boardingVestibuleEvidencePeaks++;
-    return crossedVestibule ||
-        _boardingVestibuleEvidencePeaks >= boardingApproachVisiblePeakCount;
-  }
-
-  bool _acceptBoardingApproachShadowEvidence({
-    required CorridorTrackingResult result,
-    required int confirmedSteps,
-    required int? latestPeakId,
-    required PdrLocalPoint holdPoint,
-  }) {
-    final shadowM = _boardingApproachShadowM;
-    if (shadowM == null) return false;
-    var hasNewStep = false;
-    if (latestPeakId != null &&
-        latestPeakId != _boardingApproachShadowLastPeakId) {
-      _boardingApproachShadowLastPeakId = latestPeakId;
-      hasNewStep = true;
-    } else if (latestPeakId == null) {
-      final previousConfirmed = _boardingApproachShadowLastConfirmedSteps;
-      _boardingApproachShadowLastConfirmedSteps = confirmedSteps;
-      hasNewStep =
-          previousConfirmed != null && confirmedSteps > previousConfirmed;
-    }
-    if (!hasNewStep) return false;
-
-    final distanceM = (holdPoint - shadowM).distance;
-    final wasApproaching =
-        _boardingApproachShadowLastDistanceM == null ||
-        distanceM <= _boardingApproachShadowLastDistanceM! + 0.1;
-    _boardingApproachShadowLastDistanceM = distanceM;
-    if (distanceM > _escalator.config.boardingApproachRadiusM ||
-        !wasApproaching) {
-      _boardingApproachShadowEvidencePeaks = 0;
-      return false;
-    }
-    _boardingApproachShadowEvidencePeaks++;
-    return _boardingApproachShadowEvidencePeaks >=
-        boardingApproachVisiblePeakCount;
   }
 
   void _holdBoardingApproach({
@@ -974,7 +777,7 @@ class IndoorGuidanceSession {
         markerDistanceM <= _boardingApproachLastDistanceM! + 0.1;
     _boardingApproachLastDistanceM = markerDistanceM;
     if (!crossedBoarding &&
-        (markerDistanceM > _escalator.config.boardingApproachRadiusM ||
+        (markerDistanceM > boardingApproachVisibleSnapRadiusM ||
             !wasApproaching)) {
       _boardingApproachEvidencePeaks = 0;
       return false;
@@ -986,8 +789,6 @@ class IndoorGuidanceSession {
 
   void _rejectBoardingApproachEvidence() {
     _rejectBoardingNodeApproachEvidence();
-    _boardingVestibuleEvidencePeaks = 0;
-    _boardingVestibuleLastDistanceM = null;
   }
 
   void _rejectBoardingNodeApproachEvidence() {
