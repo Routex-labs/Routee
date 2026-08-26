@@ -834,14 +834,30 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
             entranceRouteNodeId(graph.nodes, entrance),
             endNodeId,
           );
+    final wasTargeting = _journeyEntrance;
     setState(() {
       _journeyEntrance = entrance;
       _userDestination = entrance.point;
       _userDestinationLabel = _journeyEtaLabel(destination, entrance);
       // 새 문에서 경로가 안 풀리면 옛 구간을 남기지 않는다. 남기면 사용자는
       // 남쪽 문으로 걸어가는데 실내 안내만 서쪽 문에서 시작하는 상태가 된다.
+      // 비어도 진입은 막히지 않는다 — 들어온 문에서 그 자리에서 다시 푼다
+      // ([_solveIndoorLegFromJourneyEntrance]).
       _pendingIndoorRoute = (leg == null || leg.isEmpty) ? null : leg;
     });
+    // **바뀌었으면 말한다.** 카드 라벨과 야외 도착점이 함께 바뀌는데 조용히
+    // 바꾸면 "남서쪽 출구로 가고 있었는데 갑자기 남쪽 출구"가 되어, 앱이 엉뚱한
+    // 데로 데려가는 것으로 읽힌다. 문 선택에는 15 m 히스테리시스가 있어
+    // ([kEntranceSwitchMarginMeters]) 서 있는 동안 왔다갔다 하지는 않는다.
+    //
+    // **처음 고르는 것은 바뀐 것이 아니다**([wasTargeting]이 null) — 그건 안내를
+    // 걸 때 이미 카드에 적힌 문이라, 여기서 또 말하면 시작하자마자 한 줄이 뜬다.
+    // 걷는 중일 때만 말한다: 계획 화면에서는 아직 그 문으로 향한 적이 없다.
+    if (wasTargeting != null && _guidanceStarted) {
+      _showSnack(
+        '${entranceDirectionLabel(entrance, _buildingCenter(_buildingFootprint ?? const []))}로 안내를 바꿨습니다',
+      );
+    }
   }
 
   /// 건물에 들어간 순간, 미리 풀어 둔 실내 구간을 실제 안내로 승격한다.

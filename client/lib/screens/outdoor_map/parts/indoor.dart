@@ -524,6 +524,22 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
   /// **깨지는 자리 둘.** 위치를 아직 못 잡았거나(GPS null) 출입구 데이터가 없으면
   /// 아무것도 하지 않고 이유만 말한다. 버튼 게이트가 앞의 것을 이미 막지만, 좌표는
   /// 누르는 사이에도 사라질 수 있다.
+  /// 지금 통과한다고 볼 문. 앵커를 찍는 자리와 안내가 향하던 자리를 **하나로**
+  /// 묶는다.
+  ///
+  /// **안내가 향하던 문이 있으면 그것이다**([_journeyEntrance]). 앵커만 GPS
+  /// 최근접으로 따로 고르면, 실내 경로는 A문에서 시작하는데 마커는 B문에 찍혀
+  /// 들어서자마자 둘이 어긋난다 — 문 선택에는 15 m 히스테리시스가 있어
+  /// ([kEntranceSwitchMarginMeters]) 두 값이 실제로 갈리는 구간이 생긴다.
+  ///
+  /// 향하던 문이 없으면(안내 없이 탭으로 들어온 경우) GPS 최근접이다.
+  BuildingEntrance? _entranceBeingEntered(Position position) =>
+      _journeyEntrance ??
+      nearestEntrance(
+        _groundEntrances,
+        ll.LatLng(position.latitude, position.longitude),
+      );
+
   Future<void> enterIndoorFromGuidance() async {
     if (_indoorEntered) return;
     final position = _position;
@@ -531,10 +547,7 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
       _showSnack('현재 위치를 아직 못 잡았습니다. 신호가 잡히면 다시 눌러주세요.');
       return;
     }
-    final entrance = nearestEntrance(
-      _groundEntrances,
-      ll.LatLng(position.latitude, position.longitude),
-    );
+    final entrance = _entranceBeingEntered(position);
     final floor = _groundEntranceFloor;
     if (entrance == null || floor == null) {
       _showSnack('건물 출입구 정보가 없어 실내로 들어갈 수 없습니다.');
@@ -1133,10 +1146,7 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     if (indoorNavigationDriver.currentCalibration.canRenderPosition) return;
     final position = _position;
     if (position == null || !indoorEntryGate.enabled) return;
-    final entrance = nearestEntrance(
-      _groundEntrances,
-      ll.LatLng(position.latitude, position.longitude),
-    );
+    final entrance = _entranceBeingEntered(position);
     final floor = _groundEntranceFloor;
     if (entrance == null || floor == null) return;
     // 이 갈래의 전제는 "방금 저 문으로 들어왔다"이고, 그 사람은 **그 문이 있는
