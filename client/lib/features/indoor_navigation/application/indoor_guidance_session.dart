@@ -204,6 +204,8 @@ class IndoorGuidanceSession {
   int? _boardingApproachLastPeakId;
   int? _boardingApproachLastConfirmedSteps;
   double? _boardingApproachLastDistanceM;
+  bool _wasFollowingRouteIntoBoarding = false;
+  bool _routeBoardingTerminalLocked = false;
 
   /// 마지막으로 신뢰한 graph 위치에서 원시 PDR의 **이동 벡터만** 이어 붙인
   /// 탑승 접근 그림자. 화면에는 그리지 않고, 열린 공간에서 경로 간선을 잘라
@@ -243,6 +245,38 @@ class IndoorGuidanceSession {
   /// 뿐이지만, 위치 고정은 틀리면 걸어가는 사용자의 마커가 안 따라간다.
   bool get isNearRouteBoarding => _boardingApproachGateOpen;
 
+  /// 탑승 감지 직전까지 이 경로를 정상 전진했는가.
+  ///
+  /// 화면의 탑승점 활강은 이 근거가 있을 때만 시작한다. 단순 근접·오인식에서
+  /// 멀리 있는 에스컬레이터로 marker를 끌고 가면 안 된다.
+  bool get wasFollowingRouteIntoBoarding => _wasFollowingRouteIntoBoarding;
+
+  /// 화면 활강이 실제 탑승 노드에 닿았을 때 그 자리에 고정한다.
+  ///
+  /// PDR이 직각 코너를 자르면 실제 좌표는 노드를 스치지 않을 수 있다. 하지만
+  /// 경로를 따라 정상 접근해 `boardingDetected`까지 도달했다면, 화면은 남은
+  /// 경로 간선을 따라 도착한 뒤 그 노드에서 탑승 lock을 시작해야 한다.
+  bool lockRouteBoardingTerminal({required String boardingNodeId}) {
+    if (!_wasFollowingRouteIntoBoarding ||
+        (_escalator.phase != EscalatorPhase.boardingDetected &&
+            _escalator.phase != EscalatorPhase.verticalMotionDetected)) {
+      return false;
+    }
+    final holdPoint = routeBoardingHoldPoint(
+      boardingNodeId: boardingNodeId,
+      anchorFloorId: _anchor?.floorId,
+      displayedFloorId: _floorId,
+      multiFloorRoute: _multiFloorRoute,
+      graph: _graph,
+    );
+    if (holdPoint == null) return false;
+    _approachHoldPointM = holdPoint;
+    _boardingHoldPointM = holdPoint;
+    _approachHoldEnteredAtMs = _nowMs();
+    _routeBoardingTerminalLocked = true;
+    return true;
+  }
+
   /// 복도 보정 결과 원본. 디버그 궤적과 경로 진행률이 함께 쓴다.
   CorridorTrackingResult? get trackingResult =>
       _attached ? _corridor.result : null;
@@ -281,6 +315,7 @@ class IndoorGuidanceSession {
     _verticalObservationHoldPointM = null;
     _approachHoldPointM = null;
     _approachHoldEnteredAtMs = null;
+    _routeBoardingTerminalLocked = false;
   }
 
   /// 접근 근거 자체를 버린다. [clearBoardingHold]와 나눈 이유는 **시간 상한** 때문이다 —
@@ -301,6 +336,8 @@ class IndoorGuidanceSession {
     _boardingApproachLastPeakId = null;
     _boardingApproachLastConfirmedSteps = null;
     _boardingApproachLastDistanceM = null;
+    _wasFollowingRouteIntoBoarding = false;
+    _routeBoardingTerminalLocked = false;
   }
 
   void _clearBoardingApproachShadow() {
@@ -403,11 +440,13 @@ class IndoorGuidanceSession {
     final anchor = _anchor;
     if (anchor == null || anchor.floorId != _floorId) return null;
     final atMs = timestampMs ?? _nowMs();
+    // 종점 강제 후보는 경로를 정상 전진해 탑승 감지까지 도달한 경우에만 쓴다.
+    // raw PDR이 마지막 모퉁이를 자르면 내부 후보는 이 경로에 남기되, 화면은
+    // continuity shadow가 연결된 간선을 따라 뒤늦게 합류한다.
     final lockBoardingTerminal =
-        _boardingApproachGateOpen &&
-        (_approachHoldPointM != null ||
-            (_boardingApproachDistanceM ?? double.infinity) <=
-                _escalator.config.armRadiusM);
+        _approachHoldPointM != null ||
+        (_escalator.phase == EscalatorPhase.boardingDetected &&
+            _wasFollowingRouteIntoBoarding);
     final result = _corridor.update(
       graph: _graph,
       anchor: anchor,
@@ -455,6 +494,19 @@ class IndoorGuidanceSession {
         route.pointsLocalM.isNotEmpty) {
       final routeEnd = route.pointsLocalM.last;
       final routeEndM = PdrLocalPoint(routeEnd.x, routeEnd.y);
+      if (_escalator.phase != EscalatorPhase.boardingDetected) {
+        final followingRoute = _followsExpectedBoardingApproach(
+          route: route,
+          graph: _graph,
+          result: result,
+        );
+        // 코너·교차점의 한 프레임은 어느 쪽에도 단정할 수 없다. 그때마다
+        // false로 뒤집으면 실제로 제대로 걸어온 사람도 마지막 탑승 감지에서
+        // 활강을 못 한다. 명백한 반대 방향/다른 복도로 확정된 경우에만 푼다.
+        if (followingRoute != null) {
+          _wasFollowingRouteIntoBoarding = followingRoute;
+        }
+      }
       routeApproachPositionM = _updateBoardingApproachShadow(
         boardingNodeId: segment.transferFromNodeId!,
         routeEndM: routeEndM,
@@ -479,6 +531,49 @@ class IndoorGuidanceSession {
       atMs: atMs,
       routeApproachPositionM: routeApproachPositionM,
     );
+  }
+
+  /// 마지막 탑승점으로 가는 경로와 **명백히 반대인가**를 가린다.
+  ///
+  /// `true`는 같은 경로의 진행 방향, `false`는 다른 복도나 유턴, `null`은
+  /// 교차점/방향 미확정처럼 아직 판단을 보류할 프레임이다. 탑승 감지 자체가
+  /// 거리 감소 근거를 이미 확인하므로 여기서 마지막 간선의 완벽한 확정을
+  /// 강요하지 않는다.
+  bool? _followsExpectedBoardingApproach({
+    required IndoorRoute route,
+    required FloorGraph? graph,
+    required CorridorTrackingResult result,
+  }) {
+    if (graph == null || result.state == CorridorTrackingState.uncertain) {
+      return null;
+    }
+    // 리더 후보의 교체만으로는 실제 역방향/이탈이라고 단정할 수 없다.
+    // 직각 코너나 PDR 순간 흔들림에서도 직전의 정상 접근 근거를 보존한다.
+    if (result.leaderRelocated) return null;
+    final currentEdgeId = result.currentEdgeId;
+    if (currentEdgeId == null) return null;
+    final edgeIndex = route.edgeIds.indexOf(currentEdgeId);
+    if (edgeIndex < 0 || edgeIndex >= route.nodeIds.length - 1) {
+      // 교차점에서는 후보가 잠시 옆 간선을 고를 수 있다. 활성 경로 간선이
+      // 후보에 남아 있으면 아직 "다른 복도"라고 단정하지 않는다.
+      return result.junctionCandidateEdgeIds.any(route.edgeIds.contains)
+          ? null
+          : false;
+    }
+    final edge = graph.edges
+        .where((edge) => edge.id == route.edgeIds[edgeIndex])
+        .firstOrNull;
+    if (edge == null) return null;
+    final routeFrom = route.nodeIds[edgeIndex];
+    final routeTo = route.nodeIds[edgeIndex + 1];
+    final expectedDirection =
+        edge.fromNodeId == routeFrom && edge.toNodeId == routeTo
+        ? 1
+        : edge.fromNodeId == routeTo && edge.toNodeId == routeFrom
+        ? -1
+        : 0;
+    if (expectedDirection == 0 || result.travelDirectionSign == 0) return null;
+    return result.travelDirectionSign == expectedDirection;
   }
 
   /// graph에 고정된 표시 위치와 자유보행 그림자 중 탑승점에 가까운 쪽을 낸다.
@@ -584,6 +679,14 @@ class IndoorGuidanceSession {
       _boardingApproachGateOpen = true;
       return;
     }
+    // 화면 활강이 실제 탑승 노드에 도착한 뒤에는 raw PDR가 코너 바깥으로
+    // 나가도 이 거리로 다시 풀지 않는다. 이후 해제는 수직 이동 판정의 취소·
+    // 실패·하차라는 단계 전이가 맡는다.
+    if (_routeBoardingTerminalLocked) {
+      _boardingApproachDistanceM = distanceM;
+      _boardingApproachGateOpen = true;
+      return;
+    }
     if (distanceM == null || distanceM > config.routeApproachArmRadiusM) {
       _approachHoldPointM = null;
       _approachHoldEnteredAtMs = null;
@@ -617,6 +720,9 @@ class IndoorGuidanceSession {
       return;
     }
     _boardingApproachGateOpen = true;
+    // 탑승 전의 근접만으로는 위치를 붙들지 않는다. 3m 감지가 실제로 난
+    // 순간의 표시 위치를 활강 시작점으로 써야 마지막 직각 간선이 살아 있다.
+    if (_escalator.phase != EscalatorPhase.boardingDetected) return;
     if (_approachHoldPointM != null) {
       if (distanceM > config.boardingAbandonRadiusM) {
         _approachHoldPointM = null;
@@ -671,6 +777,9 @@ class IndoorGuidanceSession {
         _rejectBoardingApproachEvidence();
         continue;
       }
+      // 내부 graph cursor가 마지막 간선을 건너뛰었더라도, 현재의 route marker
+      // 자리에 먼저 고정해 둔다. 탑승 감지 뒤 화면이 이 정지점부터 남은 polyline을
+      // 따라 노드로 가므로, 여기서 노드로 직접 스냅하면 안 된다.
       final markerDistanceM = (holdPoint - marker).distance;
       final crossedBoarding = routeStep.crossedRouteWaypointIds.contains(
         boardingNodeId,
@@ -776,9 +885,13 @@ class IndoorGuidanceSession {
         _boardingApproachLastDistanceM == null ||
         markerDistanceM <= _boardingApproachLastDistanceM! + 0.1;
     _boardingApproachLastDistanceM = markerDistanceM;
-    if (!crossedBoarding &&
-        (markerDistanceM > boardingApproachVisibleSnapRadiusM ||
-            !wasApproaching)) {
+    // 3m 탑승 판정 반경 안에서는 **현재 보이는 자리**를 고정할 수 있다.
+    // 실제 노드로 스냅하는 1.5m 문턱과 섞으면, 직각 코너를 자른 PDR가 1.5m를
+    // 못 밟는 동안 화면도 출발점을 못 잡는다. 이후 UI가 이 자리부터 polyline을
+    // 따라 노드로 보낸다.
+    if (!wasApproaching ||
+        (!crossedBoarding &&
+            markerDistanceM > _escalator.config.boardingApproachRadiusM)) {
       _boardingApproachEvidencePeaks = 0;
       return false;
     }
@@ -832,27 +945,40 @@ class IndoorGuidanceSession {
       final currentM = _corridor.result?.previewPosition;
       switch (change.phase) {
         case EscalatorPhase.boardingDetected:
-          _boardingHoldPointM =
-              _approachHoldPointM ??
-              _visibleBoardingHold(
-                holdPoint: _routeBoardingHoldPoint(change),
-                currentM: currentM,
-              );
+          // 3m 반경의 탑승 판정은 노드보다 앞에서 날 수 있다. 기존처럼 이
+          // 위치를 잠시 고정하되, 화면은 이 지점에서 남은 경로 polyline을 따라
+          // 탑승 노드까지 별도 활강한다. 활강이 끝나야 실제 노드 lock으로 바뀐다.
+          if (_wasFollowingRouteIntoBoarding) {
+            _boardingHoldPointM =
+                _approachHoldPointM ??
+                _visibleBoardingHold(
+                  holdPoint: _routeBoardingHoldPoint(change),
+                  currentM: currentM,
+                );
+          }
+          break;
         case EscalatorPhase.verticalMotionDetected:
-          _boardingHoldPointM = clampBoardingHold(
+          // 접근 활강 중에는 그 시작점을 다시 탑승 노드로 바꾸지 않는다.
+          // 그렇지 않으면 고도 신호가 먼저 온 프레임에 마지막 코너를 건너뛴다.
+          final boardingPoint = _boardingHoldPointM;
+          _boardingHoldPointM ??= clampBoardingHold(
             holdPoint: _routeBoardingHoldPoint(change),
             currentM: currentM,
           );
-          _rideHoldPointM = clampBoardingHold(
-            holdPoint:
-                _routeBoardingHoldPoint(change) ??
-                _detectorBoardingNodePoint(change),
-            currentM: currentM,
-          );
+          _rideHoldPointM =
+              boardingPoint ??
+              clampBoardingHold(
+                holdPoint:
+                    _routeBoardingHoldPoint(change) ??
+                    _detectorBoardingNodePoint(change),
+                currentM: currentM,
+              );
+          break;
         case EscalatorPhase.cancelled:
         case EscalatorPhase.failed:
         case EscalatorPhase.idle:
           clearBoardingHold();
+          break;
         case EscalatorPhase.midpointReached:
         case EscalatorPhase.landed:
           break;

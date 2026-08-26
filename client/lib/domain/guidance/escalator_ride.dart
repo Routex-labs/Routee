@@ -7,13 +7,28 @@ library;
 
 import 'dart:math' as math;
 
+import 'package:indoor_pdr_core/indoor_pdr_core.dart';
 import 'package:latlong2/latlong.dart';
+
+import '../../models/building/floor_graph.dart' show LocalPoint;
 
 /// 하차 지점 카메라 정렬 시간이자, 양 끝을 몰라 활강을 못 걸었을 때 스크림
 /// 카드가 자체 재생하는 길이.
 ///
 /// 마커 활강 자체는 이 시간을 쓰지 않는다 — 진행률이 기압에서 나온다.
 const escalatorGlideDuration = Duration(milliseconds: 2400);
+
+/// 탑승 감지 뒤 남은 경로를 따라 탑승 노드로 붙는 보조 활강의 최고 속도.
+///
+/// 실제 보행보다 조금 빠르게 두되, 5m를 한 프레임에 건너뛰지는 않는다. 그래야
+/// 직각 코너를 자른 PDR라도 사용자가 본 파란선 위에서 마커가 도착한다.
+const boardingApproachGlideSpeedMps = 2.4;
+const boardingApproachGlideMinDuration = Duration(milliseconds: 500);
+const boardingApproachGlideMaxDuration = Duration(milliseconds: 2600);
+const boardingApproachGlideMaxRouteOffsetM = 2.5;
+
+/// 직각 연결 간선도 흔하므로, 방향은 사실상 유턴일 때만 막는다.
+const boardingApproachGlideMaxHeadingGapDeg = 170.0;
 
 /// 표시 진행률을 목표 쪽으로 끌어당기는 틱 주기.
 ///
@@ -99,6 +114,36 @@ class EscalatorGlide {
     );
   }
 
+  /// [progress]에서 마커가 지나고 있는 간선의 방위각.
+  ///
+  /// 활강은 실제 PDR/나침반보다 경로 자체를 보여 주는 상태이므로, 이 동안
+  /// 위치 마커의 머리도 같은 간선을 향해야 한다. 꼭짓점에서는 다음 간선을
+  /// 우선해 자연스럽게 꺾고, 길이가 0인 도면 점은 건너뛴다.
+  double? headingAtProgress(double progress) {
+    final totalM = _cumulativeM.last;
+    if (totalM <= 0) return null;
+    final targetM = progress.clamp(0.0, 1.0) * totalM;
+    var index = 1;
+    while (index < points.length - 1 && _cumulativeM[index] <= targetM) {
+      index++;
+    }
+    for (var i = index; i < points.length; i++) {
+      final bearing = escalatorExitBearingDeg(
+        boarding: points[i - 1],
+        arrival: points[i],
+      );
+      if (bearing != null) return bearing;
+    }
+    for (var i = index - 1; i > 0; i--) {
+      final bearing = escalatorExitBearingDeg(
+        boarding: points[i - 1],
+        arrival: points[i],
+      );
+      if (bearing != null) return bearing;
+    }
+    return null;
+  }
+
   /// 각 점까지의 누적 거리(m, 등장방형 근사). 진행률을 길이 비율로 옮길 때
   /// 쓰므로 절대 정확도는 필요 없다 — 구간끼리의 비만 맞으면 된다.
   static List<double> _cumulativeDistances(List<LatLng> points) {
@@ -117,6 +162,164 @@ class EscalatorGlide {
     }
     return result;
   }
+}
+
+/// 탑승 감지 시 현재 마커에서 경로 끝(탑승 노드)까지 이어 그릴 폴리라인과 시간.
+///
+/// 경로를 거의 따라오던 marker만 이어 붙인다. 코너를 조금 자르거나 잠깐 옆으로
+/// 흔들린 오차는 허용하되, 경로에서 크게 벗어나거나 명백히 반대 방향을 보면
+/// 잘못된 에스컬레이터에 끌려가는 것이므로 null을 돌려 기존 판정 취소 경로에
+/// 맡긴다.
+class BoardingApproachGlidePlan {
+  const BoardingApproachGlidePlan({
+    required this.points,
+    required this.duration,
+  });
+
+  final List<LatLng> points;
+  final Duration duration;
+}
+
+BoardingApproachGlidePlan? planBoardingApproachGlide({
+  required List<LocalPoint> routeLocalM,
+  required List<LatLng> routeWgs84,
+  required PdrLocalPoint currentLocalM,
+  required LatLng currentWgs84,
+  double? headingDeg,
+  double maxRouteOffsetM = boardingApproachGlideMaxRouteOffsetM,
+  double maxHeadingGapDeg = boardingApproachGlideMaxHeadingGapDeg,
+}) {
+  if (routeLocalM.length < 2 || routeLocalM.length != routeWgs84.length) {
+    return null;
+  }
+
+  _BoardingRouteProjection? best;
+  for (var index = 0; index < routeLocalM.length - 1; index++) {
+    final from = routeLocalM[index];
+    final to = routeLocalM[index + 1];
+    final east = to.x - from.x;
+    final north = to.y - from.y;
+    final lengthSquared = east * east + north * north;
+    if (lengthSquared <= 1e-9) continue;
+    final along =
+        ((currentLocalM.eastM - from.x) * east +
+            (currentLocalM.northM - from.y) * north) /
+        lengthSquared;
+    final t = along.clamp(0.0, 1.0).toDouble();
+    final localM = PdrLocalPoint(from.x + east * t, from.y + north * t);
+    final distanceM = (currentLocalM - localM).distance;
+    final bearingDeg = _localBearingDeg(east, north);
+    final headingGapDeg = headingDeg == null
+        ? 0.0
+        : _bearingGapDeg(headingDeg, bearingDeg);
+    final candidate = _BoardingRouteProjection(
+      segmentIndex: index,
+      t: t,
+      localM: localM,
+      distanceM: distanceM,
+      headingGapDeg: headingGapDeg,
+    );
+    if (best == null ||
+        candidate.distanceM < best.distanceM - 1e-6 ||
+        (candidate.distanceM - best.distanceM).abs() <= 1e-6 &&
+            candidate.headingGapDeg < best.headingGapDeg) {
+      best = candidate;
+    }
+  }
+  if (best == null ||
+      best.distanceM > maxRouteOffsetM ||
+      best.headingGapDeg > maxHeadingGapDeg) {
+    return null;
+  }
+
+  final projectionWgs84 = _interpolateLatLng(
+    routeWgs84[best.segmentIndex],
+    routeWgs84[best.segmentIndex + 1],
+    best.t,
+  );
+  final points = <LatLng>[currentWgs84];
+  if (_wgsDistanceM(currentWgs84, projectionWgs84) > 0.02) {
+    points.add(projectionWgs84);
+  }
+  points.addAll(routeWgs84.skip(best.segmentIndex + 1));
+  final normalized = <LatLng>[];
+  for (final point in points) {
+    if (normalized.isEmpty || _wgsDistanceM(normalized.last, point) > 0.02) {
+      normalized.add(point);
+    }
+  }
+  if (normalized.length < 2) return null;
+
+  var remainingM = (currentLocalM - best.localM).distance;
+  final first = routeLocalM[best.segmentIndex];
+  final next = routeLocalM[best.segmentIndex + 1];
+  final firstLengthM = math.sqrt(
+    math.pow(next.x - first.x, 2) + math.pow(next.y - first.y, 2),
+  );
+  remainingM += firstLengthM * (1 - best.t);
+  for (
+    var index = best.segmentIndex + 1;
+    index < routeLocalM.length - 1;
+    index++
+  ) {
+    final from = routeLocalM[index];
+    final to = routeLocalM[index + 1];
+    remainingM += math.sqrt(
+      math.pow(to.x - from.x, 2) + math.pow(to.y - from.y, 2),
+    );
+  }
+  final millis = (remainingM / boardingApproachGlideSpeedMps * 1000)
+      .round()
+      .clamp(
+        boardingApproachGlideMinDuration.inMilliseconds,
+        boardingApproachGlideMaxDuration.inMilliseconds,
+      );
+  return BoardingApproachGlidePlan(
+    points: List.unmodifiable(normalized),
+    duration: Duration(milliseconds: millis),
+  );
+}
+
+class _BoardingRouteProjection {
+  const _BoardingRouteProjection({
+    required this.segmentIndex,
+    required this.t,
+    required this.localM,
+    required this.distanceM,
+    required this.headingGapDeg,
+  });
+
+  final int segmentIndex;
+  final double t;
+  final PdrLocalPoint localM;
+  final double distanceM;
+  final double headingGapDeg;
+}
+
+double _localBearingDeg(double east, double north) {
+  final degrees = math.atan2(east, north) * 180 / math.pi;
+  return degrees < 0 ? degrees + 360 : degrees;
+}
+
+double _bearingGapDeg(double left, double right) {
+  final gap = (left - right).abs() % 360;
+  return gap > 180 ? 360 - gap : gap;
+}
+
+LatLng _interpolateLatLng(LatLng from, LatLng to, double t) => LatLng(
+  from.latitude + (to.latitude - from.latitude) * t,
+  from.longitude + (to.longitude - from.longitude) * t,
+);
+
+double _wgsDistanceM(LatLng from, LatLng to) {
+  const metersPerDegreeLat = 111320.0;
+  final meanLatRad = (from.latitude + to.latitude) * math.pi / 360;
+  final eastM =
+      (to.longitude - from.longitude) *
+      math.cos(meanLatRad) *
+      metersPerDegreeLat;
+  final northM = (to.latitude - from.latitude) * metersPerDegreeLat;
+  return math.sqrt(eastM * eastM + northM * northM);
 }
 
 /// 하차 지점에서 두 점이 이만큼은 떨어져 있어야 방향을 말한다. 도면이 두 노드를

@@ -1392,10 +1392,10 @@ class CorridorPositionTracker {
       headingBiasDeg: _headingBiasDeg,
       leaderRelocated: previewLeaderRelocated,
       ambiguous: _previewIsAmbiguous,
-      forceMatchedPosition:
-          _lockPreferredRouteTerminal &&
-              _isPreferredRouteTerminalHypothesis(leader) ||
-          forceGuidedPreview,
+      // 탑승 종점 lock은 내부 후보만 경로 끝에 남긴다. 여기서 화면 shadow까지
+      // 강제로 교체하면 마지막 직각을 자른 원시 PDR가 한 프레임에 옆 복도로
+      // 순간이동한다. 표시점은 연결 간선 투영을 따라 직접 종점에 도착해야 한다.
+      forceMatchedPosition: forceGuidedPreview && !_lockPreferredRouteTerminal,
       projectToNavigableGraph: _nearestContinuityGraphPoint,
     );
     if (!_markerContinuity.isActive) _continuityGraphEdge = leader.edge;

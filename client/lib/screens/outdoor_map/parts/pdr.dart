@@ -266,7 +266,17 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     // 흐린 마커에는 방향을 붙이지 않는다. 마지막으로 알던 자리이거나 건물 밖
     // GPS라, 지금 어디를 보고 있는지는 모른다 — 삼각형을 그리면 모르는 것을
     // 아는 척한다.
-    final heading = here == null ? null : _pdrCurrentHeadingDeg;
+    // 활강은 경로가 마커의 위치를 결정하는 특수 상태다. 이때 PDR 머리를
+    // 그대로 쓰면 점은 간선을 타는데 삼각형만 옆/뒤를 바라본다. 따라서
+    // 현재 지나고 있는 polyline 간선의 방위각을 우선한다.
+    final escalatorGlide = _escalatorGlide;
+    final boardingApproachGlide = _boardingApproachGlide;
+    final glideHeading =
+        escalatorGlide?.headingAtProgress(_escalatorGlideProgress.value) ??
+        boardingApproachGlide?.headingAtProgress(
+          _boardingApproachGlideProgress,
+        );
+    final heading = here == null ? null : glideHeading ?? _pdrCurrentHeadingDeg;
 
     final kind = marker == null
         ? _MarkerGlideKind.none
@@ -278,7 +288,10 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     // 새로 만들어졌을 수 있으므로, 같은 값이라도 한 번은 다시 써야 한다.
     if (snap) _lastWrittenMarker = null;
     final teleport =
-        snap || _escalatorGlide != null || kind != _markerGlideKind;
+        snap ||
+        _boardingApproachGlide != null ||
+        _escalatorGlide != null ||
+        kind != _markerGlideKind;
     _markerGlideKind = kind;
     _markerGlide.aimAt(marker?.point, headingDeg: heading, snap: teleport);
     _syncMarkerGlideTicker();
@@ -422,6 +435,12 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     final glide = _escalatorGlide;
     if (glide != null) {
       return glide.pointAtProgress(_escalatorGlideProgress.value);
+    }
+    final boardingApproachGlide = _boardingApproachGlide;
+    if (boardingApproachGlide != null) {
+      return boardingApproachGlide.pointAtProgress(
+        _boardingApproachGlideProgress,
+      );
     }
     // 엘리베이터도 같은 이유로 활강이 출처다. 도면을 반쯤 올라간 자리에서 미리
     // 갈아 끼우므로, 이 갈래가 없으면 그 순간 마커가 흐린 점으로 물러난다.
@@ -591,8 +610,7 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
         magneticAccuracy: features?.magneticAccuracy,
         headingSource: features?.headingSource,
         anchorRotationDeg: _pdrTrailState.anchor?.rotationDeg,
-        calibrationPhase:
-            indoorNavigationDriver.currentCalibration.phase.name,
+        calibrationPhase: indoorNavigationDriver.currentCalibration.phase.name,
         headingTrustworthy: features?.headingTrustworthy,
         markerBearingDeg: markerHeadingDeg,
         cameraBearingDeg: _mapController?.cameraPosition?.bearing ?? 0,

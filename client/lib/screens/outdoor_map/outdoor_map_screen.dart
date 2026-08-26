@@ -1028,6 +1028,18 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
 
   Timer? _escalatorGlideTimer;
 
+  /// 탑승 감지 뒤 마지막 복도 간선을 따라 탑승 노드로 붙는 짧은 활강.
+  ///
+  /// 수직 이동 활강([_escalatorGlide])과는 다른 구간이다. 원시 PDR가 마지막
+  /// 직각을 가로질러도 여기서는 경로 polyline만 따라가며, 끝에서야 탑승 lock을
+  /// 건다.
+  EscalatorGlide? _boardingApproachGlide;
+  Timer? _boardingApproachGlideTimer;
+  String? _boardingApproachGlideNodeId;
+  DateTime? _boardingApproachGlideStartedAt;
+  Duration _boardingApproachGlideDuration = Duration.zero;
+  double _boardingApproachGlideProgress = 0;
+
   /// 활강 진행률(0 = 탑승 노드, 1 = 하차 노드). 층 전환 덮개의 점이 이 값을
   /// 듣는다 — 지도 위 마커와 같은 값이라 덮개를 사이에 두고도 하나의 움직임이다.
   /// 객체 정체성이 유지돼야 셸이 매 프레임 다시 그리지 않는다.
@@ -1381,6 +1393,7 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
     _pdrAltitudeSub?.cancel();
     _pdrRawMotionSub?.cancel();
     _pdrHeadingSub?.cancel();
+    _boardingApproachGlideTimer?.cancel();
     _escalatorGlideTimer?.cancel();
     _elevatorGlideTimer?.cancel();
     _markerGlideTicker?.dispose();

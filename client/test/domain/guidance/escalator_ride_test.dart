@@ -1,6 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:indoor_pdr_core/indoor_pdr_core.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:navigation_client/domain/guidance/escalator_ride.dart';
+import 'package:navigation_client/models/building/floor_graph.dart';
 
 /// 위도 37.5 기준 약 10m 동쪽. 경도 1도 ≈ 88.4km.
 const _tenMetersEastLng = 127.0 + 10 / 88400.0;
@@ -23,8 +25,20 @@ void main() {
 
     test('진행률이 범위를 벗어나도 양 끝을 지킨다', () {
       // 하차 확정 뒤 마커가 도착 노드를 지나쳐 매장 안으로 들어가면 안 된다.
-      expect(glide.pointAtProgress(1.4).longitude, closeTo(to.longitude, 1e-12));
+      expect(
+        glide.pointAtProgress(1.4).longitude,
+        closeTo(to.longitude, 1e-12),
+      );
       expect(glide.pointAtProgress(-0.2).longitude, from.longitude);
+    });
+
+    test('활강 중 마커 머리는 현재 간선 방향을 따른다', () {
+      const corner = LatLng(37.5, _tenMetersEastLng);
+      const end = LatLng(37.5 + 10 / 111320.0, _tenMetersEastLng);
+      final bent = EscalatorGlide(points: const [from, corner, end]);
+
+      expect(bent.headingAtProgress(0.2), closeTo(90, 1));
+      expect(bent.headingAtProgress(0.8), closeTo(0, 1));
     });
 
     test('경유점이 있으면 폴리라인을 따라 흐른다', () {
@@ -45,6 +59,61 @@ void main() {
       expect(threeQuarter.longitude, closeTo(corner.longitude, 1e-9));
       expect(threeQuarter.latitude, greaterThan(corner.latitude));
       expect(threeQuarter.latitude, lessThan(end.latitude));
+    });
+  });
+
+  group('탑승점 접근 활강', () {
+    const start = LatLng(37.5, 127.0);
+    const corner = LatLng(37.5, 127.0 + 5 / 88400.0);
+    const boarding = LatLng(37.5 + 4 / 111320.0, 127.0 + 5 / 88400.0);
+    const localRoute = [LocalPoint(0, 0), LocalPoint(5, 0), LocalPoint(5, 4)];
+    const wgsRoute = [start, corner, boarding];
+
+    test('마지막 직각 간선을 자르지 않고 탑승 노드까지 잇는다', () {
+      final plan = planBoardingApproachGlide(
+        routeLocalM: localRoute,
+        routeWgs84: wgsRoute,
+        currentLocalM: const PdrLocalPoint(2.5, 0),
+        currentWgs84: const LatLng(37.5, 127.0 + 2.5 / 88400.0),
+        headingDeg: 90,
+      );
+
+      expect(plan, isNotNull);
+      expect(plan!.points, hasLength(3));
+      expect(plan.points[1], corner);
+      expect(plan.points.last, boarding);
+      expect(
+        plan.duration,
+        greaterThanOrEqualTo(boardingApproachGlideMinDuration),
+      );
+
+      final glide = EscalatorGlide(points: plan.points);
+      // 남은 6.5m 중 1.95m 지점은 첫 간선 위다. 대각선으로 corner를 자르면
+      // latitude가 이보다 먼저 올라간다.
+      final beforeCorner = glide.pointAtProgress(0.3);
+      expect(beforeCorner.latitude, closeTo(start.latitude, 1e-9));
+      expect(beforeCorner.longitude, greaterThan(127.0 + 2.5 / 88400.0));
+      expect(beforeCorner.longitude, lessThan(corner.longitude));
+    });
+
+    test('명백히 반대 방향이거나 경로에서 크게 벗어나면 시작하지 않는다', () {
+      final reverse = planBoardingApproachGlide(
+        routeLocalM: localRoute,
+        routeWgs84: wgsRoute,
+        currentLocalM: const PdrLocalPoint(2.5, 0),
+        currentWgs84: const LatLng(37.5, 127.0 + 2.5 / 88400.0),
+        headingDeg: 270,
+      );
+      final farAway = planBoardingApproachGlide(
+        routeLocalM: localRoute,
+        routeWgs84: wgsRoute,
+        currentLocalM: const PdrLocalPoint(0, 4.0),
+        currentWgs84: const LatLng(37.5, 127.0 + 2.5 / 88400.0),
+        headingDeg: 90,
+      );
+
+      expect(reverse, isNull);
+      expect(farAway, isNull);
     });
   });
 

@@ -457,21 +457,25 @@ void main() {
       expect(session.position!.localM.northM, closeTo(0, 0.01));
     });
 
-    test('경로 탑승점 3m 안의 첫 신뢰 가능한 전진 peak에서 고정한다', () {
+    test('탑승 감지 전에는 3m 안이어도 출발점을 미리 고정하지 않는다', () {
       final onePeak = sessionVia('escalator');
       walkTo(onePeak, 6);
       expect(onePeak.boardingApproachDistanceM, closeTo(2.8, 0.01));
-      expect(onePeak.isPositionHeld, isTrue);
-      final held = onePeak.position!.localM;
+      expect(onePeak.isPositionHeld, isFalse);
+      final shown = onePeak.position!.localM;
       final unchanged = onePeak.onSnapshot(
         _walkedToBoardingThenNorth(6),
         timestampMs: 6000,
       );
       onePeak.updateProgress(unchanged, previewSteps: 6, nowMs: 6000);
-      expect(onePeak.position!.localM, held, reason: '같은 peak 반복은 위치를 바꾸지 않는다');
+      expect(
+        onePeak.position!.localM,
+        shown,
+        reason: '같은 peak 반복은 위치를 바꾸지 않는다',
+      );
     });
 
-    test('탑승점 근처에서 몸을 크게 돌려도 종점이나 반대 간선으로 튀지 않는다', () {
+    test('탑승 감지 뒤 반대 방향으로 돌아도 시작점은 유지한다', () {
       final session = sessionVia('escalator');
       for (var step = 0; step <= 12; step++) {
         final atMs = 1000 + step * 500;
@@ -483,7 +487,7 @@ void main() {
       }
 
       expect(session.isPositionHeld, isTrue);
-      expect(session.position!.localM.eastM, closeTo(4.2, 0.01));
+      expect(session.position!.localM.eastM, closeTo(4.9, 0.01));
       expect(session.trackingResult!.optimisticEdgeId, 'ab');
       expect(
         session.trackingResult!.previewPosition,
@@ -491,7 +495,7 @@ void main() {
       );
     });
 
-    test('3m 안의 연속 접근은 현재 보이는 자리에서 고정하고 1.5m 밖에서는 스냅하지 않는다', () {
+    test('탑승 감지 전에는 긴 마지막 간선도 계속 진행한다', () {
       final session = longEscalatorSession();
       for (var step = 0; step <= 40; step += 1) {
         final atMs = 1000 + step * 500;
@@ -503,8 +507,7 @@ void main() {
         );
       }
 
-      expect(session.isPositionHeld, isTrue);
-      expect(session.position!.localM.eastM, closeTo(27.3, 0.01));
+      expect(session.isPositionHeld, isFalse);
       expect(session.position!.localM.eastM, isNot(closeTo(30, 0.01)));
     });
 
@@ -523,10 +526,10 @@ void main() {
       }
 
       expect(session.isNearRouteBoarding, isTrue);
-      expect(session.isPositionHeld, isTrue);
+      expect(session.isPositionHeld, isFalse);
     });
 
-    test('열린 공간에서 graph 경로를 잘라 가도 자유보행 그림자로 탑승점을 잡는다', () {
+    test('열린 공간을 가로질러도 탑승 감지 전에는 자유보행을 계속 표시한다', () {
       final session = shortcutEscalatorSession();
       for (var step = 0; step <= 14; step += 1) {
         final atMs = 1000 + step * 500;
@@ -551,17 +554,16 @@ void main() {
         reason: '원시 절대좌표를 표시하지는 않지만 실제 자유보행은 탑승점에 닿았다',
       );
       expect(session.boardingApproachDistanceM, lessThan(1));
-      expect(session.isPositionHeld, isTrue);
+      expect(session.isPositionHeld, isFalse);
       expect(
         (session.position!.localM - result.rawPreviewPosition).distance,
         greaterThan(3),
-        reason: '탑승 근거만 자유보행을 쓰고 화면 마커를 몇 m 순간이동시키지 않는다',
+        reason: '탑승 접근 그림자는 자유보행을 판정에만 쓰고 표시 위치는 억지로 고정하지 않는다',
       );
     });
 
-    test('짧은 마지막 연결 간선 전실에 도달하면 부드러운 회전이 빗나가도 붙든다', () {
+    test('짧은 마지막 연결 간선에서 감지되면 내부 시작점을 보존한다', () {
       final session = vestibuleEscalatorSession();
-      PdrLocalPoint? firstHeld;
       for (var step = 0; step <= 16; step++) {
         final atMs = 1000 + step * 500;
         final result = session.onSnapshot(
@@ -569,13 +571,9 @@ void main() {
           timestampMs: atMs,
         );
         session.updateProgress(result, previewSteps: step, nowMs: atMs);
-        if (session.isPositionHeld) firstHeld ??= session.position!.localM;
       }
 
-      expect(firstHeld, isNotNull);
-      expect(firstHeld!.eastM, closeTo(0, 0.1));
-      expect(firstHeld.northM, closeTo(5.6, 0.1));
-      expect(session.position!.localM, firstHeld);
+      expect(session.isPositionHeld, isTrue);
       expect(
         session.trackingResult!.optimisticEdgeId,
         isNot('vw-wrong'),
@@ -585,11 +583,8 @@ void main() {
         session.trackingResult!.matchedPreviewPosition.northM,
         closeTo(7, 0.1),
       );
-      expect(
-        session.trackingResult!.previewPosition.northM,
-        closeTo(7, 0.1),
-        reason: '화면 hold가 생긴 뒤 내부 tracker는 경로 종점에 잠긴다',
-      );
+      expect(session.position!.localM.eastM, closeTo(-3.4, 0.1));
+      expect(session.position!.localM.northM, closeTo(7, 0.1));
     });
 
     test('같은 전실을 지나도 경로가 에스컬레이터 탑승을 지목하지 않으면 붙들지 않는다', () {
