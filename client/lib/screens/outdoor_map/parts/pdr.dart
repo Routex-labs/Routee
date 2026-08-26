@@ -191,6 +191,13 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
   /// 고르는지는 [indoorMarkerAt] 하나가 정한다 — 소스가 하나뿐이라 화면 위의
   /// 점도 항상 하나다.
   Future<void> _syncPdrCurrentLayer({bool snap = false}) {
+    // **두 마커는 서로의 반대쪽이라 함께 뒤집힌다.** 실내 쪽만 다시 그리는
+    // 자리(앵커 확정·층 전환)에서 GPS 마커를 그대로 두면, 같은 사람 자리에
+    // 마커가 둘 뜨거나 둘 다 사라진다. 뒤집힌 순간에만 부른다 — 이 함수는
+    // 스냅샷마다 도는데 GPS 쓰기까지 매번 얹으면 채널이 찬다.
+    if (_outdoorGpsMarkerShown != _outdoorGpsVisible) {
+      unawaited(_syncCurrentLayer());
+    }
     final controller = _mapController;
     if (controller == null || !_styleReady) {
       _pdrMarkerRevision++;
@@ -247,7 +254,7 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     _lastWrittenMarker = drawn;
 
     final revision = ++_pdrMarkerRevision;
-    final data = pdrLocationData(
+    final data = locationMarkerData(
       drawn.point,
       headingDeg: drawn.headingDeg,
       offFloor: drawn.offFloor,

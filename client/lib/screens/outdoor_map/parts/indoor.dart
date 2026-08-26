@@ -245,12 +245,42 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     return ll.LatLng((minLat + maxLat) / 2, (minLng + maxLng) / 2);
   }
 
+  /// **도면만 펴 놓았을 뿐, 위치의 주인은 아직 GPS**인 상태.
+  ///
+  /// 확대나 건물 시트 탭으로 도면을 편 사람은 대개 건물 밖에 서 있다. 그 상태에서
+  /// 실내 마커를 그리면 그릴 근거가 건물 밖 GPS 좌표뿐이라
+  /// ([_indoorGapGpsPoint]), 흐린 점이 도면 위 엉뚱한 자리에 떠 "내가 건물 안에
+  /// 있다"로 읽힌다 — 밖에서 매장을 찾아보는 화면에서는 그게 거짓말이다.
+  ///
+  /// **실내 위치를 실제로 잡으면 끝난다.** 앵커가 찍혔다는 것은 이 사람이 건물
+  /// 안에 있다고 스스로 말했거나 문 앞 GPS가 그렇게 판정했다는 뜻이라, 어떻게
+  /// 도면을 폈는지는 더 볼 이유가 없다.
+  ///
+  /// **GPS 판정으로 매 좌표마다 다시 묻지 않는다.** 실내 GPS는 같은 자리에서
+  /// "밖"과 "모르겠다"를 오가서, 그걸 보면 마커가 흐려졌다 진해졌다 한다.
+  /// 도면을 편 순간의 조작 하나로 못박는다([IndoorEntrySource.isViewingOnly]).
+  bool get _indoorViewedFromOutside =>
+      _indoorOpenedByViewing &&
+      !indoorNavigationDriver.currentCalibration.canRenderPosition;
+
   /// 실내(PDR) 위치를 써도 되는 상태인지 — [_outdoorGpsVisible]의 반대쪽 짝이고
   /// **동시에 true가 되지 않는다.**
   ///
   /// 없으면 축소해 나온 야외 지도에 실내 위치 아이콘이 공중에 떠 있고, 길찾기
   /// 출발지도 그 실내 앵커로 잡힌다.
-  bool get _indoorLocationVisible => _indoorEntered;
+  bool get _indoorLocationVisible =>
+      _indoorEntered && !_indoorViewedFromOutside;
+
+  /// 지금 화면 위 위치 마커의 **주인이 누구인지.** 두 값은 서로의 반대쪽이라
+  /// 동시에 참이 되지 않는다(`widget.active`가 꺼져 있으면 둘 다 거짓이다).
+  ///
+  /// MapLibre 레이어는 위젯 트리에 없어 픽셀을 볼 수 없다 — 테스트가 그 배타성을
+  /// 확인할 수 있는 유일한 창이라 열어 둔다([indoorMarkerPointForTest]와 같은 이유).
+  @visibleForTesting
+  bool get indoorMarkerOwnsLocationForTest => _indoorLocationVisible;
+
+  @visibleForTesting
+  bool get outdoorGpsMarkerVisibleForTest => _outdoorGpsVisible;
 
   /// 좌표 한 건이 실내 쪽에 하는 일 **전부**. 부르는 자리가 둘이다 — 좌표
   /// 스트림([_handlePosition])과, 건물이 좌표보다 늦게 도착한 뒤의 재판정
@@ -379,7 +409,7 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     }
     if (judgement.verdict != GpsBuildingVerdict.inside) return;
     _coldStartIndoorHandled = true;
-    _setIndoorEntered(true);
+    _setIndoorEntered(true, source: IndoorEntrySource.gpsColdStart);
     unawaited(_askEntryFloorThenTrack(position));
   }
 
@@ -516,7 +546,7 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
       if (!mounted) return;
     }
     await _runIndoorTransition(IndoorTransitionDirection.enter, () {
-      _setIndoorEntered(true);
+      _setIndoorEntered(true, source: IndoorEntrySource.guidance);
       unawaited(_startIndoorTracking(entrance: entrance, position: position));
     });
   }
@@ -546,7 +576,11 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     unawaited(
       _runIndoorTransition(IndoorTransitionDirection.exit, () {
         _exitDoorPoint = door?.point;
-        _setIndoorEntered(false, leftBuilding: true);
+        _setIndoorEntered(
+          false,
+          leftBuilding: true,
+          source: IndoorEntrySource.guidance,
+        );
         if (target != null) unawaited(_moveCameraToPoint(target));
       }),
     );
@@ -1047,13 +1081,27 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
 
   void _triggerIndoorEntry({bool ignoreZoomArming = false}) {
     if (!ignoreZoomArming && !_autoIndoorEntryArmed) return;
+    // **문 경유 안내가 걸려 있으면 확대만으로 들어가지 않는다.**
+    //
+    // 그 여정의 실내 구간은 "건물에 들어간 순간" 승격되는데
+    // ([_activatePendingIndoorRoute]), 계획 화면이 목적지 매장을 보여 주려고
+    // 확대해 둔 것을 그 순간으로 읽으면 아직 밖에 선 사용자의 실내 구간이 먼저
+    // 소비된다 — 야외 구간은 그려져 있는데 안내는 이미 건물 안에서 시작한 화면이
+    // 된다. 실제로 들어가는 문은 안내 카드의 "OO(으)로 진입"뿐이다
+    // ([enterIndoorFromGuidance]).
+    //
+    // **무장은 내리지 않는다.** 예약이 소비되거나 안내가 끝나면 확대 진입이 다시
+    // 살아나야 한다.
+    if (!ignoreZoomArming && _pendingIndoorRoute != null) return;
     _autoIndoorEntryArmed = false;
     if (_indoorEntered) return;
     // 이 함수의 두 호출자가 곧 출처다 — 카메라 정지(확대)와 건물 정보 시트 탭.
     // 확대만으로 켜진 실내 상태를 사후에 가리려면 그 둘을 섞으면 안 된다.
     _setIndoorEntered(
       true,
-      source: ignoreZoomArming ? 'sheetTap' : 'cameraZoom',
+      source: ignoreZoomArming
+          ? IndoorEntrySource.sheetTap
+          : IndoorEntrySource.cameraZoom,
     );
     // 도면만 펴는 진입이지만, GPS가 문 앞이라고 말하면 조용히 앵커까지 찍는다
     // ([_maybeAnchorOnQuietIndoorEntry]) — 안 그러면 문 앞에서 이 길로 들어온
@@ -1104,7 +1152,7 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     // 앵커 배치 대기 중이었다면 함께 종료해 하단 바 버튼 톤도 되돌린다.
     // (배치 대기 중인 탭은 위에서 이미 소비되므로 방어적 처리다.)
     if (_placingPdrAnchor) _setPlacingAnchor(false);
-    _setIndoorEntered(false, source: 'outsideTap');
+    _setIndoorEntered(false, source: IndoorEntrySource.outsideTap);
     // 이 길은 카메라를 아예 안 만진다 — 배율도 그대로 두는 것이 맞다(사용자가
     // 도면을 보려고 당겨 둔 자리다). 되돌릴 것은 방위뿐이고, 그걸 안 되돌리면
     // 야외 지도가 돌아간 채로 남는다([resetCameraToNorthUp]).
@@ -1121,21 +1169,25 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
   /// ([returnToOutdoorView])과 구분해야 실내 위치를 버릴지, 야외 구간을 올릴지가
   /// 갈린다 — 접은 사용자는 다시 펼 수 있으니 앵커를 남기고 예약도 소비하지 않는다.
   ///
-  /// [source]는 이 변경을 부른 것이 무엇인지다(`cameraZoom`·`gps`·`sheetTap`·
-  /// `outsideTap`·`other`). 화면 동작에는 쓰지 않고 진단 파일에만 남긴다 —
-  /// [_indoorEntered]가 "도면을 보고 있다"와 "건물 안에 있다"를 겸하고 있어서,
-  /// 확대로 켜진 실내 상태와 GPS가 판정한 실내 상태를 파일에서 가릴 수 없었다.
+  /// [source]는 이 변경을 부른 것이 무엇인지다([IndoorEntrySource]). 진단 파일에
+  /// 남고, **위치의 주인이 누구인지도 이 값이 가른다** — [_indoorEntered]가
+  /// "도면을 보고 있다"와 "건물 안에 있다"를 겸하고 있어서, 확대로 켜진 실내
+  /// 상태와 실제로 걸어 들어온 실내 상태를 이 값 없이는 구분할 수 없다.
   void _setIndoorEntered(
     bool value, {
     bool leftBuilding = false,
-    String source = 'other',
+    IndoorEntrySource source = IndoorEntrySource.other,
   }) {
     if (_indoorEntered == value) return;
     _pdrDebugRecorder?.recordIndoorStateChange(
       entered: value,
-      source: source,
+      source: source.name,
       floorId: _activeFloor,
     );
+    // 도면만 편 진입인지 여기서 못박는다. 뒤에서 다시 물으면 그때의 GPS 판정에
+    // 기대게 되는데, 실내 GPS는 같은 자리에서 "밖"과 "모르겠다"를 오가므로
+    // 마커가 흐려졌다 진해졌다 한다([_indoorViewedFromOutside]).
+    _indoorOpenedByViewing = value && source.isViewingOnly;
     // 실외 구간을 품은 채 이어 온 세션이면 재진입 시각을 남긴다 — 'leftBuilding'
     // 과 이 경계 사이가 곧 실외 구간이다([_dropIndoorPosition]).
     final recorder = _pdrDebugRecorder;

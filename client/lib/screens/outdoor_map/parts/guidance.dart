@@ -340,6 +340,18 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
       _guidanceStarted = true;
     });
     _notifyRouteStateIfChanged();
+    // **문 경유 여정은 여기서 도면 층을 되돌린다.** 계획 화면은 목적지 매장을
+    // 보여 주느라 그 매장 층을 펴 두는데([_focusIndoorJourneyDestination]),
+    // 지금부터 걸을 구간은 지상 출입구까지다. 안 되돌리면 걸어가는 야외선 밑에
+    // 지하 매장 층 도면이 깔린다 — 배율만으로 도면이 페이드인하기 때문이고,
+    // 아래 카메라가 가는 배율이 곧 그 페이드의 끝이다.
+    //
+    // **기다리지 않는다.** 층 크로스페이드는 카메라를 만지지 않으므로
+    // (`recenterIfNeeded: false`) 아래 이동과 주인을 다투지 않고, 기다리면 시작을
+    // 누른 순간과 화면이 움직이는 순간 사이가 그만큼 벌어진다.
+    if (_pendingIndoorRoute != null) {
+      unawaited(_alignFloorToJourneyStart());
+    }
     // **시작을 누른 순간 화면이 내 자리로 내려간다.** 계획 카드가 떠 있는 동안
     // 카메라는 경로 전체를 담으려고 물러서 있는데, 시작해도 그대로 두면 화면은
     // 여전히 "지도를 보고 있다"에 머문다 — 따라가야 할 화면이 아니다. 한동안

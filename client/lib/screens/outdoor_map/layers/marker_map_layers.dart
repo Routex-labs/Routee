@@ -17,7 +17,7 @@ import '../../../map/icon/destination_pin.dart';
 import '../../../map/icon/location_marker_icon.dart';
 import 'indoor_overlay_layers.dart' show MapColorHex;
 
-/// 현재 위치: 반투명 원(정확도 반경 시각화용, 픽셀 반경) + 진한 점.
+/// 현재 위치: 반투명 원(정확도 반경 시각화용, 픽셀 반경) + 위치 마커 심볼.
 const kOutdoorCurrentSourceId = 'outdoor-current';
 const _accuracyLayerId = 'outdoor-accuracy';
 const _currentDotLayerId = 'outdoor-current-dot';
@@ -55,6 +55,17 @@ const kDestinationPinIconSizeZ16 = 0.24;
 const kDestinationPinIconSizeZ20 = 0.50;
 
 /// 현재 위치 소스·레이어를 등록한다.
+///
+/// **점 자체는 실내 마커와 같은 심볼이다**([locationMarkerSymbolProps]) — 같은
+/// 사람의 같은 위치를 두 화면이 다른 그림으로 그릴 이유가 없다. 예전에는 여기만
+/// `CircleLayer` 두 장(정확도 원 + 파란 점)이라 방향을 그릴 자리가 아예 없었고,
+/// 실내로 들어가는 순간 마커 모양이 통째로 바뀌었다.
+///
+/// 정확도 원은 **남긴다.** 그건 마커가 아니라 "이 좌표를 얼마나 믿는가"라, 실내
+/// (걸음으로 잇는 위치)에는 대응하는 값 자체가 없다. 아이콘 크기도 이 원 안에
+/// 들어오도록 잡혀 있다([kLocationMarkerCoreRadiusPx] 주석).
+///
+/// 비트맵 등록([registerLocationMarkerImages])이 **먼저**여야 한다.
 Future<void> registerCurrentLocationLayers(
   MapLibreMapController controller,
 ) async {
@@ -73,15 +84,11 @@ Future<void> registerCurrentLocationLayers(
       circleStrokeWidth: 1,
     ),
   );
-  await controller.addCircleLayer(
+  await controller.addSymbolLayer(
     kOutdoorCurrentSourceId,
     _currentDotLayerId,
-    CircleLayerProperties(
-      circleRadius: 7,
-      circleColor: AppColors.primary.toHexString(),
-      circleStrokeColor: '#FFFFFF',
-      circleStrokeWidth: 2,
-    ),
+    locationMarkerSymbolProps(),
+    enableInteraction: false,
   );
 }
 
@@ -151,26 +158,64 @@ Future<void> addIndoorDestinationPinLayer(
 const kOutdoorPdrCurrentSourceId = 'outdoor-pdr-current';
 const _pdrCurrentLayerId = 'outdoor-pdr-current-dot';
 
-/// PDR 위치 심볼 아이콘 이름(addImage 등록 키). heading이 있으면 방향 삼각형이
+/// 위치 심볼 아이콘 이름(addImage 등록 키). heading이 있으면 방향 삼각형이
 /// 함께 그려진 이미지, 없으면 원형 도트만 있는 이미지로 자동 교체된다. 그림과
 /// 크기 상수는 실내 지도와 공유한다([location_marker_icon.dart]) — 같은 지점을
 /// 봤을 때 두 화면의 마커가 달라 보이면 안 된다.
+///
+/// **야외 GPS 마커와 실내 PDR 마커가 이 두 이름을 함께 쓴다.** 둘은 같은 지도
+/// (같은 스타일)에 얹히는 레이어라 비트맵 등록부도 하나다 — 이름을 갈라 두면
+/// 똑같은 그림을 두 번 굽는다. 화면마다 따로 두라는 규칙은 야외/실내 **화면**
+/// 사이의 이야기다([location_marker_icon.dart]).
 ///
 /// 이름 끝에 코어 반지름을 박아 둔다 — 웹 addImage는 같은 이름이 이미 있으면
 /// 새 비트맵을 버리고 건너뛰고, removeImage도 없어서 디자인을 바꿔도 살아 있는
 /// 지도에는 예전 크기가 남는다.
 // `tri`는 방향 표시가 원뿔에서 삼각형으로 바뀐 세대다. 코어 반지름은 그대로라
 // 이름을 안 바꾸면 removeImage가 없는 웹에서 예전 원뿔이 계속 그려진다.
-const _pdrLocationImageName =
+const _locationImageName =
     'outdoor-pdr-location-tri-r$kLocationMarkerIconCoreRadius';
-const _pdrLocationDotImageName =
+const _locationDotImageName =
     'outdoor-pdr-location-dot-r$kLocationMarkerIconCoreRadius';
 
-/// PDR 위치 마커를 등록한다 — 실내 지도와 같은 파란 도트 + heading 삼각형.
+/// 현재 위치 심볼 레이어의 속성. **GPS 마커와 PDR 마커가 같은 함수를 쓴다** —
+/// 각자 정의를 들고 있으면 한쪽만 고쳐져 같은 위치가 두 화면에서 다르게 보인다.
 ///
 /// heading 유무에 따라 다른 아이콘을 자동 선택하고, heading이 있을 때만
 /// iconRotate로 지도 위에서 실제 방향을 가리키게 한다. `iconRotationAlignment:
 /// 'map'`을 넣어야 사용자가 지도를 돌려도 삼각형이 실좌표 방향을 유지한다.
+///
+/// `off_floor`가 붙은 자리는 흐리게 그린다 — 지우면 사용자는 자기가 어디
+/// 있는지도, 왜 없는지도 모른다([locationMarkerData]의 offFloor). GPS 소스는 그
+/// 속성을 붙이지 않으므로 항상 1.0이다.
+SymbolLayerProperties locationMarkerSymbolProps() => SymbolLayerProperties(
+  iconImage: [
+    'case',
+    ['has', 'heading'],
+    _locationImageName,
+    _locationDotImageName,
+  ],
+  // 정확도 원(CircleLayer 상수 반지름)이 zoom과 무관하게 고정이므로 이쪽도
+  // 고정으로 둔다 — 디자인 1px = 화면 1px.
+  iconSize: kLocationMarkerIconSize,
+  iconRotate: [
+    'coalesce',
+    ['get', 'heading'],
+    0,
+  ],
+  iconRotationAlignment: 'map',
+  iconPitchAlignment: 'viewport',
+  iconOpacity: [
+    'case',
+    ['has', 'off_floor'],
+    kOffFloorMarkerOpacity,
+    1.0,
+  ],
+  iconAllowOverlap: true,
+  iconIgnorePlacement: true,
+);
+
+/// PDR 위치 마커를 등록한다 — 실내 지도와 같은 파란 도트 + heading 삼각형.
 ///
 /// **PDR 진단 레이어보다 나중에** 불러야 마커가 항상 진단 선 위에 온다. 진단
 /// 선이 현재 위치를 덮으면 정작 어디에 서 있는지가 안 보인다.
@@ -182,34 +227,7 @@ Future<void> registerPdrLocationLayer(MapLibreMapController controller) async {
   await controller.addSymbolLayer(
     kOutdoorPdrCurrentSourceId,
     _pdrCurrentLayerId,
-    SymbolLayerProperties(
-      iconImage: [
-        'case',
-        ['has', 'heading'],
-        _pdrLocationImageName,
-        _pdrLocationDotImageName,
-      ],
-      // 야외 GPS 마커(CircleLayer 상수 반지름)가 zoom과 무관하게 고정이므로
-      // 이쪽도 고정으로 둔다 — 디자인 1px = 화면 1px.
-      iconSize: kLocationMarkerIconSize,
-      iconRotate: [
-        'coalesce',
-        ['get', 'heading'],
-        0,
-      ],
-      iconRotationAlignment: 'map',
-      iconPitchAlignment: 'viewport',
-      // 다른 층에 서 있는 동안의 마커는 흐리게. 지우면 사용자는 자기가 어디
-      // 있는지도, 왜 없는지도 모른다([pdrLocationData]의 offFloor).
-      iconOpacity: [
-        'case',
-        ['has', 'off_floor'],
-        kOffFloorMarkerOpacity,
-        1.0,
-      ],
-      iconAllowOverlap: true,
-      iconIgnorePlacement: true,
-    ),
+    locationMarkerSymbolProps(),
     enableInteraction: false,
   );
 }
@@ -224,14 +242,17 @@ Future<void> registerPdrLocationLayer(MapLibreMapController controller) async {
 /// 같다: "여기 있는 건 맞는데 이 도면 위의 자리는 아니다."
 const kOffFloorMarkerOpacity = 0.35;
 
-/// PDR 마커 비트맵 두 벌을 등록한다. 소스·레이어보다 **먼저** 불러야 한다.
-Future<void> registerPdrLocationImages(MapLibreMapController controller) async {
+/// 위치 마커 비트맵 두 벌을 등록한다. **GPS·PDR 두 레이어가 함께 쓴다** —
+/// 어느 소스·레이어보다도 먼저 불러야 한다.
+Future<void> registerLocationMarkerImages(
+  MapLibreMapController controller,
+) async {
   await controller.addImage(
-    _pdrLocationImageName,
+    _locationImageName,
     await renderLocationMarkerIcon(showHeading: true),
   );
   await controller.addImage(
-    _pdrLocationDotImageName,
+    _locationDotImageName,
     await renderLocationMarkerIcon(showHeading: false),
   );
 }
@@ -263,14 +284,19 @@ Future<void> registerPdrLocationImages(MapLibreMapController controller) async {
   return dimmed == null ? null : (point: dimmed, offFloor: true);
 }
 
-/// PDR 마커 소스에 넣을 데이터. [point]가 null이면 빈 컬렉션이라 마커가 사라진다.
+/// 위치 마커 소스(GPS·PDR 둘 다)에 넣을 데이터. [point]가 null이면 빈 컬렉션이라
+/// 마커가 사라진다.
 ///
 /// 쓰기 자체는 화면이 한다 — 센서 갱신마다 들어오는 호출을 큐로 직렬화하고 더
 /// 최신 스냅샷이 오면 버리는 판단이 화면 상태(revision)에 있기 때문이다.
 ///
+/// [headingDeg]가 null이면 삼각형 없는 도트만 그려진다. **모르는 방향을 0으로
+/// 채우지 않는다** — 북쪽을 가리키는 삼각형은 "모른다"가 아니라 "북쪽"으로 읽힌다.
+///
 /// [offFloor]는 "이 위치는 지금 보고 있는 도면 이야기가 아니다"를 뜻한다. 레이어가
 /// 그때만 [kOffFloorMarkerOpacity]로 흐리게 그린다. 고르는 것은 [indoorMarkerAt].
-Map<String, dynamic> pdrLocationData(
+/// GPS 마커는 도면과 무관하므로 이 값을 주지 않는다.
+Map<String, dynamic> locationMarkerData(
   ll.LatLng? point, {
   double? headingDeg,
   bool offFloor = false,
