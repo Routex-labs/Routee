@@ -124,6 +124,11 @@ const routeFitSideInsetPx = 16.0;
 const routeFitTopInsetPx = 120.0;
 const routeFitBottomInsetPx = 180.0;
 
+/// 잰 chrome 아래 끝과 경로 사이에 남기는 틈(논리 px).
+///
+/// 0이면 경로선이 카드 밑변에 딱 붙어, 잘린 것인지 거기서 끝나는 것인지
+/// 구분되지 않는다.
+const routeFitChromeGapPx = 12.0;
 /// 끝점 핀이 잘리지 않게 위아래로 더 비우는 높이(논리 px).
 ///
 /// 카메라는 **좌표**를 담지, 그 좌표 위에 세우는 핀의 크기는 모른다. 출발·도착
@@ -223,6 +228,39 @@ Future<void> animateCameraToPoint(
       CameraPosition(
         target: toGlLatLng(point),
         zoom: zoom ?? camera?.zoom ?? 0,
+        bearing: 0,
+        tilt: 0,
+      ),
+    ),
+  );
+}
+
+/// 보고 있는 자리는 그대로 두고 **방향만 정북·평면으로 되돌린다.** [zoom]을
+/// 주면 배율도 함께 정한다.
+///
+/// **야외로 돌아가는 모든 문에 필요하다.** 실내로 들어가면 카메라는 사용자가
+/// 바라보는 쪽이 화면 위가 되도록 돌아간다(`_centerOnIndoorMarker`). 도면을
+/// 접고 나가는 길 중 좌표를 옮기는 것들은 [animateCameraToPoint]가 방위까지
+/// 되돌려 주지만, 배율만 건드리거나 카메라를 아예 안 만지는 길
+/// (`returnToOutdoorView`·`_exitIndoorByOutsideTap`)은 그 회전을 그대로
+/// 남긴다. 그러면 사용자는 **정북이 아닌 야외 지도** 위에서 걷게 된다 — 마커는
+/// 옳은 좌표에 찍히는데 화면에서 움직이는 쪽이 회전한 만큼 어긋나, 실기기에서
+/// "동서와 남북이 서로 바뀐 것 같다"로 올라온 화면이 이것이다.
+///
+/// 이미 정북·평면이고 배율도 안 바꾼다면 아무것도 하지 않는다 — 뜻 없는
+/// 애니메이션 한 번이 진행 중인 다른 카메라 이동을 끊는다.
+Future<void> resetCameraToNorthUp(
+  MapLibreMapController controller, {
+  double? zoom,
+}) async {
+  final camera = controller.cameraPosition;
+  if (camera == null) return;
+  if (camera.bearing == 0 && camera.tilt == 0 && zoom == null) return;
+  await controller.animateCamera(
+    CameraUpdate.newCameraPosition(
+      CameraPosition(
+        target: camera.target,
+        zoom: zoom ?? camera.zoom,
         bearing: 0,
         tilt: 0,
       ),

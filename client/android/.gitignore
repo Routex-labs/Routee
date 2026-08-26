@@ -12,3 +12,6 @@ GeneratedPluginRegistrant.java
 key.properties
 **/*.keystore
 **/*.jks
+
+# Gradle Kotlin 컴파일러 세션 파일 — 빌드할 때마다 생겼다 사라진다.
+.kotlin/

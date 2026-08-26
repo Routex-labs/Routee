@@ -10,13 +10,40 @@ extension OutdoorMapMap on OutdoorMapBodyState {
   /// 카메라를 [position]으로 옮긴다. [zoom]을 주면 그 값으로 확대하고, 없으면
   /// 지금 배율을 유지한다 — 따라가는 동안 사용자가 맞춘 배율을 빼앗지 않는다.
   /// bearing·tilt는 [animateCameraToPoint]가 항상 정북·평면으로 되돌린다.
-  Future<void> _moveCameraToUser(Position position, {double? zoom}) async {
+  Future<void> _moveCameraToUser(Position position, {double? zoom}) =>
+      _moveCameraToPoint(
+        ll.LatLng(position.latitude, position.longitude),
+        zoom: zoom,
+      );
+
+  /// [_moveCameraToUser]와 같은 동작을 좌표 하나로 부른다. GPS 좌표가 없는
+  /// 이탈 경로(문으로 걸어 나감)가 문 좌표로 화면을 되돌릴 때 쓴다.
+  Future<void> _moveCameraToPoint(ll.LatLng point, {double? zoom}) async {
     final controller = _mapController;
     if (controller == null || !_styleReady) return;
-    await animateCameraToPoint(
-      controller,
-      ll.LatLng(position.latitude, position.longitude),
-      zoom: zoom,
+    await animateCameraToPoint(controller, point, zoom: zoom);
+  }
+
+  /// 실내 위치 마커를 화면 정중앙에 놓고, **바라보는 방향이 화면 위쪽**이 되게
+  /// 돌린다. 실내로 들어온 순간과 "보정" 버튼이 같은 연출을 쓴다.
+  ///
+  /// 위치를 아직 모르면 아무것도 하지 않는다 — 중앙에 놓을 자리가 없다. 방향만
+  /// 모르면 지금 방위를 유지한 채 중앙 정렬까지만 한다(모르는 방향으로 지도를
+  /// 돌리면 화면 위쪽이 갈 방향과 어긋난다).
+  Future<void> _centerOnIndoorMarker({double? zoom}) async {
+    final controller = _mapController;
+    final here = _pdrCurrentWgs84();
+    if (controller == null || !_styleReady || here == null) return;
+    final camera = controller.cameraPosition;
+    await controller.animateCamera(
+      CameraUpdate.newCameraPosition(
+        CameraPosition(
+          target: _toGl(here),
+          zoom: zoom ?? camera?.zoom ?? indoorEntryZoomThreshold,
+          bearing: _pdrCurrentHeadingDeg ?? camera?.bearing ?? 0,
+          tilt: camera?.tilt ?? 0,
+        ),
+      ),
     );
   }
 
@@ -233,21 +260,9 @@ extension OutdoorMapMap on OutdoorMapBodyState {
     // 걸면 스타일 로드 전에 건물을 탭한 사용자에게 아무 반응도 없다.
     await _flashBuildingFill();
     if (!mounted) return;
-
-    // **야외에서 건물을 눌렀으면 정보 시트가 먼저다.** 예전에는 탭이 곧 진입이라,
-    // 건물을 눌러 본 사용자가 "그 건물이 무엇인지" 대신 도면부터 봤다. 진입은
-    // 그 시트가 시킨다(안의 매장을 고르거나 "실내 지도 보기"를 누를 때).
-    //
-    // **이미 실내면 지금까지 그대로다.** 도면을 보는 중에 건물 안쪽 빈 곳을
-    // 누른 것이라 시트를 띄울 이유가 없고, 띄우면 매장을 누르려다 빗나간
-    // 손가락마다 시트가 올라온다.
-    final building = _building;
-    final onBuildingTap = widget.onBuildingTap;
-    if (!_indoorEntered && building != null && onBuildingTap != null) {
-      onBuildingTap(building);
-      return;
-    }
-
+    // **건물 탭은 곧 진입이다.** 한때 정보 시트를 앞에 세워 봤는데, 도면을
+    // 보려는 사용자에게 탭이 한 번 더 늘 뿐이었다 — 건물을 누르는 행동 자체가
+    // 이미 "여기 안을 보겠다"는 뜻이라, 그 사이에 무엇을 끼워도 걸리적거린다.
     _triggerIndoorEntry(ignoreZoomArming: true);
     // 오버레이만 켜면 도면이 지금 배율 그대로 뜬다 — 바깥에서 건물을 눌러
     // 들어온 경우 건물이 화면의 60% 남짓이라 "들어왔다"는 느낌이 안 난다.
@@ -339,8 +354,20 @@ extension OutdoorMapMap on OutdoorMapBodyState {
       entryZoom: _entryZoomThreshold(),
     )) {
       case IndoorEntryTransition.enter:
+        // 건물 배율로 돌아왔다 — 개요 붙들기는 여기서 끝난다. 다음 축소는
+        // 사용자가 한 것이므로 그때는 접혀야 한다.
+        _routeOverviewHoldsIndoor = false;
         _triggerIndoorEntry();
       case IndoorEntryTransition.exit:
+        // **경로 개요가 물러선 축소면 접지 않는다.** 이유는 [zoomOutKeepsIndoor]에
+        // 있다. 무장도 하지 않는다 — 접지 않았으니 다시 켤 것이 없고, 무장해 두면
+        // 개요에서 돌아오는 확대가 진입 연출을 한 번 더 태운다.
+        if (zoomOutKeepsIndoor(
+          overviewHold: _routeOverviewHoldsIndoor,
+          hasRouteToShow: _hasAnyRouteVisible,
+        )) {
+          break;
+        }
         _exitIndoorByZoomOut();
       case IndoorEntryTransition.keep:
         // 히스테리시스 밴드 — 현재 상태를 그대로 유지한다.
@@ -351,20 +378,22 @@ extension OutdoorMapMap on OutdoorMapBodyState {
   /// 축소로 실내를 벗어났을 때. 다음 확대에서 재발화할 수 있게 줌 트리거는
   /// **다시 무장한다**. 배치 대기 중이면 종료해 하단 바 표시도 함께 초기화한다.
   ///
-  /// 실내였을 때만 GPS 자동 진입을 끈다([_exitIndoorByOutsideTap]과 같은 이유) —
-  /// 건물 안에 서서 축소한 사람은 GPS가 여전히 "안"이라 다음 좌표 한 건이 방금
-  /// 나온 사람을 그대로 되끌고 들어간다. 영구히 죽지는 않는다: 정말 걸어 나가면
-  /// "밖" 판정이 [_applyBuildingVerdict]에서 다시 무장한다.
-  ///
-  /// 이 갈래는 야외에서 축소만 해도 카메라 정지마다 불린다. 그래서 끄는 일은
-  /// 반드시 실내였던 경우 안에 둔다 — 밖에서 지도를 넓게 보던 사람의 자동 진입을
-  /// 조용히 죽인다.
+  /// **좌표가 되끌고 들어오는 것은 여기서 막지 않는다.** 이 브랜치에서 GPS
+  /// 자동 진입 자체가 없어졌기 때문이다 — 들어가는 것은 사용자가 누른 순간뿐이고,
+  /// 실내에서 켠 콜드스타트만 1회성으로 남아 있다([_coldStartIndoorHandled]).
   void _exitIndoorByZoomOut() {
     _autoIndoorEntryArmed = true;
     if (!_indoorEntered) return;
     if (_placingPdrAnchor) _setPlacingAnchor(false);
-    _gpsEntryArmed = false;
     _setIndoorEntered(false);
+    // 이 길도 카메라를 축소 자체 말고는 만지지 않는다 — 실내에서 건물 축에
+    // 맞춰 돌아간 방위가 그대로 남으면, 이 축소로 야외로 돌아온 사용자가
+    // 그 회전된 지도 위에서 걷게 된다([resetCameraToNorthUp]과 같은 이유로
+    // 다른 이탈 경로에 붙인 `fe35e4cf`가 이 길은 놓쳤다).
+    final controller = _mapController;
+    if (controller != null && _styleReady) {
+      unawaited(resetCameraToNorthUp(controller));
+    }
   }
 
   /// 축소 이탈의 테스트 진입점. 줌 제스처는 MapLibre 플랫폼 뷰 콜백이라 위젯

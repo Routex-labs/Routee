@@ -23,6 +23,10 @@ import '../../support/entry_floor_prompt_helper.dart';
 /// 배너까지 떴다. 안내 중에는 층을 묻지 않으므로([_askEntryFloorThenTrack]의
 /// `_guidancePlanned` 갈래) 틀린 층을 바로잡을 기회도 없었다.
 ///
+/// 나가고 들어오는 것은 **버튼이 한다**(`indoor-entry-rules.md` 6절). 그래서 이
+/// 파일은 좌표를 흘려 자동으로 오가게 하지 않고, 버튼이 부르는 것과 같은 함수를
+/// 직접 부른다.
+///
 /// 여기 목업 건물은 1F·2F뿐이라 지하 대신 2F로 같은 흐름을 시험한다 — 가르는 것은
 /// 층 이름이 아니라 "나갔다 들어오면 되돌아가는가"다.
 ///
@@ -38,21 +42,6 @@ void main() {
   Position atEntrance() => Position(
     latitude: 37.5665,
     longitude: 126.9779,
-    timestamp: DateTime(2024, 1, 1),
-    accuracy: 10,
-    altitude: 0,
-    altitudeAccuracy: 0,
-    heading: 0,
-    headingAccuracy: 0,
-    speed: 0,
-    speedAccuracy: 0,
-  );
-
-  // 외곽선에서 약 185m 밖 + 신호 양호. 첫 좌표는 반드시 밖이어야 한다 — 외곽선은
-  // asset 로드 뒤에야 채워지므로, 안쪽 좌표를 먼저 흘리면 판정할 도형이 없다.
-  Position farAway() => Position(
-    latitude: 37.5665,
-    longitude: 126.9800,
     timestamp: DateTime(2024, 1, 1),
     accuracy: 10,
     altitude: 0,
@@ -95,10 +84,10 @@ void main() {
     watchPosition = defaultWatchPosition;
   });
 
-  /// 밖 → 안 순서로 좌표를 흘려 자동 진입시키고, 층 질문에 2F로 답한다.
-  Future<StreamController<Position>> walkInAndPickSecondFloor(
-    WidgetTester tester,
-  ) async {
+  /// 앱을 건물 안에서 켜고 층 질문에 2F로 답한다. **밖 좌표를 주지 않는 것이
+  /// 요점이다** — 그것이 "처음부터 안에 있었다"의 근거이고, 좌표가 화면을 실내로
+  /// 바꾸는 남은 유일한 갈래다.
+  Future<void> launchInsideAndPickSecondFloor(WidgetTester tester) async {
     final positions = StreamController<Position>.broadcast();
     addTearDown(positions.close);
     watchPosition = () => positions.stream;
@@ -106,31 +95,30 @@ void main() {
       MaterialApp(theme: AppTheme.light, home: const MapShellScreen()),
     );
     await drain(tester);
-    positions.add(farAway());
-    await tester.pump(const Duration(milliseconds: 50));
     positions.add(atEntrance());
     await tester.pump(const Duration(milliseconds: 50));
     await drain(tester);
     await answerEntryFloorPrompt(tester, '2F');
     await drain(tester);
     expect(selectedFloor(tester), '2F', reason: '테스트 전제(층 선택)가 성립하지 않았다');
-    return positions;
   }
 
   testWidgets('밖으로 나갔다 다시 들어오면 지난 층이 아니라 기본 층에서 시작한다', (tester) async {
-    final positions = await walkInAndPickSecondFloor(tester);
+    await launchInsideAndPickSecondFloor(tester);
+    final state = tester.state<OutdoorMapBodyState>(find.byType(OutdoorMapBody));
 
-    positions.add(farAway());
-    await tester.pump(const Duration(milliseconds: 50));
+    // 「밖으로 나가기」 버튼이 부르는 것과 **같은 함수**다. 버튼을 그리는 카드는
+    // 안내 중에만 서므로, 여기서는 그 카드를 세우지 않고 곧장 부른다.
+    state.exitIndoorFromGuidance();
     await drain(tester);
     expect(
       find.byType(FloorSelector),
       findsNothing,
-      reason: '테스트 전제(GPS 이탈 판정)가 성립하지 않았다',
+      reason: '테스트 전제(이탈)가 성립하지 않았다',
     );
 
-    positions.add(atEntrance());
-    await tester.pump(const Duration(milliseconds: 50));
+    // ignore: invalid_use_of_visible_for_testing_member
+    state.enterIndoorForTest();
     await drain(tester);
 
     expect(
@@ -143,7 +131,7 @@ void main() {
   testWidgets('도면만 접었다 다시 펴면 층이 유지된다', (tester) async {
     // 나간 것과 접은 것은 다르다. 접은 사용자는 같은 자리에 그대로 서 있으므로,
     // 여기서까지 되돌리면 2F에 선 사람의 도면이 1F로 갈린다.
-    await walkInAndPickSecondFloor(tester);
+    await launchInsideAndPickSecondFloor(tester);
 
     final state = tester.state<OutdoorMapBodyState>(find.byType(OutdoorMapBody));
     await state.returnToOutdoorView();

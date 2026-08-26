@@ -4,23 +4,18 @@
 /// 거리로 만들고([indoorEnterInsetMeters]·[outdoorExitMarginMeters]), 판정과 함께
 /// 그 판정을 만든 숫자를 돌려준다([GpsBuildingJudgement]).
 ///
-/// 임계값의 근거, 버린 규칙("신호가 무너짐"), 진단 칩의 각 항목이 왜 필요한지는
-/// `docs/client/indoor-entry-rules.md`.
+/// 임계값의 근거, 버린 규칙("신호가 무너짐"·"진입 오차 문턱"), 진단 칩의 각 항목이
+/// 왜 필요한지는 `docs/client/indoor-entry-rules.md`.
 library;
 
 import 'package:latlong2/latlong.dart' as ll;
 
 import 'indoor_entry_proximity.dart';
 
-/// **진입** 판정에 쓸 수 있는 좌표의 최대 오차(m). 넘으면 진입 근거로 안 쓴다.
-const decisiveAccuracyMeters = 20.0;
-
-/// **이탈** 판정에 쓸 수 있는 좌표의 최대 오차(m). 진입보다 느슨하다.
+/// **이탈** 판정에 쓸 수 있는 좌표의 최대 오차(m).
 ///
-/// 건물에서 막 나온 순간이 정확히 오차가 큰 구간이라, 진입과 같은 20 m를
-/// 요구하면 그 구간이 통째로 `unclear`가 돼 전환이 늦는다. 이탈은 부풀린
-/// 외곽선 **밖으로 14 m**를 요구하므로(아래 두 상수의 합) 30 m 오차로도 그만큼
-/// 나갔다면 근거로 쓸 만하다. 진입은 안쪽 5 m뿐이라 같이 풀면 안 된다.
+/// 이탈은 벽 **밖으로 8 m**를 요구하므로 30 m 오차로도 그만큼 나갔다면 근거로
+/// 쓸 만하다. 이보다 나쁜 좌표는 건물 폭과 오차가 맞먹어 안팎을 못 가른다.
 const outdoorExitAccuracyMeters = 30.0;
 
 /// 외곽선에서 이만큼 안쪽에 찍혀야 "들어왔다"고 본다(m).
@@ -32,11 +27,17 @@ const indoorEnterInsetMeters = 5.0;
 /// (안에 있는데 PDR 추적이 끊김)이 커서 나가는 쪽을 엄격하게 잡는다.
 const outdoorExitMarginMeters = 8.0;
 
-/// 우리 외곽선과 실제 건물 벽 사이의 알려진 어긋남(m).
+/// 우리 외곽선과 배경 지도 타일의 건물 윤곽 사이에 **남아 있는** 어긋남(m).
 ///
-/// 판정은 외곽선을 이만큼 **바깥으로 부풀려** 쓴다. 진입을 앞당기는 만큼
-/// **이탈도 늦춰야** 벽 근처에서 화면이 깜빡이지 않는다([judgeBuildingFromGps]).
-const footprintOutwardToleranceMeters = 6.0;
+/// 판정은 외곽선을 이만큼 바깥으로 부풀려 쓴다. 진입을 앞당기는 만큼 이탈도
+/// 그만큼 늦춰야 벽 근처에서 화면이 깜빡이지 않는다([judgeBuildingFromGps]).
+///
+/// **지금은 0이다.** 한때 6 m였고 근거는 "백엔드 footprint가 타일 건물보다
+/// 작다"였는데, 정합을 VWorld 건물 꼭지점으로 다시 잡아 그 차이가 0.11 m가 됐다
+/// (`docs/client/indoor-entry-rules.md` 1절). 근거가 사라진 뒤에도 6 m를 두면
+/// 벽 **바깥 1 m**에 선 사람이 "안"으로 읽힌다. 정합이 안 된 건물을 새로 넣을
+/// 때 되살릴 손잡이라 상수 자체는 남긴다.
+const footprintOutwardToleranceMeters = 0.0;
 
 /// 판정에 쓰는 위치 한 건.
 class GpsFix {
@@ -77,8 +78,8 @@ class GpsBuildingJudgement {
   /// 이 좌표가 말하는 건물 안팎.
   final GpsBuildingVerdict verdict;
 
-  /// 이 좌표의 오차 반경(m). [decisiveAccuracyMeters]를 넘으면 나머지 거리가
-  /// 어떻든 [GpsBuildingVerdict.unclear]다.
+  /// 이 좌표의 오차 반경(m). **이탈 갈래만** 이 값을 본다
+  /// ([outdoorExitAccuracyMeters]) — 안팎을 가르는 유일한 오차 문턱이다.
   final double accuracyMeters;
 
   /// 외곽선 **안쪽**으로 들어와 있는 거리(m). 밖이면 0.
@@ -136,18 +137,35 @@ GpsBuildingJudgement judgeBuildingFromGps({
   );
 }
 
+/// 이 좌표가 **건물 밖이라고 말할 만한가.** 오차를 보지 않는다.
+///
+/// 쓰이는 곳은 하나 — "앱을 켠 뒤 한 번이라도 밖이 나왔는가"
+/// (`_sawOutsideSinceLaunch`). 그 값이 실내에서 앱을 켠 사람과 걸어 들어온
+/// 사람을 가른다.
+///
+/// [judgeBuildingFromGps]의 `outside` 판정을 그대로 쓰지 않는 이유는 **오차
+/// 문턱 때문**이다. 유리 외벽 건물 앞은 오차가 30 m 아래로 안 내려오는 일이
+/// 흔한데, 그 자리에서 걸어 들어온 사람은 밖을 한 번도 못 본 것이 되어 "앱을
+/// 안에서 켰다"로 읽힌다 — 걷는 내내 층을 묻는 전면 화면이 뜬다.
+///
+/// 느슨하게 해도 되는 근거는 **이 값이 행동이 아니라 빗장**이라는 것이다.
+/// 노이즈로 true가 되면 질문을 한 번 건너뛸 뿐이고, 층은 선택기로 고르면 된다.
+bool saysOutsideBuilding(GpsBuildingJudgement judgement) =>
+    judgement.hasFootprint &&
+    judgement.metersOutside >= outdoorExitMarginMeters;
+
 /// 잰 거리로 결론을 내리는 사다리. 순서가 곧 정책이다.
 ///
-/// **오차 문턱을 두 갈래가 각자 본다.** 예전에는 맨 위에서 한 번만 걸렀는데,
-/// 그 값이 진입 기준(엄격)이라 이탈까지 같이 막혔다 — 건물에서 막 나온 순간이
-/// 정확히 오차가 큰 구간이라 그 구간이 통째로 `unclear`가 됐다.
+/// **진입은 오차를 보지 않는다.** 좌표가 외곽선 안쪽 문턱을 넘었으면 그것으로
+/// 끝이다 — 오차 문턱을 두면 실내에서 신호가 무너진 구간이 통째로 `unclear`가
+/// 되어, 이미 건물 안인 사용자가 한참 뒤에야 들어간다. 대신 잘못 들어간 화면은
+/// 건물 밖을 한 번 탭하면 닫힌다.
 GpsBuildingVerdict _verdictFrom({
   required double accuracyMeters,
   required double metersInside,
   required double metersOutside,
 }) {
-  if (accuracyMeters <= decisiveAccuracyMeters &&
-      metersInside >= indoorEnterInsetMeters) {
+  if (metersInside >= indoorEnterInsetMeters) {
     return GpsBuildingVerdict.inside;
   }
   if (accuracyMeters <= outdoorExitAccuracyMeters &&

@@ -260,6 +260,32 @@ class _MapShellScreenState extends State<MapShellScreen> {
   /// 없지만, **미리 굽는 시점**을 알려면 바뀌는 순간을 잡아야 한다.
   List<String> _floorTransitionPhotos = const [];
 
+  /// 실내↔야외 전환 덮개의 불투명도. 지도가 알려 온다
+  /// ([OutdoorMapBody.onIndoorTransitionVeilChanged]).
+  double _indoorVeilOpacity = 0;
+
+  /// 전환 연출이 화면을 덮고 있는지. 참이면 셸 chrome(검색창·길찾기 바·카테고리
+  /// 줄·하단 바·탭 줄)을 트리에서 뺀다.
+  ///
+  /// 덮개가 둘이다 — 층 전환 스크림과 실내↔야외 전환 덮개. **둘 다 지도 안에서
+  /// 그린다.** 셸 chrome은 그 지도의 형제라 z축으로는 이길 수 없어서, 덮는
+  /// 동안에는 아예 그리지 않는 것으로 가린다.
+  ///
+  /// **맨 위에 두는 것만으로는 부족하다.** 페이드가 오르내리는 동안 덮개는
+  /// 반투명이라 그 구간 내내 chrome이 비쳐 보인다 — 연출이 "덮었다"고 말하는
+  /// 동안 화면은 아직 덮이지 않은 셈이다. 0보다 크면 곧 덮이거나 덮여 있는
+  /// 것이므로, 그 순간부터 아예 그리지 않는다.
+  bool get _floorTransitionCovers =>
+      _floorScrimOpacity > 0 || _indoorVeilOpacity > 0;
+
+  void _onIndoorTransitionVeilChanged(double opacity) {
+    if (!mounted || _indoorVeilOpacity == opacity) return;
+    // 덮개가 오르기 시작하면 검색은 접는다. 패널은 상단을 통째로 차지해, 트리에
+    // 남겨 두면 덮개가 걷힌 뒤에도 키보드가 올라온 채로 돌아온다.
+    if (opacity > 0 && _searchActive) _closeSearch();
+    setState(() => _indoorVeilOpacity = opacity);
+  }
+
   // 지도 위에 얹은 공용 오버레이(검색창·카테고리 줄·하단 바)의 영역을
   // IndoorMapBody가 map click 처리에서 제외할 수 있게 넘겨줄 key들.
   // MapLibre PlatformView가 gesture arena를 우회해서 오버레이 탭이 뒤의 매장
@@ -326,8 +352,32 @@ class _MapShellScreenState extends State<MapShellScreen> {
   final _routeDestinationFocus = FocusNode();
 
   /// 지금 치고 있는 칸에 보여 줄 후보들.
-  List<DirectionsCandidate> _routeResults = const [];
+  /// 지금 치고 있는 칸에 보여 줄 후보들. **세 출처를 각자의 칸에 담는다** — 셋이
+  /// 서로 다른 속도로 도착하는데 한 리스트에 이어 붙이면 늦게 온 쪽이 먼저 온
+  /// 쪽을 덮거나 순서를 흔든다.
+  List<DirectionsCandidate> get _routeResults => [
+    ..._routeSemanticRows,
+    ..._routeIndoorRows,
+    ..._routeOutdoorRows,
+  ];
+
+  /// 실내 매장·건물. 이 줄이 도착하는 순간이 곧 "찾는 중"의 끝이다.
+  List<DirectionsCandidate> _routeIndoorRows = const [];
+
+  /// 실내가 빈손일 때만 채워지는 의미 검색 결과. 맨 위에 붙는다.
+  List<DirectionsCandidate> _routeSemanticRows = const [];
+
+  /// 건물 밖 장소(TMAP). **스피너를 붙들지 않는다** — 실내보다 훨씬 느려서,
+  /// 기다렸다 함께 붙이면 야외 건물 검색이 통째로 그 대기 시간이 된다.
+  List<DirectionsCandidate> _routeOutdoorRows = const [];
+
   bool _routeSearching = false;
+
+  /// 후보 조회 디바운스. 글자마다 서버를 때리지 않게 잠깐 모았다 보낸다 —
+  /// 상단 검색창과 **같은 리듬**이어야 같은 검색어가 어디에 치느냐에 따라
+  /// 요청 수가 달라지지 않는다(`SearchPanel._lightDebounce`).
+  static const _routeSearchDebounceDelay = Duration(milliseconds: 300);
+  Timer? _routeSearchDebounce;
 
   /// 후보 조회 순번. 빠르게 타이핑하면 요청이 겹치는데, 늦게 도착한 옛 응답이
   /// 새 결과를 덮으면 목록이 방금 친 글자와 무관한 것을 보여 준다.
@@ -500,6 +550,7 @@ class _MapShellScreenState extends State<MapShellScreen> {
     _routeDestinationController.dispose();
     _activeFloorNotifier.dispose();
     _placeLocationAttentionTimer?.cancel();
+    _routeSearchDebounce?.cancel();
     super.dispose();
   }
 
@@ -728,6 +779,10 @@ class _MapShellScreenState extends State<MapShellScreen> {
   /// | 4.5 | 탭 줄([_buildTabBar]) — **바닥에 고정**. 위 것들이 이만큼 띄운다 |
   /// | 5 | 층 전환 스크림([_buildFloorScrim]) — **맨 위여야 한다.** 지도뿐 아니라 검색창·하단 바까지 덮는다 |
   /// | 6 | 시작 덮개 — 첫 위치 판정과 카메라 준비가 끝날 때까지 전부 가린다 |
+  ///
+  /// 층 전환 중에는 3·4·4.5층을 **덮는 것이 아니라 뺀다**
+  /// ([_floorTransitionCovers]). 스크림은 맨 위지만 페이드가 오르내리는 동안
+  /// 반투명이라, 그 구간 내내 검색창과 카테고리 줄이 비쳐 보였다.
   Widget _buildShell(BuildContext context, bool routeVisible) {
     return Scaffold(
       // 상단 검색창(MapTopBar)에 포커스가 들어가 소프트키보드가 올라올 때
@@ -739,9 +794,10 @@ class _MapShellScreenState extends State<MapShellScreen> {
         children: [
           _buildMap(),
           if (_searchActive) _buildSearchBarrier(),
-          _buildTopOverlays(context),
-          if (!_guidanceActive && !_routeMode) _buildBottomBar(routeVisible),
-          if (_tabBarVisible) _buildTabBar(),
+          if (!_floorTransitionCovers) _buildTopOverlays(context),
+          if (!_floorTransitionCovers && !_guidanceActive && !_routeMode)
+            _buildBottomBar(routeVisible),
+          if (!_floorTransitionCovers && _tabBarVisible) _buildTabBar(),
           _buildFloorScrim(),
           IgnorePointer(
             child: AnimatedSwitcher(
@@ -829,6 +885,7 @@ class _MapShellScreenState extends State<MapShellScreen> {
       categorySelection: _categorySelection,
       onFloorChanged: _onActiveFloorChanged,
       onFloorTransitionChanged: _onFloorTransitionChanged,
+      onIndoorTransitionVeilChanged: _onIndoorTransitionVeilChanged,
       onStartupReady: _finishStartupLoading,
       // 실내 화면과 같은 목록을 넘긴다. 야외 지도도 실내 진입
       // 오버레이가 켜지면 층 선택기·위치 지정을 함께 쓰므로, 상단

@@ -47,9 +47,8 @@ void main() {
     speedAccuracy: 0,
   );
 
-  // 건물 외곽선 안쪽 / 약 185 m 밖. reentry_floor_reset_test와 같은 좌표다.
+  // 건물 외곽선 안쪽. reentry_floor_reset_test와 같은 좌표다.
   Position atEntrance() => at(126.9779);
-  Position farAway() => at(126.9800);
 
   Future<void> drain(WidgetTester tester) async {
     for (var i = 0; i < 8; i++) {
@@ -77,10 +76,12 @@ void main() {
     watchPosition = defaultWatchPosition;
   });
 
-  /// 밖 → 안 순서로 좌표를 흘려 자동 진입시키고, 진단 세션을 연다.
-  Future<(StreamController<Position>, OutdoorMapBodyState)> walkInAndRecord(
-    WidgetTester tester,
-  ) async {
+  /// 앱을 건물 안에서 켜서 실내로 들어가고, 진단 세션을 연다.
+  ///
+  /// 밖 좌표를 안 주는 것이 요점이다 — 좌표가 화면을 실내로 바꾸는 남은 유일한
+  /// 갈래다(`indoor-entry-rules.md` 6절). 나가고 다시 들어오는 것은 아래 각
+  /// 테스트가 **버튼이 부르는 함수**로 직접 한다.
+  Future<OutdoorMapBodyState> launchInsideAndRecord(WidgetTester tester) async {
     final positions = StreamController<Position>.broadcast();
     addTearDown(positions.close);
     watchPosition = () => positions.stream;
@@ -88,8 +89,6 @@ void main() {
       MaterialApp(theme: AppTheme.light, home: const MapShellScreen()),
     );
     await drain(tester);
-    positions.add(farAway());
-    await tester.pump(const Duration(milliseconds: 50));
     positions.add(atEntrance());
     await tester.pump(const Duration(milliseconds: 50));
     await drain(tester);
@@ -98,36 +97,45 @@ void main() {
     expect(
       find.byType(FloorSelector),
       findsOneWidget,
-      reason: '테스트 전제(GPS 자동 진입)가 성립하지 않았다',
+      reason: '테스트 전제(실내에서 앱을 켠 진입)가 성립하지 않았다',
     );
     final state = tester.state<OutdoorMapBodyState>(
       find.byType(OutdoorMapBody),
     );
     // ignore: invalid_use_of_visible_for_testing_member
     state.beginRouteRecordingSessionForTest();
-    return (positions, state);
+    return state;
+  }
+
+  /// 「밖으로 나가기」와 건물 탭이 부르는 것과 같은 함수를 직접 굴린다.
+  Future<void> leaveAndReEnter(
+    WidgetTester tester,
+    OutdoorMapBodyState state, {
+    required Future<void> Function() between,
+  }) async {
+    state.exitIndoorFromGuidance();
+    await drain(tester);
+    await between();
+    // ignore: invalid_use_of_visible_for_testing_member
+    state.enterIndoorForTest();
+    await drain(tester);
   }
 
   testWidgets('디버그 모드: 나갔다 들어와도 같은 레코더가 이어진다', (tester) async {
     await debugModeController.setEnabled(true);
-    final (positions, state) = await walkInAndRecord(tester);
+    final state = await launchInsideAndRecord(tester);
     // ignore: invalid_use_of_visible_for_testing_member
-    final opened = state.debugRecorderForTest;
-    expect(opened, isNotNull, reason: '테스트 전제(진단 세션 열림)가 성립하지 않았다');
+    final opened = state.debugRecorderForTest!;
 
-    positions.add(farAway());
-    await tester.pump(const Duration(milliseconds: 50));
-    await drain(tester);
-
-    // ignore: invalid_use_of_visible_for_testing_member
-    expect(identical(state.debugRecorderForTest, opened), isTrue);
-    expect(opened!.spansBuildingExit, isTrue);
-
-    positions.add(atEntrance());
-    await tester.pump(const Duration(milliseconds: 50));
-    await drain(tester);
-    await dismissEntryFloorPrompt(tester);
-    await drain(tester);
+    await leaveAndReEnter(
+      tester,
+      state,
+      between: () async {
+        // ignore: invalid_use_of_visible_for_testing_member
+        expect(identical(state.debugRecorderForTest, opened), isTrue);
+        expect(opened.spansBuildingExit, isTrue);
+      },
+    );
 
     // 재진입 뒤 새 길찾기를 시작해도 갈아 끼우지 않는다 — 여기가 예전에 나갈 때
     // 걸은 구간을 통째로 잃던 자리다.
@@ -154,21 +162,15 @@ void main() {
   });
 
   testWidgets('디버그가 꺼져 있으면 예전대로 새 세션으로 갈아 끼운다', (tester) async {
-    final (positions, state) = await walkInAndRecord(tester);
+    final state = await launchInsideAndRecord(tester);
     // ignore: invalid_use_of_visible_for_testing_member
-    final opened = state.debugRecorderForTest;
-    expect(opened, isNotNull, reason: '테스트 전제(진단 세션 열림)가 성립하지 않았다');
+    final opened = state.debugRecorderForTest!;
 
-    positions.add(farAway());
-    await tester.pump(const Duration(milliseconds: 50));
-    await drain(tester);
-    expect(opened!.spansBuildingExit, isFalse);
-
-    positions.add(atEntrance());
-    await tester.pump(const Duration(milliseconds: 50));
-    await drain(tester);
-    await dismissEntryFloorPrompt(tester);
-    await drain(tester);
+    await leaveAndReEnter(
+      tester,
+      state,
+      between: () async => expect(opened.spansBuildingExit, isFalse),
+    );
 
     // ignore: invalid_use_of_visible_for_testing_member
     state.beginRouteRecordingSessionForTest();

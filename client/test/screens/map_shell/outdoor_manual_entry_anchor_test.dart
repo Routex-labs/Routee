@@ -18,15 +18,16 @@ import 'package:navigation_client/repositories/place/destination_repository.dart
 import 'package:navigation_client/repositories/building/mock_building_repository.dart';
 import 'package:navigation_client/repositories/place/mock_destination_repository.dart';
 import 'package:navigation_client/screens/map_shell/map_shell_screen.dart';
+import 'package:navigation_client/screens/outdoor_map/outdoor_map_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../support/entry_floor_prompt_helper.dart';
 
-/// 자동 실내 진입이 "진입한 입구"를 기준으로 실내 위치를 잡고 센서 추적까지
-/// 시작하는지에 대한 회귀 테스트.
+/// 안내 카드의 **"OO(으)로 진입"**을 누른 뒤, 그 문을 기준으로 실내 위치를 잡고
+/// 센서 추적까지 시작하는지에 대한 회귀 테스트.
 ///
-/// 예전에는 트리거가 층 오버레이만 켜고 끝나서, 건물에 들어와도 지도에 내 위치가
-/// 없었다 — 사용자가 "위치 지정"으로 복도를 직접 탭해야 비로소 걸음 추적이 시작됐다.
+/// 예전에는 이 일을 GPS 자동 진입이 했고, 앵커를 **GPS 좌표를 통로에 붙여** 찍었다.
+/// 건물 안 GPS는 오차가 십수 m라 복도 하나쯤은 예사로 틀렸다 — 지금은 사용자가
+/// 문 앞에서 누르므로 그 문의 그래프 노드가 곧 위치다.
 ///
 /// MapLibre 레이어는 위젯 트리에 없어 위치 아이콘 픽셀을 볼 수 없다. 대신 그
 /// 아이콘의 **유일한 근거**인 PDR 앵커(`canRenderPosition`과 anchorLocalM)와 센서
@@ -76,34 +77,8 @@ void main() {
     ],
   };
 
-  // 자동 진입은 "신호가 멀쩡했을 때 입구 앞에 있었다"는 근거를 요구한다.
-  // 저하 표본만 흘리면 판정이 서지 않으므로 접근 표본을 먼저 보낸다.
-  Position approachingEntrance() => Position(
-    latitude: 37.5665,
-    longitude: 126.9779,
-    timestamp: DateTime(2024, 1, 1),
-    accuracy: 10,
-    altitude: 0,
-    altitudeAccuracy: 0,
-    heading: 0,
-    headingAccuracy: 0,
-    speed: 0,
-    speedAccuracy: 0,
-  );
-
-  Position atEntrance() => Position(
-    latitude: 37.5665,
-    longitude: 126.9779,
-    timestamp: DateTime(2024, 1, 1),
-    accuracy: 60,
-    altitude: 0,
-    altitudeAccuracy: 0,
-    heading: 0,
-    headingAccuracy: 0,
-    speed: 0,
-    speedAccuracy: 0,
-  );
-
+  /// 건물에서 한참 떨어진 인도(약 185 m 동쪽). 외곽선 밖이라 "밖을 봤다"의
+  /// 근거가 된다.
   Position farAway() => Position(
     latitude: 37.5665,
     longitude: 126.9800,
@@ -117,37 +92,63 @@ void main() {
     speedAccuracy: 0,
   );
 
+
+  /// 문 앞. 오차가 나빠도 상관없다 — 진입 게이트는 오차를 보지 않고, 앵커도
+  /// 이 좌표가 아니라 여기서 가장 가까운 문의 **노드**에 찍힌다.
+  Position atEntrance() => Position(
+    latitude: 37.5665,
+    longitude: 126.9779,
+    timestamp: DateTime(2024, 1, 1),
+    accuracy: 60,
+    altitude: 0,
+    altitudeAccuracy: 0,
+    heading: 0,
+    headingAccuracy: 0,
+    speed: 0,
+    speedAccuracy: 0,
+  );
+
+
   Future<void> drain(WidgetTester tester) async {
     for (var i = 0; i < 8; i++) {
       await tester.pump(const Duration(milliseconds: 100));
     }
   }
 
-  /// 야외 지도를 띄우고 "입구 20m 이내 + 신호 저하"로 자동 실내 진입을 발화시킨다.
-  /// 멀리서 접근 → 입구 앞(양호) → 신호 저하 순서를 지켜야 한다 — 판정이 "신호가
-  /// 멀쩡했을 때 입구 앞에 있었다"는 근거를 창에서 찾기 때문이다.
-  Future<void> walkIntoBuilding(WidgetTester tester) async {
-    // broadcast여야 한다. 앵커가 입구에 찍히면 PDR 위치도 입구 앞이라 화면이
-    // 이탈 확인용 GPS를 **다시 구독**하는데, 단일 구독 스트림은 취소된 뒤
-    // 재구독하면 'already been listened to'로 터진다. 실제 앱의 watchPosition은
-    // 호출마다 새 스트림을 준다.
+  /// 야외 지도를 띄우고, 문 앞에 선 좌표를 흘린 뒤 **진입을 직접 부른다.**
+  ///
+  /// 버튼을 탭하지 않고 같은 함수를 부르는 이유는 이 파일의 관심사가 앵커이기
+  /// 때문이다. 버튼이 언제 켜지는지는 게이트 테스트
+  /// (`screens/outdoor_map/entry/manual_transition_gate_test.dart`)와 카드
+  /// 위젯 테스트(`widgets/guidance_action_row_test.dart`)가 나눠 맡는다.
+  Future<void> enterByButton(WidgetTester tester) async {
+    // broadcast여야 한다. 앵커가 찍히면 화면이 GPS를 **다시 구독**하는데, 단일
+    // 구독 스트림은 취소된 뒤 재구독하면 'already been listened to'로 터진다.
+    // 실제 앱의 watchPosition은 호출마다 새 스트림을 준다.
     final positions = StreamController<Position>.broadcast();
+    addTearDown(positions.close);
     watchPosition = () => positions.stream;
     await tester.pumpWidget(
       MaterialApp(theme: AppTheme.light, home: const MapShellScreen()),
     );
-    // 위치를 흘리기 전에 건물(입구 좌표·층 그래프) 로드가 끝날 때까지 진행한다.
+    // 위치를 흘리기 전에 건물(문 목록·층 그래프) 로드가 끝날 때까지 진행한다.
     await drain(tester);
+    // **밖 좌표를 먼저 흘린다.** 밖을 한 번도 안 본 채 안 좌표가 오면 "앱을
+    // 실내에서 켰다"로 읽혀, 화면이 스스로 실내로 들어가고 GPS 스냅으로 앵커를
+    // 찍는다 — 이 파일이 확인하려는 문 노드 앵커가 아니게 된다.
     positions.add(farAway());
-    await tester.pump(const Duration(milliseconds: 50));
-    positions.add(approachingEntrance());
     await tester.pump(const Duration(milliseconds: 50));
     positions.add(atEntrance());
     await tester.pump(const Duration(milliseconds: 50));
     await drain(tester);
-    // 자동 진입은 "몇 층에 계신가요?"를 먼저 띄우고, **답을 받은 뒤에** 앵커를
-    // 찍는다. 걷지 않으면 아래 검증이 기다리는 안내가 영영 안 온다.
-    await dismissEntryFloorPrompt(tester);
+    // **await하지 않는다.** 이 Future는 전환 연출(AnimationController)이 끝나야
+    // 완료되는데, 그 시계를 미는 것이 아래 drain이다 — 여기서 기다리면 서로를
+    // 기다리며 테스트가 멈춘다.
+    unawaited(
+      tester
+          .state<OutdoorMapBodyState>(find.byType(OutdoorMapBody))
+          .enterIndoorFromGuidance(),
+    );
     await drain(tester);
   }
 
@@ -190,18 +191,18 @@ void main() {
     watchPosition = defaultWatchPosition;
   });
 
-  Future<void> useGraphRepository() async {
-    final repository = _GraphBuildingRepository(graphJson);
+  Future<void> useGraphRepository({bool withGraph = true}) async {
+    final repository = _GraphBuildingRepository(withGraph ? graphJson : null);
     buildingRepository = repository;
     destinationRepository = MockDestinationRepository(repository);
     await repository.getAllBuildings();
   }
 
-  testWidgets('자동 진입 후 입구 좌표에 실내 위치를 잡고 센서 추적을 시작한다', (
+  testWidgets('진입 버튼을 누르면 그 문의 노드에 실내 위치를 잡고 센서 추적을 시작한다', (
     WidgetTester tester,
   ) async {
     await useGraphRepository();
-    await walkIntoBuilding(tester);
+    await enterByButton(tester);
     // 센서 준비 대기가 끝날 때까지(_sensorWarmupTimeout) 시계를 밀어 준다.
     await tester.pump(const Duration(seconds: 3));
     await drain(tester);
@@ -209,13 +210,13 @@ void main() {
     final calibration = indoorNavigationDriver.currentCalibration;
     expect(calibration.canRenderPosition, isTrue);
 
-    // 앵커는 입구를 통로에 스냅한 지점이다. 입구의 층 로컬 좌표 (17.6, 22.3)에서
-    // 가장 가까운 통로 점은 n-a(18, 22)라 1m 안에 들어와야 한다. 여기가 어긋나면
-    // 지도의 위치 아이콘도 같은 만큼 엉뚱한 곳에 찍힌다.
+    // 앵커는 문의 그래프 노드 n-a(18, 22) **그 점**이다. 스냅도 좌표 변환도
+    // 거치지 않으므로 오차가 끼어들 자리가 없다 — 여기가 어긋나면 지도의 위치
+    // 아이콘도 같은 만큼 엉뚱한 곳에 찍힌다.
     final anchor = calibration.anchor!;
     expect(anchor.floorId, '1F');
-    expect(anchor.anchorLocalM.eastM, closeTo(18, 1));
-    expect(anchor.anchorLocalM.northM, closeTo(22, 1));
+    expect(anchor.anchorLocalM.eastM, closeTo(18, 0.01));
+    expect(anchor.anchorLocalM.northM, closeTo(22, 0.01));
 
     // 센서 세션이 실제로 돌고 있어야 한다 — 위치만 찍고 추적이 없으면 사용자는
     // 걸어도 마커가 그대로인 화면을 보게 된다.
@@ -229,7 +230,7 @@ void main() {
     WidgetTester tester,
   ) async {
     await useGraphRepository();
-    await walkIntoBuilding(tester);
+    await enterByButton(tester);
 
     // 이 유예가 없으면 나침반이 멀쩡한 기기까지 "heading 없음"으로 보여, 추정한
     // 진입 방향이 회전각으로 박히고 이후 궤적 전체가 그만큼 돌아간다.
@@ -250,17 +251,15 @@ void main() {
     expect(indoorNavigationDriver.currentCalibration.canRenderPosition, isTrue);
   });
 
-  testWidgets('층 그래프가 없으면 자동 앵커를 포기하고 수동 지정을 안내한다', (
+  testWidgets('층 그래프가 없으면 앵커를 포기하고 수동 지정을 안내한다', (
     WidgetTester tester,
   ) async {
-    // mock asset의 층에는 navigation_graph가 없다 — 입구 좌표를 층 좌표로 옮길
-    // 근거가 없으므로 억지로 찍지 않고, 사용자에게 수동 경로를 알려 준다.
-    final repository = MockBuildingRepository();
-    buildingRepository = repository;
-    destinationRepository = MockDestinationRepository(repository);
-    await repository.getAllBuildings();
+    // 문 목록은 있는데 그 문의 노드를 찾을 그래프가 없는 건물이다(같은 층
+    // 응답에서 stores는 오고 navigation_graph만 비었다). 억지로 찍지 않고
+    // 사용자에게 수동 경로를 알려 준다.
+    await useGraphRepository(withGraph: false);
 
-    await walkIntoBuilding(tester);
+    await enterByButton(tester);
 
     // 안내는 스낵바라 기본 4초 뒤 사라진다. 먼저 확인하고 시계를 민다.
     expect(find.textContaining('위치 지정으로 직접 지정해주세요'), findsOneWidget);
@@ -278,10 +277,98 @@ void main() {
       PdrRuntimeState.idle,
     );
   });
+
+  testWidgets('나갔다 다시 진입하면 문 노드에 실내 위치를 **다시** 잡는다', (
+    WidgetTester tester,
+  ) async {
+    // 실측 증상: 실내→야외로 나간 뒤 다시 실내로 길찾기해 진입하면 파란 마커가
+    // 아예 안 떴다.
+    //
+    // 뿌리는 **드라이버 보정과 화면 앵커가 서로 다른 시각에 풀린다**는 것이다.
+    // 나갈 때 화면은 앵커와 추정치를 즉시 비우는데(`_dropIndoorPosition`),
+    // 드라이버 보정은 센서 세션이 실제로 멈춰야 풀린다 — 그 정지는 기다리지
+    // 않는 호출이고, 디버그 모드에서는 기록을 이으려고 세션을 아예 살려 둔다.
+    // 그 사이 `canRenderPosition`이 참인 채로 남아, 다시 들어와도 추적 시작이
+    // "이미 앵커가 있다"며 곧장 돌아섰다. 그릴 것은 아무것도 없었다.
+    //
+    // **디버그 모드로 건다** — 세션이 확실히 살아 있어 그 상태를 결정적으로
+    // 재현한다. 정지를 기다리지 않는 일반 모드도 같은 창이 열리지만, 그쪽은
+    // 정지가 언제 끝나느냐에 달려 있어 테스트가 시계에 의존하게 된다.
+    await debugModeController.setEnabled(true);
+    addTearDown(() => debugModeController.setEnabled(false));
+    await useGraphRepository();
+    await enterByButton(tester);
+    await tester.pump(const Duration(seconds: 3));
+    await drain(tester);
+    expect(
+      tester
+          .state<OutdoorMapBodyState>(find.byType(OutdoorMapBody))
+          .indoorMarkerPointForTest,
+      isNotNull,
+      reason: '테스트 전제(첫 진입에서 마커가 잡혔다)가 성립하지 않았다',
+    );
+
+    final state = tester.state<OutdoorMapBodyState>(find.byType(OutdoorMapBody));
+    // 진단 세션을 연다. 이것이 있어야 나갈 때 센서 세션을 살려 두는 갈래를 탄다
+    // (`_dropIndoorPosition`) — 사용자가 실기기에서 테스트하던 상태 그대로다.
+    // ignore: invalid_use_of_visible_for_testing_member
+    state.beginRouteRecordingSessionForTest();
+    state.exitIndoorFromGuidance();
+    await drain(tester);
+    expect(
+      indoorNavigationDriver.currentRuntimeStatus.state,
+      isNot(PdrRuntimeState.idle),
+      reason: '테스트 전제(디버그 모드는 센서 세션을 살려 둔다)가 성립하지 않았다',
+    );
+    expect(
+      state.indoorMarkerPointForTest,
+      isNull,
+      reason: '테스트 전제(나가면 실내 위치를 버린다)가 성립하지 않았다',
+    );
+    expect(
+      indoorNavigationDriver.currentCalibration.canRenderPosition,
+      isTrue,
+      reason: '이 테스트가 재현하려는 상태(드라이버 보정만 살아 있다)가 아니다',
+    );
+
+    unawaited(state.enterIndoorFromGuidance());
+    await drain(tester);
+    await tester.pump(const Duration(seconds: 3));
+    await drain(tester);
+
+    expect(
+      state.indoorMarkerPointForTest,
+      isNotNull,
+      reason: '다시 들어왔는데 그릴 위치가 없으면 사용자는 빈 도면을 본다',
+    );
+    final anchor = indoorNavigationDriver.currentCalibration.anchor!;
+    expect(anchor.floorId, '1F');
+    expect(anchor.anchorLocalM.eastM, closeTo(18, 0.01));
+    expect(anchor.anchorLocalM.northM, closeTo(22, 0.01));
+  });
+
+  testWidgets('출입구 데이터가 없으면 들어가지 않고 이유를 말한다', (WidgetTester tester) async {
+    // mock asset에는 지상 출입구('교통' 소분류 + entrance_node_id)가 없다. 문을
+    // 모르면 앵커를 찍을 자리도, 실내 구간이 시작할 노드도 없다 — 도면만 펴 봐야
+    // 위치 없는 화면이 되므로 진입 자체를 하지 않는다.
+    final repository = MockBuildingRepository();
+    buildingRepository = repository;
+    destinationRepository = MockDestinationRepository(repository);
+    await repository.getAllBuildings();
+
+    await enterByButton(tester);
+
+    expect(find.textContaining('건물 출입구 정보가 없어'), findsOneWidget);
+    expect(
+      indoorNavigationDriver.currentCalibration.canRenderPosition,
+      isFalse,
+    );
+  });
+
 }
 
-/// navigation_graph가 들어 있는 층을 하나 가진 가짜 저장소. mock asset은 그래프가
-/// 없어 자동 앵커 경로를 끝까지 태울 수 없다.
+/// 지상 출입구 하나와 (선택적으로) navigation_graph를 가진 층을 내려주는 가짜
+/// 저장소. mock asset에는 둘 다 없어 앵커 경로를 끝까지 태울 수 없다.
 class _GraphBuildingRepository implements BuildingRepository {
   // 카테고리 pill은 이 테스트들의 관심사가 아니다. 빈 목록이면 pill 줄이 아예
   // 뜨지 않아 검증 대상 화면이 그대로 유지된다.
@@ -300,7 +387,8 @@ class _GraphBuildingRepository implements BuildingRepository {
       const [];
   _GraphBuildingRepository(this.graphJson);
 
-  final Map<String, dynamic> graphJson;
+  /// null이면 그 층에 navigation_graph를 넣지 않는다.
+  final Map<String, dynamic>? graphJson;
 
   static const _building = Building(
     id: 'thehyundai-seoul',
@@ -329,10 +417,25 @@ class _GraphBuildingRepository implements BuildingRepository {
     String floor,
   ) async {
     if (buildingId != _building.id || floor != '1F') return null;
+    // API 응답 모양(footprint_wgs84 + stores)으로 준다. GeoJSON 모양에는 지상
+    // 출입구를 심을 자리가 없는데, 진입 버튼은 그 문 목록이 있어야 동작한다.
     return {
-      'type': 'FeatureCollection',
-      'features': <Map<String, dynamic>>[],
-      'navigation_graph': graphJson,
+      'footprint_wgs84': [
+        for (final point in _building.footprintWgs84!)
+          {'lat': point.latitude, 'lng': point.longitude},
+      ],
+      'stores': [
+        // 소분류 '교통' + entrance_node_id가 있어야 지상 출입구로 추려진다
+        // (`domain/route/building_entrances.dart`의 groundEntrancesFrom).
+        {
+          'id': 'door-a',
+          'name': '출구',
+          'subcategory': '교통',
+          'entrance_node_id': 'n-a',
+          'centroid_wgs84': {'lat': 37.5665, 'lng': 126.9779},
+        },
+      ],
+      'navigation_graph': ?graphJson,
     };
   }
 

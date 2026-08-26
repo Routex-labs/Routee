@@ -64,6 +64,11 @@ extension OutdoorMapRouteLayers on OutdoorMapBodyState {
   ll.LatLng? _indoorDestinationPinForActiveFloor() {
     final destination = _indoorRouteDestination;
     if (destination == null) return null;
+    // **출구는 도착지가 아니라 경유지다.** 나가는 여정의 실내 구간은 목적지가
+    // 지상 출입구라([_exitEntranceOfIndoorRoute]) 그대로 두면 문 위에 도착 핀이
+    // 서서, 사용자가 "여기가 목적지"로 읽는다. 이 여정의 도착 핀은 바깥 목적지에
+    // 찍힌 것 하나뿐이다([_syncDestinationLayer]).
+    if (_exitEntranceOfIndoorRoute != null) return null;
     final multi = _indoorMultiFloorRoute;
     if (multi != null) {
       if (multi.destinationSegment.floorName != _activeFloor) return null;
@@ -142,8 +147,8 @@ extension OutdoorMapRouteLayers on OutdoorMapBodyState {
               geoJsonLineFeature(transferPoints, style: 'indoor'),
             ]),
     );
-    // 실내 경로가 활성이면 그걸 우선 그린다(GPS 걷기 경로와 동시에 표시하지
-    // 않는다 — 사용자는 지금 실내에 있고 실내 경로가 유일한 관심사).
+    // 실내 경로가 활성이면 그걸 우선 그린다(평소에는 GPS 걷기 경로와 동시에
+    // 표시하지 않는다 — 사용자는 지금 실내에 있고 실내 경로가 유일한 관심사).
     final indoor = _indoorRouteSegment;
     if (indoor != null && indoor.points.length >= 2) {
       final visuals = _indoorRouteVisuals(indoor);
@@ -151,13 +156,27 @@ extension OutdoorMapRouteLayers on OutdoorMapBodyState {
         scopeId: _activeFloor,
         currentCompleted: visuals.completed,
       );
+      final features = <Map<String, dynamic>>[];
+      if (visuals.remaining.length >= 2) {
+        features.add(geoJsonLineFeature(visuals.remaining, style: 'indoor'));
+      }
+      // **실내→야외 여정은 예외다.** 두 구간이 한 여정이라 같이 보여야 한다.
+      // 예전에는 여기서 그냥 돌아섰고, 그 뒤에 그려진 야외 구간이 같은 소스를
+      // 덮거나(순서에 따라) 아예 못 그려져 **둘 중 하나는 반드시 사라졌다.**
+      // 거울상인 야외→실내는 이미 [_pendingIndoorRoute] 미리 보기로 둘을 함께
+      // 그리고 있다 — 그 비대칭을 없앤다.
+      //
+      // 완료 구간은 실내 것만 쓴다. 아직 건물 안이라 야외 구간은 한 걸음도
+      // 걷지 않았고, 그 회색선은 나간 뒤 야외 scope에서 새로 잡힌다.
+      final outdoorLeg = _pendingOutdoorDestination == null ? null : _route;
+      if (outdoorLeg != null && outdoorLeg.points.length >= 2) {
+        features.add(geoJsonLineFeature(outdoorLeg.points, style: 'walk'));
+      }
       await controller.setGeoJsonSource(
         kOutdoorRouteSourceId,
-        visuals.remaining.length < 2
+        features.isEmpty
             ? emptyGeoJsonCollection()
-            : geoJsonCollection([
-                geoJsonLineFeature(visuals.remaining, style: 'indoor'),
-              ]),
+            : geoJsonCollection(features),
       );
       return;
     }

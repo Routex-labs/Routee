@@ -94,6 +94,7 @@ class NativePdrEvent {
       walkDirConfidence: _double(raw, 'walkDirConfidence'),
       magneticAccuracy: raw['magneticAccuracy']?.toString(),
       magneticField: _double(raw, 'magneticField'),
+      magneticInclinationDeg: _double(raw, 'magneticInclinationDeg'),
       rotationHeadingAccuracyDeg: _double(raw, 'rotationHeadingAccuracyDeg'),
       headingSource: raw['headingSource']?.toString(),
     );

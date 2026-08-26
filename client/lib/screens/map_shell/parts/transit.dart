@@ -202,13 +202,9 @@ extension _MapShellTransit on _MapShellScreenState {
     );
   }
 
-  /// 후보 목록을 띄우고, 고른 하나를 **확정해 지도에 그린다.**
+  /// 후보 목록을 띄우고, 확정한 하나를 지도에 그린 뒤 **안내까지 시작한다.**
   /// **첫 조회와 뒤로가기가 같이 쓴다** — 고른 뒤의 흐름을 두 벌로 만들면 한쪽만
   /// 고쳐진다.
-  ///
-  /// **안내는 여기서 걸지 않는다.** 목록을 닫으면 지도 위 요약 카드가 그 확정된
-  /// 경로를 들고 `안내 시작`을 내민다([TransitSummaryCard]) — 상세 페이지를 한
-  /// 겹 더 쌓아 그 버튼을 감췄던 옛 흐름은 중첩 시트였다.
   ///
   /// 목록이 떠 있는 동안에는 요약 카드를 접는다([_transitRoutesSheetOpen]).
   Future<void> _pickTransitRoute(
@@ -222,6 +218,7 @@ extension _MapShellTransit on _MapShellScreenState {
         () => TransitRoutesSheet.show(
           context,
           routes: routes,
+          destinationLabel: destination.title,
           onCloseAll: _requestCloseSheetChain,
           // 누른 줄로 지도를 갈아친다. 미리보기와 **같은 함수**라 TMAP 호출은
           // 한 건도 안 늘고, 고르지 않고 닫으면 마지막에 본 후보가 그대로 남는다.
@@ -238,6 +235,34 @@ extension _MapShellTransit on _MapShellScreenState {
       if (!mounted || picked == null) return;
       final outdoor = _outdoorKey.currentState;
       if (outdoor == null) return;
+
+      // **건물 안에서 출발하면 정류장까지의 실내 구간을 먼저 그린다.**
+      //
+      // 거울상인 하차 쪽은 아래 [prepareIndoorLegFromDrop]으로 이미 있었는데,
+      // 승차 쪽은 함수([showIndoorLegToTransitBoarding])와 좌표 계산
+      // ([transitBoardPoint])이 다 만들어져 있으면서 **부르는 자리만 없었다.**
+      // 그래서 실내에서 대중교통을 시작하면 바깥 경로만 그려지고, 사용자는 지금
+      // 서 있는 층에서 어느 문으로 나가야 하는지 화면에서 알 수 없었다.
+      //
+      // 대중교통 경로를 그리기 **전에** 부른다 — 그 함수가 `_userDestination`을
+      // 비우므로, 뒤에 부르면 방금 세운 도착 핀이 지워진다.
+      //
+      // **도면 유무만 보면 안 된다**([transitStartsIndoors]) — 도보 갈래
+      // ([classifyWalkRoute])와 같은 모양이라야 수단을 바꾸는 것만으로 안내
+      // 앞부분이 사라지지 않는다.
+      final boardingWalkOrigin =
+          transitStartsIndoors(
+            origin: _selectedOrigin,
+            indoorContextActive: _indoorContextActive,
+            indoorStartReady:
+                indoorNavigationDriver.currentCalibration.canRenderPosition,
+          )
+          ? await outdoor.showIndoorLegToTransitBoarding(
+              transitBoardPoint(picked, fallback: origin),
+              origin: _indoorOriginPoi(),
+            )
+          : null;
+      if (!mounted) return;
 
       // **건물 안 매장이면 마지막 도보는 매장이 아니라 문으로 간다.**
       //
@@ -285,7 +310,10 @@ extension _MapShellTransit on _MapShellScreenState {
         completed,
         destination: walkTarget,
         label: '${destination.title}까지',
-        origin: origin,
+        // 실내 구간을 그렸으면 바깥 도보는 **그 문에서** 시작한다. 안 그러면
+        // 실내 선은 문에서 끝나는데 바깥 선은 건물 안 좌표에서 뻗어, 두 선이
+        // 서로 다른 곳을 가리킨다.
+        origin: boardingWalkOrigin ?? origin,
         // 나머지 후보도 함께 넘겨 회색으로 깔린다. 고른 것 하나만 그리면 "다른
         // 길도 있다"가 시트를 다시 열기 전까지 화면에서 사라진다.
         //
@@ -310,9 +338,14 @@ extension _MapShellTransit on _MapShellScreenState {
         );
         if (!mounted) return;
       }
-      // 여기서 멈춘다. 목록이 닫혔으니 지도 위 요약 카드가 이 확정된 경로로
-      // 돌아와 `안내 시작`을 내민다 — 안내를 걸지 말지는 그 버튼에서 사용자가
-      // 정한다.
+
+      // **여기까지 왔다는 것은 상세에서 `안내 시작`을 눌렀다는 뜻이다** — 목록은
+      // 그 버튼에서만 값을 돌려준다(TransitRoutesSheet.show). 확정만 하고 멈추면
+      // 하단 카드가 같은 버튼을 한 번 더 내밀어 두 번 누르게 된다.
+      //
+      // 계획 카드의 버튼과 **같은 함수**를 탄다. 경로에서 멀면 그쪽 가드가 막고
+      // 안내 문구만 뜨는데, 그때 카드에 버튼이 남는 것이 맞는 동작이다.
+      await outdoor.startGuidanceForPickedRoute();
     } finally {
       if (mounted) setState(() => _transitRoutesSheetOpen = false);
     }
@@ -378,6 +411,17 @@ extension _MapShellTransit on _MapShellScreenState {
       point: candidate.point,
       nodeId: nodeId,
     );
+  }
+
+  /// 사용자가 **출발지로 고른 실내 매장**. 안 골랐으면 null이라 실내 구간이
+  /// PDR 앵커(=지금 서 있는 자리)에서 시작한다.
+  ///
+  /// [_indoorStoreOf]의 출발지 쪽 짝이다. 좌표만 있는 야외 지점은 실내 라우팅의
+  /// 시작 노드가 못 되므로 걸러 낸다.
+  PoiSearchResult? _indoorOriginPoi() {
+    final selected = _selectedOrigin;
+    if (selected == null) return null;
+    return _indoorStoreOf(selected);
   }
 
   /// 고른 한 경로의 출발·도착 도보를 TMAP 보행자 경로로 채운다.

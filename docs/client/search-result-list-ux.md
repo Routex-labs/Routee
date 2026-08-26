@@ -909,12 +909,11 @@ zoom이 화면 폭에 맞춰 16.8까지 내려가고(`indoor_entry_zoom.dart`) �
   돌리면 한 번 누른 값에 요청이 두 번 나간다.
 - **실외에서는 그리지 않는다.** 이미 밖이라 나갈 곳이 없고, 그 화면의 "찾지 못했어요"는
   TMAP까지 뒤진 뒤의 결론이다.
-- **건물 안에 서서 눌러도 유지된다.** 축소만으로는 부족하다 — GPS는 여전히 "안"이라 다음
-  좌표 한 건이 그대로 되끌고 들어간다. 그래서 `returnToOutdoorView`가 GPS 자동 진입까지
-  끈다(`_exitIndoorByOutsideTap`과 같은 이유). 영구히 죽지는 않는다: 정말 걸어 나가면 "밖"
-  판정이 다시 무장한다. 축소로 나가는 길은 이 함수를 안 거치므로 거기서 따로 끈다
-  (`parts/map.dart`의 `_exitIndoorByZoomOut`). 이 세 갈래가 어긋나면 "나갔는데 다시 들어가고
-  결과도 사라진다"가 돌아온다 — 검증은 `test/screens/outdoor_map/outdoor_zoom_exit_gps_test.dart`.
+- **건물 안에 서서 눌러도 유지된다.** 축소해 두면 그만이다 — 실내로 들어가는 길이 사용자가
+  누르는 것 하나뿐이라, 좌표가 아무리 "안"이라고 말해도 화면을 열지 않는다. 한동안은 GPS가
+  자동으로 들여보냈고 그때는 나가는 갈래마다 그 자동 진입을 따로 꺼 줘야 했는데, 지금은 끌
+  것 자체가 없다(`docs/client/indoor-entry-rules.md`). 좌표가 화면을 열지도 접지도 않는다는
+  것의 검증은 `test/screens/outdoor_map/outdoor_exit_to_outdoors_test.dart`.
 
 검증 기준: `test/screens/map_shell/search_outside_escape_test.dart`.
 

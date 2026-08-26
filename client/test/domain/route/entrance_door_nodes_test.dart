@@ -16,8 +16,7 @@ const _metersPerDegreeLat = 111320.0;
 
 LatLng _wgs84(double xM, double yM) => LatLng(
   _lat0 + yM / _metersPerDegreeLat,
-  _lng0 +
-      xM / (_metersPerDegreeLat * math.cos(_lat0 * math.pi / 180)),
+  _lng0 + xM / (_metersPerDegreeLat * math.cos(_lat0 * math.pi / 180)),
 );
 
 GraphNode _node(String id, double xM, double yM, {String? floorId}) {
@@ -202,6 +201,57 @@ void main() {
 
     test('그래프를 못 받았으면 예전 안쪽 노드로 폴백한다', () {
       expect(entranceRouteNodeId(null, entrance), 'n-inside');
+    });
+  });
+
+  /// 나가는 여정인지를 가리는 판정. **문 하나에 노드가 둘**이라는 사실이 여기서
+  /// 새면 "밖으로 나가기" 버튼이 안 뜨고 문 도달이 그냥 도착으로 읽힌다.
+  group('exitEntranceForRouteNodeId', () {
+    const doors = [
+      BuildingEntrance(
+        id: 'exit-1',
+        name: '출구',
+        nodeId: 'n-inside-1',
+        point: LatLng(_lat0, _lng0),
+      ),
+      BuildingEntrance(
+        id: 'exit-2',
+        name: '출구',
+        nodeId: 'n-inside-2',
+        point: LatLng(_lat0, _lng0),
+      ),
+    ];
+
+    test('꿰맨 문 노드로 끝나는 경로도 나가는 여정이다', () {
+      // 꿰매기가 성공한 정상 케이스다. 안쪽 노드만 비교하던 동안 이 갈래가
+      // 통째로 안 걸렸다.
+      final found = exitEntranceForRouteNodeId(
+        doors,
+        entranceDoorNodeId('exit-2'),
+      );
+      expect(found?.id, 'exit-2');
+    });
+
+    test('안쪽 노드로 끝나는 경로도 나가는 여정이다', () {
+      // 꿰매기를 건너뛴 출구의 폴백 경로다([entranceRouteNodeId]).
+      expect(exitEntranceForRouteNodeId(doors, 'n-inside-1')?.id, 'exit-1');
+    });
+
+    test('매장으로 끝나는 경로는 나가는 여정이 아니다', () {
+      expect(exitEntranceForRouteNodeId(doors, 'FL-2:ND-9'), isNull);
+    });
+
+    test('도착 노드를 모르면 나가는 여정이 아니다', () {
+      expect(exitEntranceForRouteNodeId(doors, null), isNull);
+    });
+
+    test('출입구 데이터가 없으면 나가는 여정이 아니다', () {
+      // 문 목록을 못 받은 건물이다. 여기서 참이 되면 눌러도 이어질 경로가 없는
+      // 버튼이 뜬다.
+      expect(
+        exitEntranceForRouteNodeId(const [], entranceDoorNodeId('exit-1')),
+        isNull,
+      );
     });
   });
 }

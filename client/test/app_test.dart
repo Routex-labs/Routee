@@ -49,10 +49,8 @@ final _fakeLowAccuracyPosition = Position(
   speedAccuracy: 0,
 );
 
-// 자동 진입 감지 테스트용 두 건. 판정은 **한 건으로 성립하지 않는다** —
-// "신호가 멀쩡했을 때 입구 앞에 있었다"는 근거가 창 안에 있어야 하므로, 접근
-// 표본(양호)과 진입 표본(저하)을 순서대로 흘려야 한다. 근거 없이 저하 한 건만
-// 오는 경우는 판정하지 않는 것이 이 정책의 규칙이다.
+// 데모 건물 입구 위, 신호 양호. 외곽선 안쪽 문턱을 넘으므로 이 한 건이 곧
+// "건물 안"이다 — 진입 판정은 오차를 보지 않는다(`judgeBuildingFromGps`).
 final _fakePositionApproachingEntrance = Position(
   latitude: 37.5665,
   longitude: 126.9779,
@@ -73,6 +71,22 @@ final _fakePositionAtEntrance = Position(
   longitude: 126.9779,
   timestamp: DateTime(2024, 1, 1),
   accuracy: 45,
+  altitude: 0,
+  altitudeAccuracy: 0,
+  heading: 0,
+  headingAccuracy: 0,
+  speed: 0,
+  speedAccuracy: 0,
+);
+
+/// 건물 북쪽 벽에서 약 33 m 떨어진 인도 + 신호 양호. **건물 앞을 지나가는
+/// 상황**이고, 외곽선 밖이라는 것이 전제다 — 이 좌표 한 건이 "앱을 실내에서
+/// 켰다"는 판정의 빗장을 내린다(`saysOutsideBuilding`).
+final _fakePositionPassingBy = Position(
+  latitude: 37.5670,
+  longitude: 126.9780,
+  timestamp: DateTime(2024, 1, 1),
+  accuracy: 5,
   altitude: 0,
   altitudeAccuracy: 0,
   heading: 0,
@@ -221,8 +235,10 @@ void main() {
   });
 
   testWidgets(
-    'map shell shows the indoor entry overlay when entrance is detected nearby',
+    'map shell opens the floor plan for someone who launched the app inside',
     (WidgetTester tester) async {
+      // **앱을 건물 안에서 켜면 화면이 스스로 실내로 간다.** 밖 좌표가 한 번도
+      // 오지 않는 것이 그 근거다 — 걸어 들어온 사람이라면 반드시 밖을 지나온다.
       watchPosition = () => Stream.fromIterable([
         _fakePositionApproachingEntrance,
         _fakePositionAtEntrance,
@@ -241,14 +257,12 @@ void main() {
       // 층 질문이 나타난다. 이 테스트는 진입 뒤 동작을 보므로 그 시간을 넘긴다.
       await tester.pump(const Duration(seconds: 1));
       await tester.pump();
-      // 자동 진입은 '건물 감지 중...'을 먼저 띄운 뒤, 입구 기준으로 실내 위치를
-      // 잡는 작업이 끝나면 같은 자리에 결과를 덮어쓴다(진행 문구가 4초를 다
-      // 채운 뒤에야 결과가 뜨면 이미 끝난 작업을 계속 보여주는 셈이다).
-      // 이 fixture의 mock 층에는 navigation_graph가 없어 결과가 즉시 나오므로,
-      // 여기서 보이는 것은 진행 문구가 아니라 수동 지정 안내다.
+      // 실내 위치를 잡는 작업은 '건물 감지 중...'을 먼저 띄운 뒤 같은 자리에
+      // 결과를 덮어쓴다. 이 fixture의 mock 층에는 navigation_graph가 없어 결과가
+      // 즉시 나오므로, 여기서 보이는 것은 진행 문구가 아니라 수동 지정 안내다.
       //
-      // 다만 그 작업은 **층을 답한 뒤에** 시작한다 — 자동 진입이 "몇 층에
-      // 계신가요?"를 먼저 띄운다.
+      // 다만 그 작업은 **층을 답한 뒤에** 시작한다 — "몇 층에 계신가요?"가
+      // 먼저 뜬다.
       await dismissEntryFloorPrompt(tester);
       expect(find.textContaining('위치 지정으로 직접 지정해주세요'), findsOneWidget);
 
@@ -261,26 +275,35 @@ void main() {
   );
 
   testWidgets(
+    'map shell keeps the outdoor view for someone walking in from outside',
+    (WidgetTester tester) async {
+      // **밖에서 걸어 들어오는 사람은 스스로 들어가지지 않는다.** GPS 자동 진입을
+      // 걷어낸 뒤의 계약이다 — 그쪽은 안내 카드의 진입 버튼으로 들어간다.
+      // 위 테스트와 좌표는 같고 **앞에 밖 좌표가 하나 더 붙은 것만** 다르다.
+      // 그 한 건이 "앱을 실내에서 켰다"와 "걸어 들어왔다"를 가른다.
+      watchPosition = () => Stream.fromIterable([
+        _fakePositionPassingBy,
+        _fakePositionApproachingEntrance,
+        _fakePositionAtEntrance,
+      ]);
+
+      await tester.pumpWidget(
+        MaterialApp(theme: AppTheme.light, home: const MapShellScreen()),
+      );
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+      await tester.pumpAndSettle();
+
+      expect(find.byType(FloorSelector), findsNothing);
+      expect(find.byTooltip('메뉴'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
     'map shell keeps the outdoor view when GPS signal stays strong near the entrance',
     (WidgetTester tester) async {
-      // 건물 북쪽 벽에서 약 33 m 떨어진 인도 + 신호 양호(건물 앞을 지나가는
-      // 상황). 좌표를 외곽선 **밖**으로 잡는 것이 이 테스트의 전제다 — 진입
-      // 판정이 "믿을 수 있는 좌표가 건물 안"이라(judgeBuildingFromGps), 입구와
-      // 같은 좌표(외곽선 안쪽 약 22 m)를 흘리면 지나가는 상황이 아니라 실제로
-      // 들어온 상황이 된다.
-      final passingByPosition = Position(
-        latitude: 37.5670,
-        longitude: 126.9780,
-        timestamp: DateTime(2024, 1, 1),
-        accuracy: 5,
-        altitude: 0,
-        altitudeAccuracy: 0,
-        heading: 0,
-        headingAccuracy: 0,
-        speed: 0,
-        speedAccuracy: 0,
-      );
-      watchPosition = () => Stream.value(passingByPosition);
+      watchPosition = () => Stream.value(_fakePositionPassingBy);
 
       await tester.pumpWidget(
         MaterialApp(theme: AppTheme.light, home: const MapShellScreen()),

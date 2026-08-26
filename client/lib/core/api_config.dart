@@ -22,6 +22,20 @@ String get apiBaseUrl {
 /// Studio 1F만 적재하는 기본 개발 DB와 맞춘 데모 건물 ID.
 const demoBuildingId = 'thehyundai-seoul';
 
+/// 검색·경로 HTTP 한 건이 응답을 기다리는 상한.
+///
+/// **timeout이 없으면 화면이 영원히 「찾는 중」에 머무를 수 있다.** 소켓이 끊기지
+/// 않고 멎으면 `http` 패키지는 스스로 포기하지 않는다 — 응답도 오류도 오지
+/// 않으니 `await`가 영영 안 풀리고, 그 뒤에 있는 스피너도 안 내려간다. 실제로
+/// 길찾기 칸의 후보 목록이 그렇게 멈춘 적이 있다.
+///
+/// **8초에서 15초로 올렸다.** 실기기에서 매 질의가 정확히 8초에 걸렸다 — Cloud Run
+/// 콜드 스타트가 그보다 오래 걸린다는 뜻이다. 상한이 짧으면 살아 있는 백엔드를
+/// 죽은 것으로 다룬다. 길어도 화면이 멈추지 않는 이유는 따로 있다: 실내·바깥
+/// 조회가 나란히 돌아서, 이 상한은 실내 줄이 늦게 붙는 것까지만 늘린다
+/// (`screens/map_shell/directions_candidates.dart`).
+const searchRequestTimeout = Duration(seconds: 15);
+
 /// TMAP 보행자 경로·POI 통합검색. 비면 `MockDirectionsRepository`로 떨어진다.
 const tmapAppKey = String.fromEnvironment('TMAP_APP_KEY');
 const tmapBaseUrl = 'https://apis.openapi.sk.com/tmap';

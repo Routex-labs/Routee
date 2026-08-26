@@ -40,15 +40,14 @@ final _subwayStation = OutdoorPoi(
   distanceMeters: 300,
 );
 
-/// **판정을 못 내리는** GPS 표본(정확도 60 m > [decisiveAccuracyMeters] 20 m).
+/// 건물에서 확실히 떨어진 좌표.
 ///
-/// 바깥 검색에는 기준점이 필요한데(`outdoorSearchCenter`), 그렇다고 정확한
-/// 좌표를 넣으면 건물 안/밖 판정이 서면서 실내 상태가 통째로 흔들린다 —
-/// 그게 바로 집에서 실내 기능을 못 잡아 두는 이유다. 정확도를 무너뜨리면
-/// 판정은 `unclear`로 비켜 가고 기준점만 남는다.
-Position _unclearFix() => Position(
-  latitude: 37.5665,
-  longitude: 126.9779,
+/// 한때 건물 안 좌표에 오차 60 m를 달아 "판정이 안 서는 표본"으로 썼는데,
+/// **진입이 오차를 안 보게 된 뒤로 그 표본이 곧 자동 진입**이 됐다. 지금은
+/// 거리로 밖을 만든다(`docs/client/indoor-entry-rules.md` 1절).
+Position _outsideFix() => Position(
+  latitude: 37.5680,
+  longitude: 126.9800,
   timestamp: DateTime(2024, 1, 1),
   accuracy: 60,
   altitude: 0,
@@ -184,8 +183,9 @@ void main() {
     // 도착지 칸으로 옮겼다.
     await tester.pumpWidget(MaterialApp(theme: AppTheme.light, home: const MapShellScreen()));
     await drain(tester);
-    // 바깥 검색에는 기준점이 필요하다.
-    positions.add(_unclearFix());
+    // 바깥 검색에는 기준점이 필요하다. 건물 밖 좌표라 실내로 끌려가지 않고,
+    // 실내 상태는 아래 [enterIndoor]가 직접 켠다.
+    positions.add(_outsideFix());
     await drain(tester);
 
     await tester.tap(find.byType(TextField).first);

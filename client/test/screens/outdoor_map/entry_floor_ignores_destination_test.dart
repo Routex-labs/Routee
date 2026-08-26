@@ -27,7 +27,12 @@ import '../../support/entry_floor_prompt_helper.dart';
 /// 이름이 아니라 **"보고 있는 층"이 앵커 층을 정하는가**다.
 ///
 /// 앵커 층은 [OutdoorMapBodyState.currentFloor]로 읽는다 —
-/// `_startTrackingFromGpsFix`가 앵커를 찍을 때 쓰는 값이 그 층이다.
+/// `_startIndoorTracking`이 앵커를 찍을 때 쓰는 값이 그 층이다.
+///
+/// 좌표가 화면을 실내로 바꾸는 갈래는 이제 **앱을 건물 안에서 켠 경우 하나뿐**
+/// 이다(`indoor-entry-rules.md` 6절). 그 갈래도 층을 물으므로, 답하지 않았을 때
+/// 무엇이 층을 정하는지가 그대로 이 파일의 질문이다 — 걸어 들어와 버튼을 누른
+/// 쪽은 출입구 층으로 못 박혀([enterIndoorFromGuidance]) 물을 것이 없다.
 void main() {
   late BuildingRepository originalBuildingRepository;
   late DestinationRepository originalDestinationRepository;
@@ -50,9 +55,6 @@ void main() {
     speedAccuracy: 0,
   );
 
-  // 첫 좌표는 반드시 밖이어야 한다 — 외곽선은 asset 로드 뒤에야 채워지므로,
-  // 안쪽 좌표를 먼저 흘리면 판정할 도형이 없다.
-  Position farAway() => positionAt(37.5665, 126.9800);
   Position atEntrance() => positionAt(37.5665, 126.9779);
 
   // 지도 오버레이의 반복 애니메이션 때문에 pumpAndSettle이 정착하지 않으므로,
@@ -84,7 +86,9 @@ void main() {
     watchPosition = defaultWatchPosition;
   });
 
-  testWidgets('다른 층 도면을 펴 놓고 지상 입구로 들어오면 앵커 층은 출입구 층이다', (tester) async {
+  testWidgets('다른 층 도면을 펴 놓고 건물 안에서 앱을 켜면 앵커 층은 진입 근거가 정한다', (
+    tester,
+  ) async {
     final positions = StreamController<Position>.broadcast();
     addTearDown(positions.close);
     watchPosition = () => positions.stream;
@@ -98,9 +102,8 @@ void main() {
         home: Scaffold(body: OutdoorMapBody(key: key)),
       ),
     );
-    await drain(tester);
-    positions.add(farAway());
-    await tester.pump(const Duration(milliseconds: 50));
+    // **좌표를 아직 주지 않는다.** 밖 좌표를 한 번이라도 보면 "걸어 들어왔다"로
+    // 갈려([_sawOutsideSinceLaunch]) 이 갈래가 통째로 닫힌다.
     await drain(tester);
 
     final state = key.currentState!;
@@ -131,8 +134,7 @@ void main() {
     positions.add(atEntrance());
     await tester.pump(const Duration(milliseconds: 50));
     await drain(tester);
-    // 층을 물어도 답하지 않는다. 안내 중이면 아예 묻지 않으므로, 답이 없는
-    // 상태가 실기기에서 문제가 된 그 상태다.
+    // 층을 물어도 답하지 않는다. 답이 없는 상태가 실기기에서 문제가 된 그 상태다.
     await dismissEntryFloorPrompt(tester);
     await drain(tester);
 

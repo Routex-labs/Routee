@@ -12,8 +12,8 @@ import 'package:navigation_client/repositories/routing/transit_repository.dart';
 import 'package:navigation_client/models/route/transit_route.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:navigation_client/screens/map_shell/map_shell_screen.dart';
+import 'package:navigation_client/screens/map_shell/widgets/sheets/transit_route_detail_sheet.dart';
 import 'package:navigation_client/screens/map_shell/widgets/sheets/transit_routes_sheet.dart';
-import 'package:navigation_client/screens/outdoor_map/widgets/transit_summary_card.dart';
 import 'package:navigation_client/widgets/transit_itinerary_card.dart';
 import 'package:navigation_client/service_locator.dart';
 import 'package:navigation_client/state/recent_route_points_controller.dart';
@@ -157,10 +157,11 @@ void main() {
     await drain(tester);
   }
 
-  /// 후보 목록에서 [index]번째 카드를 눌러 그 경로로 확정하고, 지도 위 요약
-  /// 카드의 `안내 시작`으로 안내까지 건다. **카드 탭이 그 자리에서 목록을
-  /// 닫는다** — 상세 페이지를 한 겹 더 쌓지 않는다.
+  /// 후보 목록에서 [index]번째 카드를 눌러 상세를 열고, 거기서 `안내 시작`으로
+  /// 그 경로를 확정한다. **카드 탭만으로는 아무것도 그려지지 않는다** — 상세는
+  /// 다른 후보와 견주라고 있는 한 겹이라, 지도는 이 버튼에서만 바뀐다.
   ///
+  /// 이 버튼은 확정과 **안내 시작을 함께** 한다(`transit_preview_test.dart`).
   /// 그래서 이 함수를 부른 뒤 화면은 계획이 아니라 안내 중이다.
   Future<void> pickTransitCandidate(
     WidgetTester tester, [
@@ -170,16 +171,17 @@ void main() {
     await drain(tester);
     expect(
       find.byType(TransitRoutesSheet),
-      findsNothing,
-      reason: '카드를 누르면 그 자리에서 목록이 닫힌다',
+      findsOneWidget,
+      reason: '카드를 눌렀다고 목록이 닫히면 다른 후보로 돌아올 길이 없다',
     );
     await tester.tap(
       find.descendant(
-        of: find.byType(TransitSummaryCard),
+        of: find.byType(TransitRouteDetailSheet),
         matching: find.text('안내 시작'),
       ),
     );
     await drain(tester);
+    expect(find.byType(TransitRoutesSheet), findsNothing);
   }
 
   /// 길찾기 바가 지금 보여 주는 도착지. 경로만 지웠는지(칸은 살아 있는지)를 본다.
@@ -384,8 +386,7 @@ void main() {
     await pickTransitCandidate(tester);
 
     // 안내 한 겹, 경로 한 겹, 길찾기 바 한 겹. 셋을 합치면 상단 X와 같은 정리다.
-    // 첫 겹이 안내인 것은 [pickTransitCandidate]가 확정에 이어 요약 카드의
-    // `안내 시작`까지 눌러서다.
+    // 첫 겹이 안내인 것은 상세의 `안내 시작`이 확정과 함께 안내를 걸기 때문이다.
     await tester.binding.handlePopRoute();
     await drain(tester);
     await tester.binding.handlePopRoute();

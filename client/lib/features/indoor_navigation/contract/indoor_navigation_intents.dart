@@ -1,6 +1,7 @@
 import 'package:indoor_pdr_core/indoor_pdr_core.dart';
 
 import '../../../domain/geo/geo_transform.dart';
+import 'pdr_anchor.dart';
 
 /// UI가 **호출**하는 명령 계약(UI → 로직).
 ///
@@ -26,9 +27,32 @@ abstract interface class IndoorNavigationIntents {
   /// 사용자가 현재 진행 방향을 floor local_m 방향으로 맞춰 rotation을 확정한다.
   /// [floorDirection]은 위치가 아닌 단위와 무관한 방향 벡터다. 컨트롤러가 anchor
   /// 확정 때 받은 axes로 PDR 동·북 방향에 역변환한다.
+  ///
+  /// [basis]는 이 방향을 무엇에서 얻었는지다. 회전각과 함께 anchor에 남아 진단
+  /// 칩으로 나가므로, 방향이 틀어졌을 때 어느 근거가 나빴는지 사후에 갈린다.
   Future<void> confirmAnchorByFloorDirection({
     required PdrLocalPoint floorDirection,
+    required AnchorRotationBasis basis,
   });
+
+  /// 센서 세션은 그대로 두고 **방위 신뢰 상태만** 새로 잡는다.
+  ///
+  /// [startGuidance]가 세션을 여는 순간에 하는 것과 같은 방위 초기화이지만,
+  /// native 센서는 멈추지도 다시 켜지도 않는다 — 걸음·기록은 그대로 잇고,
+  /// 밖을 걷는 동안 흔들렸을 수 있는 자북 신뢰·걸음 방향 누적만 새로 판단하게
+  /// 한다. 문을 다시 지나 들어온 재진입에서 부른다 — 세션이 이미 이 층에서
+  /// 돌고 있어도, 이번에 찍는 앵커의 회전각은 그 낡은 누적이 아니라 여기서부터
+  /// 다시 판단해야 한다.
+  ///
+  /// 세션이 열려 있지 않으면([startGuidance] 전) 아무 일도 하지 않는다.
+  Future<void> resetHeadingTrust();
+
+  /// 복도 축으로 잡은 anchor의 **앞뒤만** 뒤집는다(회전각 +180°).
+  ///
+  /// 위치는 그대로 두고 회전각만 바꾼다 — anchor 원점은 사용자가 찍은 그 점이고,
+  /// 뒤집기는 그 점을 중심으로 한 점대칭이라 찍은 자리가 움직이지 않는다.
+  /// anchor가 아직 없으면 아무 일도 하지 않는다.
+  Future<void> flipAnchorRotation();
 
   /// 층 변경. PDR 세션을 reset하고 새 층 anchor 확정을 다시 요구한다.
   Future<void> changeFloor({required String floorId});

@@ -8,6 +8,7 @@ class EscalatorDetectorConfig {
   const EscalatorDetectorConfig({
     this.armRadiusM = 6.0,
     this.routeApproachArmRadiusM = 16.0,
+    this.altitudeArmRadiusM = 16.0,
     this.armHoldMs = 60000,
     this.smoothingWindowMs = 3000,
     this.minSmoothingSamples = 3,
@@ -49,6 +50,10 @@ class EscalatorDetectorConfig {
 
   /// 경로가 탑승 노드를 정확히 가리킬 때만 쓰는 넓은 허가 반경(실측 위치 오차 12m).
   final double routeApproachArmRadiusM;
+
+  /// **기압이 이미 층 이동을 말할 때** 쓰는 허가 반경. 근거는
+  /// `docs/client/escalator-thresholds.md`의 「허가」절.
+  final double altitudeArmRadiusM;
 
   /// 허가 유지 시간. 탑승 뒤에는 걸음이 멈춰 위치가 갱신되지 않으므로, 노드에서
   /// 멀어진 것으로 계산되는 동안에도 판정할 수 있어야 한다.

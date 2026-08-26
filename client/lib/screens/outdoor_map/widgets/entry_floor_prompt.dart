@@ -53,7 +53,7 @@ class EntryFloorPrompt extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.routexColors;
     // **Scaffold를 쓰지 않는다.** ScaffoldMessenger는 가장 나중에 등록된
-    // Scaffold에 스낵바를 옮겨 붙인다 — 자동 진입이 띄운 '건물 감지 중...'이
+    // Scaffold에 스낵바를 옮겨 붙인다 — 실내 위치를 잡느라 띄운 '건물 감지 중...'이
     // 이 화면 하단으로 따라 올라와 "나중에 고르기"를 덮었다.
     return Material(
       color: colors.surfaceBase,

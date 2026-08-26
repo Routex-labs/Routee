@@ -146,8 +146,11 @@ Dart의 파일 단위 프라이버시(`_`) 때문에 공개로 바꾼 것이고,
 | `_syncFreshFixTimer` `_maybeRequestFreshFix` | 〃 (같은 이름, private) | 655d940e |
 | `_handlePosition`의 스트림 상태 갱신 부분 | 〃 `_deliver` | 655d940e |
 
-화면에 남은 것: `_position`(그릴 값), `_lastFixAt`(진단), `_gpsEntryArmed`(진입 판정),
-`_handlePosition`의 판정·렌더링 부분, `_syncGpsSubscription`(켤지 말지 결정).
+화면에 남은 것: `_position`(그릴 값), `_lastFixAt`(진단), `_handlePosition`의
+판정·렌더링 부분, `_syncGpsSubscription`(켤지 말지 결정).
+
+(당시 함께 남아 있던 `_gpsEntryArmed`는 GPS 자동 진입을 걷어내면서 사라졌다 —
+[판정 규칙](indoor-entry-rules.md) 6절.)
 
 **대조로 잡은 차이 3건**(옮기기만 했다면 조용히 달라졌을 것들):
 스트림 좌표 수신 시 재연결 간격 되돌리기 누락, `lastFixReceivedAt`을 게이트 앞에서 찍던

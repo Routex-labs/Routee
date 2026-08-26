@@ -6,6 +6,7 @@ library;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:navigation_client/models/route/directions_candidate.dart';
 import 'package:navigation_client/models/route/transit_route.dart';
 import 'package:navigation_client/screens/map_shell/transit_walk_handoff.dart';
 
@@ -122,6 +123,160 @@ void main() {
 
     test('구간이 없으면 그대로 둔다', () {
       expect(trimTrailingWalkLeg(plan([])).legs, isEmpty);
+    });
+  });
+
+  group('타는 자리', () {
+    test('앞에 도보가 붙어 있어도 **탈것**이 시작한 곳을 쓴다', () {
+      // 하차 쪽 사고의 거울상이다. legs.first를 쓰면 카카오 도보의 시작점,
+      // 즉 우리가 보낸 출발 좌표가 잡혀 "방금 보낸 값을 되받는" 꼴이 된다.
+      const walkStart = LatLng(37.40, 127.00);
+      const busStart = LatLng(37.45, 127.02);
+      final itinerary = plan([
+        leg(TransitMode.walk, const [walkStart, busStart]),
+        leg(TransitMode.bus, const [busStart, LatLng(37.5, 127.05)]),
+      ]);
+
+      expect(transitBoardPoint(itinerary, fallback: _fallback), busStart);
+    });
+
+    test('탈것이 여럿이면 **처음** 탈것이 시작한 곳이다', () {
+      const busStart = LatLng(37.45, 127.02);
+      final itinerary = plan([
+        leg(TransitMode.bus, const [busStart, LatLng(37.5, 127.05)]),
+        leg(TransitMode.subway, const [
+          LatLng(37.5, 127.05),
+          LatLng(37.55, 127.1),
+        ]),
+      ]);
+
+      expect(transitBoardPoint(itinerary, fallback: _fallback), busStart);
+    });
+
+    test('처음부터 끝까지 걷는 안내면 첫 구간의 시작이다', () {
+      const walkStart = LatLng(37.40, 127.00);
+      final itinerary = plan([
+        leg(TransitMode.walk, const [walkStart, LatLng(37.42, 127.01)]),
+      ]);
+
+      expect(transitBoardPoint(itinerary, fallback: _fallback), walkStart);
+    });
+
+    test('점이 하나도 없으면 fallback으로 떨어진다', () {
+      expect(
+        transitBoardPoint(
+          plan([leg(TransitMode.bus, const [])]),
+          fallback: _fallback,
+        ),
+        _fallback,
+      );
+    });
+
+    test('구간이 아예 없어도 터지지 않는다', () {
+      expect(transitBoardPoint(plan([]), fallback: _fallback), _fallback);
+    });
+  });
+
+  group('첫 도보 잘라내기', () {
+    test('처음이 도보면 잘라 낸다', () {
+      final itinerary = plan([
+        leg(TransitMode.walk, const [LatLng(37.4, 127.0)]),
+        leg(TransitMode.bus, const [LatLng(37.45, 127.0)]),
+        leg(TransitMode.walk, const [LatLng(37.5, 127.05)]),
+      ]);
+
+      final trimmed = trimLeadingWalkLeg(itinerary);
+      expect(trimmed.legs.length, 2);
+      expect(trimmed.legs.first.mode, TransitMode.bus);
+      expect(trimmed.totalTimeSeconds, itinerary.totalTimeSeconds);
+      expect(trimmed.fare, itinerary.fare);
+    });
+
+    test('처음이 탈것이면 그대로 둔다', () {
+      final itinerary = plan([
+        leg(TransitMode.bus, const [LatLng(37.45, 127.0)]),
+        leg(TransitMode.walk, const [LatLng(37.5, 127.05)]),
+      ]);
+
+      expect(trimLeadingWalkLeg(itinerary).legs.length, 2);
+    });
+
+    test('구간이 도보 하나뿐이면 자르지 않는다', () {
+      final itinerary = plan([
+        leg(TransitMode.walk, const [LatLng(37.4, 127.0)]),
+      ]);
+
+      expect(trimLeadingWalkLeg(itinerary).legs.length, 1);
+    });
+
+    test('구간이 없으면 그대로 둔다', () {
+      expect(trimLeadingWalkLeg(plan([])).legs, isEmpty);
+    });
+  });
+
+  group('실내에서 출발하는가', () {
+    const indoor = DirectionsCandidate(
+      title: '스타벅스 리저브',
+      subtitle: 'B2',
+      point: LatLng(37.5259, 126.9284),
+      nodeId: 'N-1',
+      floor: 'B2',
+    );
+    const outdoor = DirectionsCandidate(
+      title: '뉴고려병원',
+      subtitle: '',
+      point: LatLng(37.6, 127.1),
+    );
+
+    test('고른 출발지가 실내 지점이면 도면·앵커와 무관하게 참', () {
+      expect(
+        transitStartsIndoors(
+          origin: indoor,
+          indoorContextActive: false,
+          indoorStartReady: false,
+        ),
+        isTrue,
+      );
+    });
+
+    test('고른 출발지가 야외 지점이면 도면이 떠 있어도 거짓', () {
+      expect(
+        transitStartsIndoors(
+          origin: outdoor,
+          indoorContextActive: true,
+          indoorStartReady: true,
+        ),
+        isFalse,
+      );
+    });
+
+    test('출발지가 없으면 도면과 실내 위치가 **둘 다** 있어야 참', () {
+      // 도면은 확대만으로도 켜진다. 하나로 뭉개면 건물 밖에 선 사용자의 경로가
+      // 있지도 않은 실내 구간을 먼저 그리려 든다.
+      expect(
+        transitStartsIndoors(
+          origin: null,
+          indoorContextActive: true,
+          indoorStartReady: false,
+        ),
+        isFalse,
+      );
+      expect(
+        transitStartsIndoors(
+          origin: null,
+          indoorContextActive: false,
+          indoorStartReady: true,
+        ),
+        isFalse,
+      );
+      expect(
+        transitStartsIndoors(
+          origin: null,
+          indoorContextActive: true,
+          indoorStartReady: true,
+        ),
+        isTrue,
+      );
     });
   });
 }

@@ -210,7 +210,7 @@ Stream<Position> defaultWatchPosition() {
 ///
 /// **일회성이라도 간격을 준다** — 안드로이드는 요청 간격의 두 배까지 묵은 좌표를
 /// "지금 것"으로 돌려주기 때문이다(gps-stream-policy.md 3절).
-LocationSettings oneShotFixSettings() {
+LocationSettings _oneShotFixSettings() {
   if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
     return AndroidSettings(
       accuracy: LocationAccuracy.best,
@@ -225,6 +225,15 @@ LocationSettings oneShotFixSettings() {
 /// 판정이 계속 갱신되도록 한다. 플랫폼 채널이 없는 테스트 환경에서는 이
 /// 변수를 가짜 [Position] 스트림으로 교체한다.
 Stream<Position> Function() watchPosition = defaultWatchPosition;
+
+Future<Position> defaultCurrentPosition() {
+  return Geolocator.getCurrentPosition(locationSettings: _oneShotFixSettings());
+}
+
+/// 좌표를 한 건 직접 끌어오는 일회성 조회. [watchPosition]과 같은 이유로 변수다
+/// — 테스트에서 갈아끼우지 못하면 "스트림은 조용한데 기기는 좌표를 만든다"는
+/// 상태를 재현할 수 없다(`docs/client/gps-stream-policy.md` 1절).
+Future<Position> Function() currentPosition = defaultCurrentPosition;
 
 /// 실내 화면을 직접 열었을 때 추정위치를 만들기 위한 GPS 1회 조회.
 ///

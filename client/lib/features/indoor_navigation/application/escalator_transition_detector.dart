@@ -52,12 +52,22 @@ class EscalatorTransitionDetector {
   // 탑승 노드 id별로 보관한다.
   final Map<String, _ArmedNode> _armedNodes = {};
   final Map<String, double> _observedBoardingDistances = {};
+
+  /// 근접이 아니라 **기압 근거로** 허가한 탑승 노드 id([_armByAltitude]).
+  ///
+  /// [_observedBoardingDistances]와 섞지 않는다 — 그 값은 "실제로 그만큼 가까이
+  /// 갔다"는 관측이고, 배너 단계(3 m)와 근거 문자열이 그것을 그대로 믿는다.
+  final Set<String> _altitudeArmedNodeIds = {};
   String? _expectedBoardingNodeId;
   String? _expectedArrivalNodeId;
   String _boardingEvidence = 'observed';
   int? _armedUntilMs;
   bool _armBaselineRefreshPending = false;
   int _lastSteps = 0;
+
+  /// 마지막으로 받은 보정 위치(층 local m). 기압 근거로 뒤늦게 허가할 때
+  /// 후보 노드를 고르는 기준점이다([_armByAltitude]).
+  PdrLocalPoint? _lastPositionM;
 
   /// 방금 확정한 이동의 목적 층. 화면이 그 층을 알려 올 때 "설명되는 층 변경"
   /// 임을 알아보고 baseline·기압 창을 지키기 위한 표식이다. 한 번 쓰면 비운다.
@@ -242,6 +252,7 @@ class EscalatorTransitionDetector {
     required int timestampMs,
   }) {
     _lastSteps = steps;
+    _lastPositionM = positionM;
     if (_escalatorNodes.isEmpty) return;
 
     var armedNow = false;
@@ -677,6 +688,7 @@ class EscalatorTransitionDetector {
     if (!armed) {
       _armedNodes.clear();
       _observedBoardingDistances.clear();
+      _altitudeArmedNodeIds.clear();
       _armBaselineRefreshPending = false;
     }
     return armed;
@@ -1053,6 +1065,7 @@ class EscalatorTransitionDetector {
     _postConfirmQuietSinceMs = null;
     _armedNodes.clear();
     _observedBoardingDistances.clear();
+    _altitudeArmedNodeIds.clear();
     _armedUntilMs = null;
     _armBaselineRefreshPending = false;
     _setPhase(
@@ -1208,10 +1221,19 @@ class EscalatorTransitionDetector {
     // 시간이다.
     final risenM = math.max(deltaM.abs(), _fastDisplacementM.abs());
 
+    // 허가가 아직 없으면 **여기서** 기압 근거로 한 번 더 시도한다. 근접만으로
+    // 거는 허가(6 m)는 랜딩에서 보정 위치가 어긋나면 영영 안 걸리는데, 그러면
+    // 배너는 "이동 중"이라 말하면서 층은 끝까지 안 바뀐다(2026-08-17 현장).
     final boarding =
         _verticalRouteBoardingLock ??
         _approachBoarding ??
-        _pickBoardingNode(direction);
+        _pickBoardingNode(direction) ??
+        _armByAltitude(
+          direction,
+          atMs: atMs,
+          risenM: risenM,
+          hasMotionEvidence: hasMotionEvidence,
+        );
     if (_promoteAtBoardingPoint(
       boarding,
       atMs: atMs,
@@ -1422,7 +1444,81 @@ class EscalatorTransitionDetector {
         .toList();
     observedCandidates.sort((a, b) => a.$2.compareTo(b.$2));
     if (observedCandidates.isNotEmpty) return observedCandidates.first.$1;
+
+    // 관측 근거가 없으면 기압 근거로 허가한 노드를 쓴다. **관측보다 뒤에 둔다** —
+    // 실제로 가까이 간 노드가 있으면 그쪽이 언제나 더 강한 근거다.
+    final byAltitude =
+        candidates
+            .where((c) => _altitudeArmedNodeIds.contains(c.$1.id))
+            .toList()
+          ..sort((a, b) => a.$2.compareTo(b.$2));
+    if (byAltitude.isNotEmpty) {
+      _boardingEvidence = 'altitudeArmed';
+      return byAltitude.first.$1;
+    }
     return null;
+  }
+
+  /// 기압이 이미 층 이동을 말하는데 허가가 없을 때, 마지막 보정 위치 주변에서
+  /// 탑승 노드를 골라 뒤늦게 허가한다. 못 고르면 null.
+  ///
+  /// 근접(6 m)만으로 거는 허가는 랜딩에서 보정 위치가 어긋나면 영영 안 걸리고,
+  /// 그러면 배너는 "이동 중"인데 층은 끝까지 안 바뀐다. 조건과 오탐 방어는
+  /// `docs/client/escalator-thresholds.md`의 「허가」절.
+  _EscalatorNode? _armByAltitude(
+    EscalatorDirection direction, {
+    required int atMs,
+    required double risenM,
+    required bool hasMotionEvidence,
+  }) {
+    if (!hasMotionEvidence) return null;
+    if (risenM < config.visibleVerticalDeltaM) return null;
+    final position = _lastPositionM;
+    if (position == null) return null;
+
+    _EscalatorNode? nearest;
+    var nearestM = double.infinity;
+    final groups = <String>{};
+    for (final node in _escalatorNodes) {
+      if (node.name.role != EscalatorNodeRole.boarding) continue;
+      if (node.name.direction != direction) continue;
+      final distance = math.sqrt(
+        math.pow(position.eastM - node.xM, 2) +
+            math.pow(position.northM - node.yM, 2),
+      );
+      if (distance > config.altitudeArmRadiusM) continue;
+      groups.add(node.name.group);
+      if (distance < nearestM) {
+        nearestM = distance;
+        nearest = node;
+      }
+    }
+    // 두 뱅크가 함께 잡히면 어느 것을 탔는지 가릴 근거가 없다. 층을 잘못 바꾸는
+    // 비용이 못 바꾸는 비용보다 크므로 여기서는 아무것도 고르지 않는다.
+    if (nearest == null || groups.length > 1) return null;
+
+    // 허가는 매 샘플 갱신하되 이벤트는 처음 걸릴 때만 남긴다 — 안 그러면 진단
+    // 로그가 초당 몇 줄씩 같은 사실로 찬다.
+    final first = !_armedNodes.containsKey(nearest.id);
+    _armedNodes[nearest.id] = _ArmedNode(
+      nodeId: nearest.id,
+      distanceM: nearestM,
+      atMs: atMs,
+    );
+    _altitudeArmedNodeIds.add(nearest.id);
+    _armedUntilMs = atMs + config.armHoldMs;
+    _boardingEvidence = 'altitudeArmed';
+    if (first) {
+      _pushEvent(
+        atMs: atMs,
+        kind: 'armed',
+        reason: 'altitude:${nearest.id}',
+        deltaM: risenM,
+        group: nearest.name.group,
+        toFloorLabel: nearest.name.otherFloorLabel,
+      );
+    }
+    return nearest;
   }
 
   String? _expectedArrivalFor(_EscalatorNode boarding) {
@@ -1571,8 +1667,12 @@ class EscalatorTransitionDetector {
     _smoothedHistory.clear();
     _baselineM = null;
     _lastSmoothedM = null;
+    // 같은 local m 숫자가 층마다 다른 자리를 가리킨다. 들고 가면 새 층의 엉뚱한
+    // 에스컬레이터가 기압 근거로 허가된다([_armByAltitude]).
+    _lastPositionM = null;
     _armedNodes.clear();
     _observedBoardingDistances.clear();
+    _altitudeArmedNodeIds.clear();
     _expectedBoardingNodeId = null;
     _expectedArrivalNodeId = null;
     _armedUntilMs = null;

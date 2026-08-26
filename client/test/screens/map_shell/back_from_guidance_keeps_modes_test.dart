@@ -11,6 +11,7 @@ import 'package:navigation_client/repositories/place/destination_repository.dart
 import 'package:navigation_client/repositories/place/mock_destination_repository.dart';
 import 'package:navigation_client/repositories/routing/transit_repository.dart';
 import 'package:navigation_client/screens/map_shell/map_shell_screen.dart';
+import 'package:navigation_client/screens/map_shell/widgets/sheets/transit_route_detail_sheet.dart';
 import 'package:navigation_client/screens/outdoor_map/widgets/transit_summary_card.dart';
 import 'package:navigation_client/screens/map_shell/widgets/sheets/transit_routes_sheet.dart';
 import 'package:navigation_client/state/recent_route_points_controller.dart';
@@ -258,11 +259,11 @@ void main() {
 
     await tester.tap(find.byType(TransitItineraryCard).first);
     await drain(tester);
-    // 카드 탭이 그 자리에서 목록을 닫고 확정한다. 안내는 지도 위 요약 카드의
-    // 이 버튼으로 건다(`transit_preview_test.dart`).
+    // 상세의 이 버튼 하나가 확정과 안내를 함께 한다 — 하단 카드에서 한 번 더
+    // 누를 필요가 없다(`transit_preview_test.dart`).
     await tester.tap(
       find.descendant(
-        of: find.byType(TransitSummaryCard),
+        of: find.byType(TransitRouteDetailSheet),
         matching: find.text('안내 시작'),
       ),
     );

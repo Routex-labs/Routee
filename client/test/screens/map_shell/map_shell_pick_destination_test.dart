@@ -86,7 +86,7 @@ void main() {
       ),
     );
     await drain(tester);
-    // 자동 진입이 띄운 "몇 층에 계신가요?"가 지도를 덮는다. 상단 바를 누르려면
+    // 실내에서 켠 판정이 띄운 "몇 층에 계신가요?"가 지도를 덮는다. 상단 바를 누르려면
     // 먼저 걷어야 한다.
     await dismissEntryFloorPrompt(tester);
     await tester.tap(find.byTooltip('길찾기'));

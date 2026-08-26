@@ -37,20 +37,6 @@ void main() {
   // 건물 북쪽으로 약 220 m. footprint 밖이며 근접 톨러런스(80 m)도 넘는다.
   const outsideBuilding = ll.LatLng(37.5687, 126.9780);
 
-  // 데모 건물 입구 위 + 신호 양호. 자동 진입은 "신호가 멀쩡했을 때 입구 앞에
-  // 있었다"는 근거를 요구하므로, 저하 표본만으로는 판정이 서지 않는다.
-  Position approachingEntrance() => Position(
-    latitude: 37.5665,
-    longitude: 126.9779,
-    timestamp: DateTime(2024, 1, 1),
-    accuracy: 10,
-    altitude: 0,
-    altitudeAccuracy: 0,
-    heading: 0,
-    headingAccuracy: 0,
-    speed: 0,
-    speedAccuracy: 0,
-  );
 
   // 같은 자리에서 신호가 무너진 상태. 위 접근 표본과 짝을 이뤄 자동 실내 진입
   // 조건을 만족한다.
@@ -142,15 +128,16 @@ void main() {
       ),
     );
     await drain(tester);
-    // 첫 위치는 건물에서 떨어진 곳이어야 한다 — 자동 진입 판정에 쓰는 입구
-    // 좌표는 asset 로드 후에 채워지므로, 입구를 첫 이벤트로 흘리면 아직 입구를
-    // 몰라 진입이 일어나지 않는다.
+    // 좌표는 흘려 둔다 — 이탈 탭이 카메라를 사용자 위치로 되돌리는 갈래가 있어
+    // 위치가 아예 없으면 그 코드가 안 지나간다. 진입 자체는 좌표로 하지 않는다:
+    // GPS 자동 진입은 없어졌고, 지금 이 화면을 여는 것은 건물 탭·확대·버튼이다.
     positions.add(farAway());
-    await tester.pump(const Duration(milliseconds: 50));
-    positions.add(approachingEntrance());
     await tester.pump(const Duration(milliseconds: 50));
     positions.add(atEntrance());
     await tester.pump(const Duration(milliseconds: 50));
+    await drain(tester);
+    // ignore: invalid_use_of_visible_for_testing_member
+    key.currentState!.enterIndoorForTest();
     await drain(tester);
 
     expect(

@@ -19,7 +19,11 @@ import '../../support/entry_floor_prompt_helper.dart';
 ///
 /// 그대로 두면 활성 층이 건물의 `default_floor`(1F)로 굳어, B2에 서 있는 사람의
 /// 위치와 경로가 1층에 찍힌다 — 화면에는 "그럴듯한 1층 지도"로만 보여서 틀렸다는
-/// 신호가 어디에도 없다. 그래서 자동 진입은 층을 먼저 묻는다.
+/// 신호가 어디에도 없다.
+///
+/// **묻는 것은 앱을 건물 안에서 켰을 때뿐이다.** 걸어 들어온 사람에게는 문을
+/// 통과한 층이 곧 답이고, 그 순간에는 전환 연출이 뜬다 — 거기에 시트까지 겹치면
+/// 덮개 위로 모달이 올라온다(`docs/client/indoor-transition-choreography.md` 6절).
 ///
 /// 지금 층은 층 선택기([FloorSelector.selectedFloor])로 읽는다 — 화면이 실제로
 /// 그리는 값이라, 내부 상태만 바뀌고 도면은 그대로인 반쪽 성공을 잡아낸다.
@@ -85,8 +89,24 @@ void main() {
     watchPosition = defaultWatchPosition;
   });
 
-  /// 밖 → 안 순서로 좌표를 흘려 자동 실내 진입을 발화시킨다. 층 질문이 뜬 채로
-  /// 돌아온다.
+  /// **앱을 건물 안에서 켠다.** 밖 좌표를 한 번도 주지 않는 것이 요점이다 —
+  /// 그것이 "처음부터 안에 있었다"의 근거다([_sawOutsideSinceLaunch]).
+  /// 층 질문이 뜬 채로 돌아온다.
+  Future<StreamController<Position>> launchInside(WidgetTester tester) async {
+    final positions = StreamController<Position>.broadcast();
+    addTearDown(positions.close);
+    watchPosition = () => positions.stream;
+    await tester.pumpWidget(
+      MaterialApp(theme: AppTheme.light, home: const MapShellScreen()),
+    );
+    await drain(tester);
+    positions.add(atEntrance());
+    await tester.pump(const Duration(milliseconds: 50));
+    await drain(tester);
+    return positions;
+  }
+
+  /// 밖 → 안 순서로 좌표를 흘려 **걸어 들어온** 진입을 만든다. 이쪽은 묻지 않는다.
   Future<StreamController<Position>> walkIn(WidgetTester tester) async {
     final positions = StreamController<Position>.broadcast();
     addTearDown(positions.close);
@@ -104,6 +124,8 @@ void main() {
     return positions;
   }
 
+  /// 시작 덮개는 **최소 1.2초**를 채운다. 그 전에 층 질문이 올라오면 로고가
+  /// 한 프레임 번쩍이고 사라진다.
   testWidgets('시작 후 1.2초 전에는 층 질문이 로고를 덮지 않는다', (tester) async {
     final positions = StreamController<Position>.broadcast();
     addTearDown(positions.close);
@@ -113,8 +135,6 @@ void main() {
     );
     await drain(tester);
 
-    positions.add(farAway());
-    await tester.pump(const Duration(milliseconds: 50));
     positions.add(atEntrance());
     await tester.pump(const Duration(milliseconds: 50));
     await tester.pump(const Duration(milliseconds: 200));
@@ -131,8 +151,8 @@ void main() {
     );
   });
 
-  testWidgets('GPS로 들어오면 몇 층인지 묻는다', (tester) async {
-    await walkIn(tester);
+  testWidgets('앱을 건물 안에서 켜면 몇 층인지 묻는다', (tester) async {
+    await launchInside(tester);
 
     expect(find.text('몇 층에 계신가요?'), findsOneWidget);
     // 기본 지도는 아직 준비 과정이므로 질문 화면 뒤에서 시작 덮개가 계속 가린다.
@@ -144,7 +164,7 @@ void main() {
   });
 
   testWidgets('고른 층이 곧 지금 보고 있는 층이 된다', (tester) async {
-    await walkIn(tester);
+    await launchInside(tester);
     // 묻기 전 기본값은 건물의 default_floor(1F)다. 이 값이 바뀌지 않는 것이
     // 원래 증상이었다.
     expect(
@@ -175,7 +195,7 @@ void main() {
   });
 
   testWidgets('건너뛰면 기본 층 그대로 두고 지도로 돌아간다', (tester) async {
-    await walkIn(tester);
+    await launchInside(tester);
 
     await dismissEntryFloorPrompt(tester);
     await drain(tester);
@@ -190,7 +210,7 @@ void main() {
   // 벽 근처에서는 판정이 안팎을 오간다. 진입마다 물으면 이 화면이 되풀이해 떠
   // 지도에 닿을 수가 없다.
   testWidgets('건물을 나가지 않는 한 다시 묻지 않는다', (tester) async {
-    final positions = await walkIn(tester);
+    final positions = await launchInside(tester);
     await dismissEntryFloorPrompt(tester);
     await drain(tester);
     expect(find.text('몇 층에 계신가요?'), findsNothing);
@@ -198,6 +218,14 @@ void main() {
     // 같은 자리에서 좌표가 한 번 더 온다.
     positions.add(atEntrance());
     await drain(tester);
+
+    expect(find.text('몇 층에 계신가요?'), findsNothing);
+  });
+
+  // 걸어 들어온 사람에게는 묻지 않는다. 문을 통과한 층이 곧 답이고, 그 순간에는
+  // 전환 연출(문+문구)이 화면을 덮고 있어 시트가 그 위로 올라온다.
+  testWidgets('걸어 들어오면 묻지 않는다', (tester) async {
+    await walkIn(tester);
 
     expect(find.text('몇 층에 계신가요?'), findsNothing);
   });

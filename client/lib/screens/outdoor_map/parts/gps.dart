@@ -22,7 +22,7 @@ extension OutdoorMapGps on OutdoorMapBodyState {
   /// 진입 직후 실내 위치가 아직 없을 때 **자리만 지키는** GPS 좌표. 없으면 null.
   ///
   /// 실내로 들어간 순간 GPS 마커는 꺼지는데([_outdoorGpsVisible]), 실내 마커는
-  /// 앵커를 찍고 보정이 수렴해야 나온다([_startTrackingFromGpsFix]). 실측에서 그
+  /// 앵커를 찍고 보정이 수렴해야 나온다([_startIndoorTracking]). 실측에서 그
   /// 공백이 25초였고 그동안 화면에 위치가 하나도 없었다 — 진입 판정은 맞았는데
   /// "내 위치를 알려주는 게 안 뜬다"로 올라온 화면이 이것이다. 그 구간을 이
   /// 좌표가 흐린 점 하나로 메운다([indoorMarkerAt]의 3순위).
@@ -95,11 +95,9 @@ extension OutdoorMapGps on OutdoorMapBodyState {
         at: position.timestamp,
       );
       if (!jump.accepted) {
-        // **표시에서만 뺀다.** 건물 안팎 판정에는 그대로 넣는다 — 이탈은 이제 문
-        // 근거가 주 경로이고, 여기서 좌표를 빼면 판정이 늦어지는 대가만 확실해진다.
-        // 판정에서도 빼야 하는지는 `gps_rejected_fixes`가 다음 실측에서 답한다:
-        // 거른 좌표가 verdict를 뒤집었을 값이었는지 보고 정한다.
-        _applyBuildingVerdict(position, sinceLastFix: sinceLastFix);
+        // **표시에서만 뺀다.** 진단 칩은 그대로 갱신해, 화면이 멈춘 이유가
+        // "좌표가 안 온다"인지 "와서 버렸다"인지 현장에서 가릴 수 있게 한다.
+        _updateTransitionDebugChip(sinceLastFix: sinceLastFix);
         return;
       }
     }
@@ -139,7 +137,7 @@ extension OutdoorMapGps on OutdoorMapBodyState {
     // 폴백으로 쓰는 문이 이 선택의 결과라, 순서를 뒤집으면 사용자가 이미 다른
     // 문으로 들어왔는데 폴백은 한 박자 전 문을 가리킨다.
     if (!_indoorEntered) _syncSelectedEntrance();
-    _applyBuildingVerdict(position, sinceLastFix: sinceLastFix);
+    _applyPositionToIndoorGates(position, sinceLastFix: sinceLastFix);
     // 건물 안이면 아래 이동을 생략한다. 실내 도면 카메라와 첫 GPS 카메라가
     // 경합해 선택기 뒤에서 지도가 한 번 더 튀는 것을 막는다.
     if (!_indoorEntered &&
@@ -166,7 +164,7 @@ extension OutdoorMapGps on OutdoorMapBodyState {
     _updateRoute(position, fromPositionStream: true);
   }
 
-  /// 자동 실내 진입 직후, **층을 먼저 묻고** 그 층으로 실내 위치를 잡는다.
+  /// 실내에서 앱을 켠 직후, **층을 먼저 묻고** 그 층으로 실내 위치를 잡는다.
   ///
   /// GPS는 건물 안이라는 것까지만 말한다. 그대로 두면 [_activeFloor]가 건물의
   /// `default_floor`(1F)로 굳어, B2에 서 있는 사람의 위치와 경로가 1층에 찍힌다.
@@ -200,7 +198,7 @@ extension OutdoorMapGps on OutdoorMapBodyState {
       await _moveToEntryEvidenceFloor();
     }
     if (!mounted || !_indoorEntered) return;
-    await _startTrackingFromGpsFix(position);
+    await _startIndoorTracking(position: position);
     if (!mounted || !_indoorEntered) return;
     // 시작 화면은 **모든 갈래에서** 걷힌다. 위치를 잡은 시점이 곧 가릴 이유가
     // 없어진 시점이다.
@@ -358,16 +356,41 @@ extension OutdoorMapGps on OutdoorMapBodyState {
     );
   }
 
-  /// 자동 실내 진입 직후, 실내 위치(PDR 앵커)를 잡고 센서 추적을 시작한다.
+  /// 실내 위치(PDR 앵커)를 잡고 센서 추적을 시작한다. 부르는 곳이 둘이고, 그
+  /// 둘이 **아는 것이 다르다**.
   ///
-  /// **시작점은 방금 그 GPS 좌표에서 가장 가까운 통로 지점**이고, 스냅이 안 되면
-  /// 방금 지나온 문으로 폴백한다(들어온 사람은 어느 문이든 통과했다).
+  ///   - 진입 버튼([enterIndoorFromGuidance]) — [entrance]를 준다. 사용자가 방금
+  ///     그 문을 통과했다는 것이 가장 확실한 근거이고, 문 노드는 이미 통로 위의
+  ///     점이라 붙일 필요도 없다.
+  ///   - 실내에서 앱을 켠 경우([_askEntryFloorThenTrack]) — 문을 모른다. 어느
+  ///     복도에 서 있는지 아는 것은 GPS뿐이라 그 좌표를 통로에 붙인다.
   ///
-  /// **실패 조건 셋** — 이미 확정된 앵커가 있다·층 그래프가 없다·스냅도 폴백도
-  /// 실패. 하나라도 걸리면 포기하고 수동 경로를 안내한다: 틀린 위치를 찍는 것보다
-  /// 위치가 없는 편이 낫다.
-  Future<void> _startTrackingFromGpsFix(Position position) async {
-    if (indoorNavigationDriver.currentCalibration.canRenderPosition) return;
+  /// 그래서 사다리가 셋이다: 문 노드 → GPS 스냅 → 아는 문 좌표. [entrance]가
+  /// null이면 첫 칸을 건너뛴다.
+  ///
+  /// **실패 조건 둘** — 층 그래프가 없다·사다리 셋이 다 실패. 하나라도 걸리면
+  /// 포기하고 수동 경로를 안내한다: 틀린 위치를 찍는 것보다 위치가 없는 편이 낫다.
+  Future<void> _startIndoorTracking({
+    required Position position,
+    BuildingEntrance? entrance,
+  }) async {
+    // **이미 확정된 앵커는 [entrance]를 아는 호출에서만 덮는다.**
+    //
+    // 문을 아는 호출은 사용자가 방금 「진입」을 누른 것이고, 그 문은 지금 이
+    // 사람이 서 있는 자리를 말하는 가장 새로운 근거다. 반대로 문을 모르는 호출
+    // (실내 콜드스타트)이 덮으면 GPS 스냅이 이미 잡아 둔 좋은 앵커를 밀어낸다.
+    //
+    // 이 갈래가 없으면 **나갔다 다시 들어올 때 마커가 통째로 사라진다**(실기기
+    // 증상). 나갈 때 [_dropIndoorPosition]은 화면 쪽 앵커
+    // ([DebugPdrTrailState.beginNewSession])와 추정치를 비우는데, 드라이버의
+    // 보정은 센서 세션이 실제로 멈춰야 풀린다 — 정지는 기다리지 않는 호출이고
+    // (`stopWithoutWaiting`), 디버그 모드에서는 기록을 이으려고 아예 세션을
+    // 살려 둔다. 그 사이 `canRenderPosition`은 참인 채로 남아, 다시 들어와도
+    // 여기서 곧장 돌아섰다. 앵커는 비었고 추정치도 비어 그릴 것이 없었다.
+    if (entrance == null &&
+        indoorNavigationDriver.currentCalibration.canRenderPosition) {
+      return;
+    }
 
     // 건물이 막 도착한 직후라면 층 그래프 요청이 아직 도는 중이다.
     await _floorGraphLoad;
@@ -407,20 +430,34 @@ extension OutdoorMapGps on OutdoorMapBodyState {
       return (point: snapped.point, gapM: snapped.distanceToGraphM);
     }
 
-    // 1순위는 GPS 좌표다. 진입 판정을 통과한 좌표라 이미 "믿을 수 있고 건물 안"
-    // 이며, 사용자가 실제로 서 있는 곳에 가장 가깝다.
-    var snapped = snap(
-      ll.LatLng(position.latitude, position.longitude),
-      autoEntryGpsSnapDistanceM,
-    );
-    var estimateSource = 'gps';
+    // 1순위는 방금 통과한 문의 **그래프 노드**다. 좌표 변환도 스냅도 거치지
+    // 않으므로 [_groundEntranceNodesM](나가기 게이트가 재는 값)과 정확히 같은
+    // 점이고, 오차가 끼어들 자리가 없다.
+    final doorNode = entrance == null
+        ? null
+        : graph.nodes.where((node) => node.id == entrance.nodeId).firstOrNull;
+    ({PdrLocalPoint point, double gapM})? snapped = doorNode == null
+        ? null
+        : (point: PdrLocalPoint(doorNode.xM, doorNode.yM), gapM: 0);
+    var estimateSource = 'entrance';
     if (snapped == null) {
-      // 2순위는 방금 지나온 문. 건물에 들어온 사람은 어느 문이든 통과했으므로,
-      // GPS 점이 매장 한가운데에 찍혀 통로를 못 찾은 경우의 안전한 폴백이다.
-      final entrance = _entrance;
-      snapped = entrance == null
+      // 2순위는 GPS 좌표를 통로에 붙이는 것. 실내에서 앱을 켠 사용자에게는 이것이
+      // 1순위이고, 진입 버튼 쪽에서는 문 노드가 이 층 그래프에 없을 때의 폴백이다
+      // (출입구 데이터와 층 그래프가 어긋난 건물).
+      snapped = snap(
+        ll.LatLng(position.latitude, position.longitude),
+        autoEntryGpsSnapDistanceM,
+      );
+      estimateSource = 'gps';
+    }
+    if (snapped == null) {
+      // 3순위는 지금 안내 기준으로 쥐고 있는 문. GPS 점이 매장 한가운데에 찍혀
+      // 통로를 못 찾은 경우의 안전한 폴백이다 — 건물 안에 있는 사람은 어느 문이든
+      // 통과했다.
+      final known = _entrance;
+      snapped = known == null
           ? null
-          : snap(entrance, maxEntranceAnchorSnapDistanceM);
+          : snap(known, maxEntranceAnchorSnapDistanceM);
       estimateSource = 'entrance';
     }
     if (snapped == null) {
@@ -451,7 +488,17 @@ extension OutdoorMapGps on OutdoorMapBodyState {
 
     // GPS로 건물 안임을 이미 확인했으므로 권한 게이트를 다시 두지 않는다. 세션이
     // 다른 층에서 돌고 있으면 이 층으로 옮겨야 앵커가 이 층으로 기록된다.
-    if (!await _bindPdrSessionToFloor(floor, gatePermission: false)) return;
+    //
+    // [entrance]가 있으면(문을 지나 들어온 진짜 재진입) 세션이 이미 돌고
+    // 있어도 방위만은 새로 잡는다([forceFreshHeading]) — 밖을 걷는 동안 흔들린
+    // 방위가 이번에 찍는 문 앞 앵커의 회전각에 그대로 구워지는 것을 막는다.
+    if (!await _bindPdrSessionToFloor(
+      floor,
+      gatePermission: false,
+      forceFreshHeading: entrance != null,
+    )) {
+      return;
+    }
     await _awaitSensorWarmup();
     if (!mounted || !_indoorEntered) return;
 
@@ -462,30 +509,34 @@ extension OutdoorMapGps on OutdoorMapBodyState {
     );
     if (!mounted) return;
 
-    // 자북 heading을 못 얻는 기기는 여기서 방향 보정을 기다린다. 수동 배치는
-    // 사용자에게 다이얼로그로 물어보지만, 자동 진입에서 아무 조작 없이 모달이
-    // 튀어나오면 사용자는 자기가 뭘 눌러 띄운 건지 알 수 없다. 대신 진입 방향을
-    // 추정해 그 자리에서 확정한다([_entryFloorDirection]).
+    // 자북 heading을 못 얻는 기기는 여기서 방향 보정을 기다린다. 묻지 않고
+    // 추정해 그 자리에서 확정한다([_entryFloorDirection]) — 아무 조작 없이 모달이
+    // 튀어나오면 사용자는 자기가 뭘 눌러 띄운 건지 알 수 없다.
     if (indoorNavigationDriver.currentCalibration.phase ==
         CalibrationPhase.awaitingHeading) {
-      final direction = _entryFloorDirection(
+      final estimate = _entryFloorDirection(
         position: position,
         anchorFloorPoint: estimatedPoint,
         graph: graph,
         axes: axes,
       );
-      if (direction == null) {
+      if (estimate == null) {
         _replaceSnack('진입 방향을 알 수 없습니다. 위치 지정으로 직접 지정해주세요.');
         return;
       }
       await indoorNavigationDriver.confirmAnchorByFloorDirection(
-        floorDirection: direction,
+        floorDirection: estimate.direction,
+        basis: estimate.basis,
       );
       if (!mounted) return;
     }
 
     _syncPdrCurrentLayer(snap: true);
     unawaited(_syncDebugPdrLayers());
+    // 이제 실내 마커가 있다. 진입 순간에는 위치를 몰라 건너뛴 연출
+    // ([_setIndoorEntered])을 여기서 한다 — 카메라는 아직 진입 직전의 야외
+    // 화면이라, 방금 찍은 마커가 화면 밖일 수 있다.
+    unawaited(_centerOnIndoorMarker());
     // 입구에서 위치를 새로 잡았으므로, 건물에 들어오기 전에 골라둔 출발지 매장은
     // 더 이상 "지금 내가 있는 곳"이 아니다. 상위가 그 값을 버리게 알린다.
     widget.onLocationAnchored?.call();

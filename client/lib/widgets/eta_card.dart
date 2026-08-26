@@ -4,6 +4,7 @@ import 'package:routex_design_system/routex_design_system.dart';
 import '../domain/geo/distance_format.dart';
 import '../domain/guidance/route_guidance.dart';
 import '../features/indoor_navigation/contract/floor_transition_ui_state.dart';
+import 'guidance_action_row.dart';
 import 'transit_style.dart' show formatTransitDuration;
 
 /// 앱의 경로 값을 Runtime Kit의 계획·안내 패턴에 연결한다.
@@ -22,6 +23,7 @@ class EtaCard extends StatelessWidget {
     this.onClosePointerDown,
     this.routeOptions,
     this.extraMetric,
+    this.transition,
   });
 
   final double distanceMeters;
@@ -31,6 +33,10 @@ class EtaCard extends StatelessWidget {
   final VoidCallback? onClose;
   final VoidCallback? onStartGuidance;
   final ValueChanged<Offset>? onClosePointerDown;
+
+  /// 안내 중 `안내 종료` 왼쪽에 함께 놓을 실내↔야외 전환. null이면 종료 버튼만
+  /// 남아 지금까지와 같은 카드다.
+  final GuidanceTransitionAction? transition;
 
   /// 복수 경로 후보를 고를 수 있을 때 요약 위에 놓는 선택 영역. 출발 전
   /// 계획 카드에서만 쓰인다 — 안내 중에는 경로를 바꿀 수 없다.
@@ -63,22 +69,33 @@ class EtaCard extends StatelessWidget {
       );
     }
 
+    final metrics = [
+      RoutexTripMetric(value: arrivalTime, label: '도착 예정'),
+      RoutexTripMetric(
+        value: formatTransitDuration(minutes * 60),
+        label: '남은 시간',
+      ),
+      RoutexTripMetric(value: formatDistance(distanceMeters), label: '남은 거리'),
+    ];
+    final transition = this.transition;
     return Listener(
       onPointerDown: (event) => onClosePointerDown?.call(event.position),
-      child: RoutexTripProgress(
-        metrics: [
-          RoutexTripMetric(value: arrivalTime, label: '도착 예정'),
-          RoutexTripMetric(
-            value: formatTransitDuration(minutes * 60),
-            label: '남은 시간',
-          ),
-          RoutexTripMetric(
-            value: formatDistance(distanceMeters),
-            label: '남은 거리',
-          ),
-        ],
-        onStop: onClose,
-      ),
+      // 전환 버튼이 없을 때는 디자인시스템 패턴을 그대로 쓴다. 수치와 종료
+      // 버튼이 한 줄에 앉는 지금 모양이 안내의 기본값이고, 버튼이 하나 더
+      // 붙는 실내↔야외 여정에서만 줄을 나눈다([GuidanceTripMetricsRow]).
+      child: transition == null
+          ? RoutexTripProgress(metrics: metrics, onStop: onClose)
+          : RoutexBottomSheet(
+              showHandle: false,
+              includeBottomSafeArea: true,
+              child: RoutexStack(
+                gap: RoutexStackGap.content,
+                children: [
+                  GuidanceTripMetricsRow(metrics: metrics),
+                  GuidanceActionRow(onStop: onClose, transition: transition),
+                ],
+              ),
+            ),
     );
   }
 }

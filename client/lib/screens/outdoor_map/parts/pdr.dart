@@ -172,6 +172,16 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     await _confirmPdrAnchor(floorPoint, notifyLocationChanged: false);
   }
 
+  /// 지금 화면이 아는 **실내 위치 그 자체**. 마커의 유일한 근거라, 이 값이
+  /// null이면 도면 위에 파란 점이 없다.
+  ///
+  /// MapLibre 레이어는 위젯 트리에 없어 픽셀을 볼 수 없다. 드라이버의 보정만
+  /// 봐서는 모자란 자리가 있어 이 값이 따로 필요하다 — 나갔다 들어오는 길에서는
+  /// **드라이버는 여전히 보정됐다고 말하는데 화면에는 점이 없는** 상태가 실제로
+  /// 있었다(`_startIndoorTracking`의 [entrance] 갈래).
+  @visibleForTesting
+  ll.LatLng? get indoorMarkerPointForTest => _pdrCurrentWgs84();
+
   /// 실내 위치(PDR) 마커. 야외 상태에서는 [_indoorLocationVisible]이 false라
   /// 항상 빈 소스를 밀어 넣어 마커가 사라진다 — 야외에서는 GPS 마커
   /// ([_syncCurrentLayer])만 보이고, 실내에서는 이쪽만 보인다.
@@ -242,6 +252,7 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
       headingDeg: drawn.headingDeg,
       offFloor: drawn.offFloor,
     );
+    _publishHeadingDebug(drawn.headingDeg);
 
     final previous = _pdrMarkerWriteQueue;
     _pdrMarkerWriteQueue = () async {
@@ -465,6 +476,75 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
   ///
   /// 디버그 모드가 꺼져 있거나 개별 토글이 꺼져 있으면 빈 데이터를 넘겨 해당
   /// 소스를 비운다. 지도 소스에 실제로 쓰는 일은 [syncPdrDebugLayers]가 한다.
+  /// heading이 도는 네 토막의 값을 칩 한 줄로 내보낸다.
+  ///
+  /// **마커를 그리는 그 자리에서 찍는다.** 따로 계산하면 칩과 화면이 다른 값을
+  /// 보게 되고, 그러면 현장에서 "칩은 맞는데 마커는 틀렸다"를 어느 쪽도 못 믿는다
+  /// (GPS 진입 판정 칩과 같은 규칙 — `indoor-entry-rules.md`).
+  void _publishHeadingDebug(double? markerHeadingDeg) {
+    if (!_debugModeController.enabled) {
+      _headingDebugText.value = null;
+      return;
+    }
+    _headingDebugText.value = describeMarkerHeading(
+      deviceBearingDeg: _pdrTrailState.snapshot?.orientationHeadingDeg,
+      markerBearingDeg: markerHeadingDeg,
+      cameraBearingDeg: _mapController?.cameraPosition?.bearing ?? 0,
+      anchorRotationDeg: _pdrTrailState.anchor?.rotationDeg,
+      // 각도와 **함께** 있어야 읽힌다. 따로 두면 칩을 보는 사람이 두 값을 눈으로
+      // 짝지어야 하고, 그 사이에 다른 자리가 끼면 짝이 어긋난다.
+      rotationBasis: _pdrTrailState.anchor?.rotationBasis,
+      // **파생값이 아니라 센서가 준 원문을 띄운다.** `headingReference`만 보면
+      // 실내에서 자력계가 교란돼 gyro hold에 들어간 상태도 그냥 `magneticNorth`
+      // 로 보인다 — 그 구분이 안 보여서 회귀를 한참 못 찾았다.
+      headingSource: _pdrTrailState.snapshot?.quality.features.headingSource,
+      magneticAccuracy:
+          _pdrTrailState.snapshot?.quality.features.magneticAccuracy,
+      // 앵커가 이 방위를 썼는지 갈아탔는지의 근거다. rot과 나란히 있어야
+      // "게이트가 안 걸렸다"와 "걸렸는데도 틀렸다"가 구분된다.
+      headingErrorDeg:
+          _pdrTrailState.snapshot?.quality.features.rotationHeadingAccuracyDeg,
+    );
+    _logHeading(markerHeadingDeg);
+  }
+
+  /// 칩과 **같은 값**으로 heading 네 토막을 로그 한 줄에 찍는다.
+  ///
+  /// 칩은 화면에 네 자리만 담지만 원인을 가르려면 그 판정의 근거(자기장 세기,
+  /// walkOffset, 신뢰 판정)까지 나란히 있어야 한다. 걷는 중에 읽는 값이라
+  /// 초당 한 줄로 묶는다 — 스냅샷은 걸음마다 오므로 거르지 않으면 로그가
+  /// 흘러가 정작 앵커가 잡히는 순간을 못 본다.
+  void _logHeading(double? markerHeadingDeg) {
+    final now = DateTime.now();
+    final last = _lastHeadingLogAt;
+    if (last != null && now.difference(last) < const Duration(seconds: 1)) {
+      return;
+    }
+    _lastHeadingLogAt = now;
+    final features = _pdrTrailState.snapshot?.quality.features;
+    debugPrint(
+      describeHeadingLog(
+        deviceBearingDeg: features?.deviceHeadingDeg,
+        gyroBearingDeg: features?.gyroHeadingDeg,
+        orientationBearingDeg: _pdrTrailState.snapshot?.orientationHeadingDeg,
+        walkingBearingDeg: _pdrTrailState.snapshot?.walkingHeadingDeg,
+        walkOffsetDeg: features?.walkOffsetDeg,
+        headingConverged: features?.headingConverged,
+        magneticFieldUt: features?.magneticFieldUt,
+        magneticInclinationDeg: features?.magneticInclinationDeg,
+        headingErrorDeg: features?.rotationHeadingAccuracyDeg,
+        magneticAccuracy: features?.magneticAccuracy,
+        headingSource: features?.headingSource,
+        anchorRotationDeg: _pdrTrailState.anchor?.rotationDeg,
+        calibrationPhase:
+            indoorNavigationDriver.currentCalibration.phase.name,
+        headingTrustworthy: features?.headingTrustworthy,
+        markerBearingDeg: markerHeadingDeg,
+        cameraBearingDeg: _mapController?.cameraPosition?.bearing ?? 0,
+      ),
+    );
+  }
+
   Future<void> _syncDebugPdrLayers() async {
     final controller = _mapController;
     if (controller == null || !_styleReady) return;
@@ -511,6 +591,31 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     _liveHeading?.orientationDeg ??
         _pdrTrailState.snapshot?.orientationHeadingDeg,
   );
+
+  /// 복도 축으로 잡은 앵커의 **앞뒤**를 걸어 본 궤적으로 한 번만 확인한다.
+  ///
+  /// 축은 선이라 두 방향 중 어느 쪽인지 못 고른다. 거꾸로 잡았다면 궤적이 앵커를
+  /// 중심으로 점대칭이고, 복도는 유한하므로 그 궤적은 통행 그래프를 벗어난다 —
+  /// 두 가설을 같은 자로 재는 것이 [anchorAxisIsBackward]다. 이동이 모자라
+  /// 아직 못 가르면 null이고, 그때는 판정을 소진하지 않고 다음 걸음을 기다린다.
+  void _maybeFlipAnchorAxis() {
+    final anchor = _pdrTrailState.anchor;
+    final graph = _floorGraph;
+    if (anchor == null ||
+        graph == null ||
+        anchor.rotationBasis != AnchorRotationBasis.corridorAxis ||
+        identical(anchor, _anchorAxisSignProbed)) {
+      return;
+    }
+    final backward = anchorAxisIsBackward(
+      graph: graph,
+      anchorLocalM: anchor.anchorLocalM,
+      floorPath: _pdrConfirmedFloorPath,
+    );
+    if (backward == null) return;
+    _anchorAxisSignProbed = anchor;
+    if (backward) unawaited(indoorNavigationDriver.flipAnchorRotation());
+  }
 
   /// 실제로 걸어가고 있는 방향(true north 기준). [_pdrCurrentHeadingDeg]와 **같은
   /// 변환**을 지나야 두 각을 섞을 수 있다 — 한쪽만 층 좌표계에 있으면 도면이
@@ -749,6 +854,7 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
 
   void _syncCorridorTracking(PdrSnapshot? snapshot) {
     if (_indoorEntered) _ensureGuidanceAttached();
+    _maybeFlipAnchorAxis();
     _guidance
       ..setContext(
         floorId: _activeFloor,
@@ -796,10 +902,18 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
   /// [gatePermission]이 false면 권한 확인 없이 시작한다(GPS 자동 진입 전용 — 거기서
   /// 한 번 더 막으면 자동 추적이 시작되지 않는다). [announceFailure]는 사용자가 직접
   /// "위치 지정"을 누른 경우에만 켠다.
+  ///
+  /// [forceFreshHeading]은 **문을 다시 지나 들어온 진짜 재진입**에서만 켠다.
+  /// 세션이 이 층에서 이미 돌고 있으면 그대로 잇는데, 방위 신뢰까지 이어지면
+  /// 밖을 걷는 동안 흔들린 값이 새 앵커 회전각에 구워진다(위치는 옳은데 마커
+  /// 방향만 엉뚱한 증상). 그래서 세션은 두고 방위 신뢰만
+  /// [IndoorNavigationIntents.resetHeadingTrust]로 새로 잡는다 — native
+  /// 재시작은 왕복이 걸음 세션을 끊을 만큼 걸릴 수 있어 고르지 않았다.
   Future<bool> _bindPdrSessionToFloor(
     String floor, {
     bool gatePermission = true,
     bool announceFailure = false,
+    bool forceFreshHeading = false,
   }) async {
     // 아래 사다리는 전부 "지금 세션 상태"를 읽어 갈린다. 정지가 아직 도는 중이면
     // 그 상태가 거짓말을 한다([PdrSessionLifecycle.awaitStop]).
@@ -824,7 +938,20 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     } else if (indoorNavigationDriver.currentFloorId != floor) {
       await indoorNavigationDriver.changeFloor(floorId: floor);
       if (!mounted) return false;
+      if (forceFreshHeading) await indoorNavigationDriver.resetHeadingTrust();
     } else if (!gatePermission) {
+      if (forceFreshHeading) {
+        // 세션은 그대로 두고 방위 신뢰만 새로 잡는다 — native 센서를 멈추지
+        // 않으므로 걸음 세션은 끊기지 않는다.
+        await indoorNavigationDriver.resetHeadingTrust();
+        setState(() {
+          _pdrTrailState.beginNewSession();
+          _guidance
+            ..resetTracking()
+            ..clearProgress();
+        });
+        return mounted;
+      }
       // 자동 진입인데 이미 이 층 세션이 돌고 있다. 그대로 이어 쓴다.
       return true;
     }
@@ -1013,19 +1140,38 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
       axes: axes,
     );
     if (!mounted) return;
+    // **방향은 사용자에게 묻지 않는다.**
+    //
+    // 예전에는 여기서 「바라보는 방향 맞추기」 모달을 띄웠다. 아무 조작 없이
+    // 튀어나오는 창이었고, 화면 위/오른쪽 같은 보기로 실제 방위를 고르게 하는
+    // 것이라 사용자가 답을 알기도 어려웠다.
+    //
+    // 그렇다고 그냥 지우면 안 된다 — [CalibrationPhase.awaitingHeading]은
+    // `canRenderPosition`이 false라, 물음을 없애는 순간 **위치 마커가 통째로
+    // 사라진다.** 그래서 묻는 대신 자동 진입과 **같은 추정**으로 채운다
+    // ([_entryFloorDirection]: GPS course → 찍은 자리의 복도 축).
     if (indoorNavigationDriver.currentCalibration.phase ==
         CalibrationPhase.awaitingHeading) {
-      final screenDirection = await _askScreenDirection();
-      if (screenDirection == null || !mounted) return;
-      final cameraBearing = _mapController?.cameraPosition?.bearing ?? 0;
-      final floorDirection = floorDirectionForScreenDirection(
-        cameraBearingDeg: cameraBearing,
-        screenClockwiseOffsetDeg: screenDirection,
-        axes: axes,
-      );
+      final estimate = graph == null
+          ? null
+          : _entryFloorDirection(
+              position: _position,
+              anchorFloorPoint: floorPoint,
+              graph: graph,
+              axes: axes,
+            );
+      // 추정도 실패하면(그래프가 없거나 찍은 점 근처에 통로가 없음) 방향을
+      // 모르는 채로 둔다. 지어낸 각도로 궤적을 통째로 돌리는 것보다, 위치가
+      // 아직 안 잡힌 상태로 남겨 두고 사용자가 다시 찍게 하는 편이 낫다.
+      if (estimate == null) {
+        _showSnack('방향을 잡지 못했습니다. 조금 걸은 뒤 다시 지정해주세요.');
+        return;
+      }
       await indoorNavigationDriver.confirmAnchorByFloorDirection(
-        floorDirection: floorDirection,
+        floorDirection: estimate.direction,
+        basis: estimate.basis,
       );
+      if (!mounted) return;
     }
     if (!mounted) return;
     _setPlacingAnchor(false);
@@ -1054,30 +1200,6 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
       indoorNavigationDriver.currentRuntimeStatus,
     );
     if (mounted) _setPlacingAnchor(false);
-  }
-
-  Future<double?> _askScreenDirection() {
-    return showDialog<double>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('진행 방향 보정'),
-        content: const Text(
-          '이 기기는 절대 북쪽 기준 heading을 얻지 못했습니다. 현재 휴대폰이 향한 지도 방향을 선택해주세요.',
-        ),
-        actions: [
-          for (final entry in const [
-            (label: '위쪽', value: 0.0),
-            (label: '오른쪽', value: 90.0),
-            (label: '아래쪽', value: 180.0),
-            (label: '왼쪽', value: 270.0),
-          ])
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(entry.value),
-              child: Text(entry.label),
-            ),
-        ],
-      ),
-    );
   }
 }
 

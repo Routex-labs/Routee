@@ -151,6 +151,11 @@ extension OutdoorMapUi on OutdoorMapBodyState {
     final pdrActive =
         indoorNavigationDriver.currentRuntimeStatus.state !=
         PdrRuntimeState.idle;
+    // 안내 중 하단 카드가 셋 중 어느 것이든 같은 버튼을 받는다 — 실내→야외
+    // 여정이 도보로도 대중교통으로도 시작될 수 있어서다.
+    final transition = _guidanceStarted && !_showingArrivalOnly
+        ? _guidanceTransitionAction()
+        : null;
     final arrived = _arrivedDestination;
     // 지도 위 안내는 **한 자리**다. 무엇이 그 자리를 쓰는지는 [GuidanceBanner]가
     // 정한다 — 여기서는 각 상태의 재료만 넘긴다.
@@ -387,6 +392,13 @@ extension OutdoorMapUi on OutdoorMapBodyState {
                     valueListenable: _escalatorDebugText,
                     builder: (_, text, _) => MapDebugChip(text: text),
                   ),
+                  const SizedBox(height: 6),
+                  // heading 칩은 맨 아래다 — 위 둘과 같은 순서 규칙이다(건물에
+                  // 들어가야 층이 돌고, 층 도면이 있어야 실내 마커가 뜬다).
+                  ValueListenableBuilder<String?>(
+                    valueListenable: _headingDebugText,
+                    builder: (_, text, _) => MapDebugChip(text: text),
+                  ),
                 ],
               ),
             ),
@@ -541,20 +553,12 @@ extension OutdoorMapUi on OutdoorMapBodyState {
                       child: Builder(
                         builder: (context) {
                           final boarding = _debugEscalatorBoarding(up: up);
-                          return RoutexMapControl(
+                          return DebugFloorTransitionControl(
                             key: Key(
                               'debug-force-floor-transition-${up ? 'up' : 'down'}',
                             ),
-                            label: up ? '위층으로 층 전환' : '아래층으로 층 전환',
-                            // **글리프는 화살표 하나뿐이다.** 층 라벨(`text`)을
-                            // 같이 넘기면 [RoutexMapControl]의 assert
-                            // (`icon`·`glyphBuilder`·`text` 중 정확히 하나)에
-                            // 걸려, 디버그 빌드에서 이 자리가 통째로
-                            // ErrorWidget(붉은 사각형)이 된다 — Stack의 비배치
-                            // 자식이라 지도 전체를 덮는다(2026-08-26 실기기).
-                            icon: up
-                                ? Icons.arrow_upward_rounded
-                                : Icons.arrow_downward_rounded,
+                            up: up,
+                            targetFloorLabel: boarding?.name.otherFloorLabel,
                             onPressed: boarding == null
                                 ? null
                                 : () => _debugForceFloorTransition(up: up),
@@ -633,72 +637,130 @@ extension OutdoorMapUi on OutdoorMapBodyState {
         //
         // 도착을 말하는 표면이 위(배너)·아래(카드) 둘인 것은 역할이 달라서다.
         // 배너는 **무슨 일이 일어났는지**를, 카드는 **이제 무엇을 할지**(매장
-        // 정보·안내 종료)를 말한다. 지나쳐 걸어가 안내가 되살아나면(`arrived`가
-        // 풀리면) 이 카드가 다시 돌아온다.
-        if (indoorRouteDestination != null && !_showingArrivalOnly)
-          _bottomDockedCard(
-            EtaCard(
-              key: _etaCardKey,
-              distanceMeters: indoorEta.distanceM,
-              // 시간은 비용 기준 — 엘리베이터 대기·탑승 시간이 여기 들어 있다.
-              minutes:
-                  (indoorEta.costM / indoorWalkingSpeedMetersPerSecond / 60)
-                      .ceil()
-                      .clamp(1, 999),
-              label: _indoorEtaLabel(indoorRouteDestination),
-              guidanceStarted: _guidanceStarted,
-              routeOptions: _indoorRouteExtras(indoorRouteDestination),
-              onStartGuidance: _guidanceStarted
-                  ? null
-                  : () => unawaited(_startCurrentGuidance()),
-              onClose: _dismissIndoorRouteFromEtaCard,
-              onClosePointerDown: (position) => _etaClosePointerDown = position,
-            ),
-          )
-        // 대중교통 안내는 도보 ETA 카드와 **같은 자리**를 쓰고 서로를 밀어낸다.
-        // 두 카드가 함께 뜨면 한 화면에서 소요 시간이 두 개가 되어, 지도에
-        // 그려진 선이 어느 쪽인지 알 수 없다.
+        // 정보·안내 종료)를 말한다.
         //
-        // 후보 목록이 덮고 있는 동안에는 아예 안 그린다([OutdoorMapBody.transitRoutesSheetOpen]).
-        else if (_transitItinerary case final itinerary?
-            when !widget.transitRoutesSheetOpen)
-          _bottomDockedCard(
-            TransitSummaryCard(
-              key: _etaCardKey,
-              itinerary: itinerary,
-              label: _transitLabel ?? '목적지까지',
-              onStartGuidance: _guidanceStarted
-                  ? null
-                  : () => unawaited(_startCurrentGuidance()),
-              onClose: _dismissUserDestinationFromEtaCard,
-              onClosePointerDown: (position) => _etaClosePointerDown = position,
+        // **`!_showingArrivalOnly`가 아니라 `_arrivedDestination == null`로
+        // 가른다.** [_showingArrivalOnly]는 판정(`action`)이 `arrived`인
+        // 프레임에만 참이라, 도착 직후 판정이 걸음 잡음으로 한 프레임만
+        // `arrived`를 벗어나도 이 카드가 도착 카드 위에 같이 뜬다. 도착 카드가
+        // 떠 있는 동안은(`_arrivedDestination != null`) 아래 세 갈래를 **밖에서
+        // 한 번에** 안 그려서 끝내는 버튼을 하나로 묶는다 — 세 갈래 중 하나에만
+        // 걸면 그 갈래가 Stack에서 도착 카드보다 나중에 그려져(뒤가 위) 도착
+        // 카드를 덮는다. 도착했는데 `안내 종료`가 안 보이던 실기기 증상이 이것이다.
+        if (_arrivedDestination == null)
+          if (indoorRouteDestination != null)
+            _bottomDockedCard(
+              EtaCard(
+                key: _etaCardKey,
+                distanceMeters: indoorEta.distanceM,
+                // 시간은 비용 기준 — 엘리베이터 대기·탑승 시간이 여기 들어 있다.
+                minutes:
+                    (indoorEta.costM / indoorWalkingSpeedMetersPerSecond / 60)
+                        .ceil()
+                        .clamp(1, 999),
+                label: _indoorEtaLabel(indoorRouteDestination),
+                guidanceStarted: _guidanceStarted,
+                transition: transition,
+                routeOptions: _indoorRouteExtras(indoorRouteDestination),
+                onStartGuidance: _guidanceStarted
+                    ? null
+                    : () => unawaited(_startCurrentGuidance()),
+                onClose: _dismissIndoorRouteFromEtaCard,
+                onClosePointerDown: (position) =>
+                    _etaClosePointerDown = position,
+              ),
+            )
+          // 대중교통 안내는 도보 ETA 카드와 **같은 자리**를 쓰고 서로를 밀어낸다.
+          // 두 카드가 함께 뜨면 한 화면에서 소요 시간이 두 개가 되어, 지도에
+          // 그려진 선이 어느 쪽인지 알 수 없다.
+          //
+          // 후보 목록이 덮고 있는 동안에는 아예 안 그린다([OutdoorMapBody.transitRoutesSheetOpen]).
+          else if (_transitItinerary case final itinerary?
+              when !widget.transitRoutesSheetOpen)
+            _bottomDockedCard(
+              TransitSummaryCard(
+                key: _etaCardKey,
+                itinerary: itinerary,
+                label: _transitLabel ?? '목적지까지',
+                transition: transition,
+                onStartGuidance: _guidanceStarted
+                    ? null
+                    : () => unawaited(_startCurrentGuidance()),
+                onClose: _dismissUserDestinationFromEtaCard,
+                onClosePointerDown: (position) =>
+                    _etaClosePointerDown = position,
+              ),
+            )
+          else if (route != null)
+            _bottomDockedCard(
+              EtaCard(
+                key: _etaCardKey,
+                distanceMeters: _outdoorEta(route).distanceM,
+                minutes: _outdoorEta(route).minutes,
+                label: userDestination != null
+                    ? (_userDestinationLabel ?? '목적지까지')
+                    : '건물 입구까지',
+                guidanceStarted: _guidanceStarted,
+                transition: transition,
+                routeOptions: _directionsRouteExtras(context, route),
+                extraMetric: _directionsFareMetric(route),
+                onClose: userDestination != null
+                    ? _dismissUserDestinationFromEtaCard
+                    : null,
+                onStartGuidance: userDestination != null && !_guidanceStarted
+                    ? () => unawaited(_startCurrentGuidance())
+                    : null,
+                onClosePointerDown: userDestination != null
+                    ? (position) => _etaClosePointerDown = position
+                    : null,
+              ),
             ),
-          )
-        else if (route != null)
-          _bottomDockedCard(
-            EtaCard(
-              key: _etaCardKey,
-              distanceMeters: _outdoorEta(route).distanceM,
-              minutes: _outdoorEta(route).minutes,
-              label: userDestination != null
-                  ? (_userDestinationLabel ?? '목적지까지')
-                  : '건물 입구까지',
-              guidanceStarted: _guidanceStarted,
-              routeOptions: _directionsRouteExtras(context, route),
-              extraMetric: _directionsFareMetric(route),
-              onClose: userDestination != null
-                  ? _dismissUserDestinationFromEtaCard
-                  : null,
-              onStartGuidance: userDestination != null && !_guidanceStarted
-                  ? () => unawaited(_startCurrentGuidance())
-                  : null,
-              onClosePointerDown: userDestination != null
-                  ? (position) => _etaClosePointerDown = position
-                  : null,
+
+        // 진입·이탈 전환 연출. **Stack 맨 위여야 한다** — 덮개의 존재 이유가
+        // 화면이 갈리는 순간을 가리는 것이라, 배지·ETA 카드·층 선택기가 그 위에
+        // 남으면 덮은 의미가 없다. 연출 중이 아니면 스스로 빈 위젯이 된다.
+        Positioned.fill(
+          child: AnimatedBuilder(
+            animation: _indoorTransition,
+            builder: (context, _) => IndoorTransitionOverlay(
+              progress: _indoorTransition.value,
+              direction: _indoorTransitionDirection,
+              buildingName: _building?.name,
             ),
           ),
+        ),
       ],
     );
+  }
+
+  /// 안내 중 하단 카드의 **왼쪽 버튼**. 이 여정이 실내↔야외를 건너지 않으면 null
+  /// 이라 카드는 지금까지처럼 `안내 종료` 하나만 띄운다.
+  ///
+  /// 두 갈래가 배타적인 것은 [_guidanceEntersBuilding]·[_guidanceLeavesBuilding]이
+  /// `_indoorEntered`를 반대로 보기 때문이다 — 한 화면에 진입과 나가기가 함께
+  /// 뜨는 상태는 없다.
+  ///
+  /// **버튼을 숨기지 않고 회색으로 둔다.** 조건을 채웠을 때만 나타나면 사용자는
+  /// 그런 버튼이 있는 줄도 모르고 걷다가, 정작 문 앞에서 처음 보고 "이게 뭐지"를
+  /// 한 번 더 생각해야 한다.
+  GuidanceTransitionAction? _guidanceTransitionAction() {
+    if (_guidanceEntersBuilding) {
+      final name = _building?.name;
+      if (name == null || name.isEmpty) return null;
+      return GuidanceTransitionAction(
+        label: '${withDirectionJosa(name)} 진입',
+        onPressed: indoorEntryGate.enabled
+            ? () => unawaited(enterIndoorFromGuidance())
+            : null,
+      );
+    }
+    if (_guidanceLeavesBuilding) {
+      return GuidanceTransitionAction(
+        label: '밖으로 나가기',
+        onPressed: outdoorExitGate.enabled ? exitIndoorFromGuidance : null,
+      );
+    }
+    return null;
   }
 
   /// 층을 옮길 때 무엇을 타고 갈지 고르는 줄. 층 간 경로가 아니면 null이다.

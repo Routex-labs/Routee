@@ -11,8 +11,8 @@ import 'package:navigation_client/repositories/place/destination_repository.dart
 import 'package:navigation_client/repositories/place/mock_destination_repository.dart';
 import 'package:navigation_client/repositories/routing/transit_repository.dart';
 import 'package:navigation_client/screens/map_shell/map_shell_screen.dart';
+import 'package:navigation_client/screens/map_shell/widgets/sheets/transit_route_detail_sheet.dart';
 import 'package:navigation_client/screens/map_shell/widgets/sheets/transit_routes_sheet.dart';
-import 'package:navigation_client/screens/outdoor_map/widgets/transit_summary_card.dart';
 import 'package:navigation_client/service_locator.dart';
 import 'package:navigation_client/state/recent_route_points_controller.dart';
 import 'package:navigation_client/theme/app_theme.dart';
@@ -162,15 +162,14 @@ void main() {
     await drain(tester);
   }
 
-  /// 첫 후보를 고른 뒤 지도 위 요약 카드의 `안내 시작`으로 확정한다. 카드 탭은
-  /// 그 자리에서 목록을 닫고 지도를 갈아칠 뿐 안내를 걸지는 않는다 — 안내는
-  /// 요약 카드의 버튼이 시작한다(`transit_preview_test.dart`).
+  /// 첫 후보의 상세를 열어 `안내 시작`으로 확정한다. 카드 탭은 지도만 갈아치울
+  /// 뿐 확정이 아니고, 이 버튼 하나로 **안내까지 시작된다**(`transit_preview_test.dart`).
   Future<void> pickFirstCandidate(WidgetTester tester) async {
     await tester.tap(find.byType(TransitItineraryCard).first);
     await drain(tester);
     await tester.tap(
       find.descendant(
-        of: find.byType(TransitSummaryCard),
+        of: find.byType(TransitRouteDetailSheet),
         matching: find.text('안내 시작'),
       ),
     );

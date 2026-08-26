@@ -69,6 +69,7 @@ Map<String, Object?> motionEvent({
   String source = 'device_motion/xMagneticNorthZVertical',
   int? stepPeakCount,
   int? latestStepPeakMs,
+  double? headingErrorDeg,
 }) => {
   'source': 'ios_core_motion',
   'kind': 'motion',
@@ -76,6 +77,7 @@ Map<String, Object?> motionEvent({
   'fusedHeadingDeg': heading,
   'headingStable': true,
   'headingSource': source,
+  'rotationHeadingAccuracyDeg': ?headingErrorDeg,
   'motionTimestamp': tMs.toDouble(),
   'stepPeakCount': ?stepPeakCount,
   'latestStepPeakMs': ?latestStepPeakMs?.toDouble(),
@@ -293,6 +295,108 @@ void main() {
     expect(driver.currentCalibration.anchor!.anchorLocalM.northM, 34);
   });
 
+  group('자북 frame이어도 센서가 오차를 크게 신고하면 그 방위를 안 쓴다', () {
+    // 안드로이드는 gyro hold 중에도 frame을 자북으로 신고한다. frame만 보면
+    // 철골 건물 안에서 통째로 돌아간 방위가 보정 없이 앵커에 박힌다
+    // (docs/client/android-heading-drift.md 6절).
+    Future<void> pinWith(double? errorDeg) async {
+      await driver.startGuidance(floorId: 'F1');
+      source.emitRaw(
+        motionEvent(
+          tMs: 1000,
+          heading: 0,
+          source: 'fused_orientation_provider+gyro_hold',
+          headingErrorDeg: errorDeg,
+        ),
+      );
+      await settle();
+      await driver.confirmAnchorByPin(floorPointM: const PdrLocalPoint(0, 0));
+    }
+
+    test('오차가 문턱을 넘으면 진행 방향 보정으로 넘어간다', () async {
+      await pinWith(60);
+      expect(driver.currentCalibration.phase, CalibrationPhase.awaitingHeading);
+      expect(driver.currentCalibration.requiresManualRotationCalibration, isTrue);
+    });
+
+    test('오차가 작으면 자편각만 얹고 바로 확정한다', () async {
+      await pinWith(8);
+      expect(driver.currentCalibration.phase, CalibrationPhase.calibrated);
+      // 센서를 믿었다는 뜻이지 회전이 0이라는 뜻이 아니다 — floor 축은 진북
+      // 기준이라 자편각이 남는다(`heading_declination_test.dart`).
+      expect(
+        driver.currentCalibration.anchor!.rotationDeg,
+        closeTo(magneticDeclinationDeg, 1e-9),
+      );
+      expect(
+        driver.currentCalibration.anchor!.rotationBasis,
+        AnchorRotationBasis.trustedHeading,
+      );
+    });
+
+    test('기기가 오차를 안 주면(-1) 막지 않는다', () async {
+      // SM-G996N은 rotation vector의 values[4]를 -1로 준다. 여기서 막으면 그
+      // 기기의 앵커가 통째로 죽는다.
+      await pinWith(-1);
+      expect(driver.currentCalibration.phase, CalibrationPhase.calibrated);
+    });
+  });
+
+  group('복도 축으로 잡은 회전각의 앞뒤 뒤집기', () {
+    Future<void> anchorOnCorridorAxis() async {
+      await driver.startGuidance(floorId: 'F1');
+      source.emitRaw(
+        motionEvent(
+          tMs: 1000,
+          heading: 0,
+          source: 'fused_orientation_provider',
+          headingErrorDeg: 180,
+        ),
+      );
+      await settle();
+      await driver.confirmAnchorByPin(floorPointM: const PdrLocalPoint(5, 7));
+      await driver.confirmAnchorByFloorDirection(
+        floorDirection: const PdrLocalPoint(1, 0),
+        basis: AnchorRotationBasis.corridorAxis,
+      );
+    }
+
+    test('회전각만 180° 돌고 찍은 자리는 안 움직인다', () async {
+      await anchorOnCorridorAxis();
+      final before = driver.currentCalibration.anchor!;
+      await driver.flipAnchorRotation();
+      final after = driver.currentCalibration.anchor!;
+
+      expect(
+        normalizePdrRotation(after.rotationDeg - before.rotationDeg).abs(),
+        closeTo(180, 1e-9),
+      );
+      // 앵커 원점이 움직이면 사용자가 찍은 자리가 사라진다. 뒤집기는 그 점을
+      // 중심으로 한 점대칭이어야 한다.
+      expect(after.anchorLocalM.eastM, before.anchorLocalM.eastM);
+      expect(after.anchorLocalM.northM, before.anchorLocalM.northM);
+    });
+
+    test('근거가 뒤집힘으로 바뀌어 두 번 판정되지 않는다', () async {
+      await anchorOnCorridorAxis();
+      expect(
+        driver.currentCalibration.anchor!.rotationBasis,
+        AnchorRotationBasis.corridorAxis,
+      );
+      await driver.flipAnchorRotation();
+      expect(
+        driver.currentCalibration.anchor!.rotationBasis,
+        AnchorRotationBasis.corridorAxisFlipped,
+      );
+    });
+
+    test('앵커가 없으면 아무 일도 하지 않는다', () async {
+      await driver.startGuidance(floorId: 'F1');
+      await driver.flipAnchorRotation();
+      expect(driver.currentCalibration.anchor, isNull);
+    });
+  });
+
   test('arbitrary 기준: pin 후 heading 보정까지 요구한다', () async {
     await driver.startGuidance(floorId: 'F1');
     source.emitRaw(
@@ -320,6 +424,7 @@ void main() {
 
     await driver.confirmAnchorByFloorDirection(
       floorDirection: const PdrLocalPoint(0, 1),
+      basis: AnchorRotationBasis.corridorAxis,
     );
     expect(driver.currentCalibration.phase, CalibrationPhase.calibrated);
     expect(driver.currentCalibration.anchor!.rotationDeg, closeTo(90, 1e-9));

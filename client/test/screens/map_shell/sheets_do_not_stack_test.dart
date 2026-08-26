@@ -133,12 +133,11 @@ void main() {
   }
 
   final outdoorEntries = <String, Future<bool> Function(WidgetTester)>{
-    '건물 폴리곤 탭': (tester) async {
-      await tapMap(tester);
-      return find.byType(BuildingInfoSheet).evaluate().isNotEmpty;
-    },
     '상단 바 메뉴': openMenu,
-    // 이벤트는 여기에 없다. 탭 줄의 이벤트는 **건물 안에서만 서고**, 야외에서
+    // 건물 폴리곤 탭은 여기에 없다. **탭이 곧 진입이라 시트를 띄우지 않는다**
+    // (`parts/map.dart`의 「건물 탭은 곧 진입이다」) — 아래 「건물을 누르면…」이
+    // 그 계약을 따로 잰다.
+    // 이벤트도 없다. 탭 줄의 이벤트는 **건물 안에서만 서고**, 야외에서
     // 오늘 목록 시트를 여는 입구는 이제 하나도 없다([MapShellScreen] 탭 목록).
   };
 
@@ -251,27 +250,27 @@ void main() {
     await sweep(tester, indoorEntries, indoor: true);
   });
 
-  testWidgets('건물을 두 번 누르면 정보 시트가 두 겹으로 쌓이지 않는다', (tester) async {
+  testWidgets('건물을 누르면 시트 없이 그대로 실내로 들어간다', (tester) async {
     await pumpShell(tester, indoor: false);
 
     await tapMap(tester);
-    expect(find.byType(BuildingInfoSheet), findsOneWidget);
+
+    // 탭이 곧 진입이라 겹칠 시트 자체가 생기지 않는다. 두 번 눌러도 같다.
+    expect(find.byType(BuildingInfoSheet), findsNothing);
+    expect(sheetStackGuard.openCount, 0);
 
     await tapMap(tester);
-    expect(find.byType(BuildingInfoSheet), findsOneWidget);
+    expect(find.byType(BuildingInfoSheet), findsNothing);
+    expect(sheetStackGuard.openCount, 0);
   });
 
-  testWidgets('건물 정보 시트가 떠 있을 때 메뉴를 열면 시트가 두 겹이 되지 않는다', (tester) async {
+  testWidgets('건물을 누른 뒤 메뉴를 열어도 시트는 한 장뿐이다', (tester) async {
     await pumpShell(tester, indoor: false);
 
     await tapMap(tester);
-    expect(find.byType(BuildingInfoSheet), findsOneWidget);
-
     expect(await openMenu(tester), isTrue);
-    expect(
-      find.byType(BuildingInfoSheet),
-      findsNothing,
-      reason: '메뉴가 건물 시트 위에 얹히면 뒤로가기를 몇 번 눌러야 하는지 알 수 없다',
-    );
+
+    expect(sheetStackGuard.openCount, 1);
+    expect(visibleSheetNames(), ['앱 메뉴']);
   });
 }

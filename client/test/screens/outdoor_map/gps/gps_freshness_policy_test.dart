@@ -67,18 +67,18 @@ void main() {
     });
   });
 
-  group('streamFirstFixTimeout', () {
+  group('streamSilenceTimeout', () {
     test('실측에서 기기가 좌표를 만든 최대 간격보다 넉넉히 길다', () {
       // 이 값이 짧으면 **느릴 뿐 살아 있는 스트림**을 끊는다. 그러면 재등록이
       // 겹치며 오히려 더 느려진다. 실기기(더현대 앞, 2026-08-13)에서 일회성
       // 조회가 좌표를 받아 낸 간격의 최댓값이 9.0초였다.
-      expect(streamFirstFixTimeout, greaterThan(const Duration(seconds: 9)));
+      expect(streamSilenceTimeout, greaterThan(const Duration(seconds: 9)));
     });
 
     test('시작 직후 벙어리 구간이 하염없이 길지는 않다', () {
       // 그동안 화면은 일회성 조회가 떠받치지만, 스트림 없이 오래 가면 그만큼
       // 배터리를 일회성 조회로 태운다.
-      expect(streamFirstFixTimeout, lessThanOrEqualTo(const Duration(seconds: 20)));
+      expect(streamSilenceTimeout, lessThanOrEqualTo(const Duration(seconds: 20)));
     });
   });
 
@@ -99,6 +99,38 @@ void main() {
       // 스트림은 순간적으로 닫혔다 돌아오는 경우가 대부분이다. 첫 대기가 길면
       // 그 흔한 경우에서 매번 화면이 멈춘다.
       expect(streamRetryMinDelay, lessThanOrEqualTo(const Duration(seconds: 3)));
+    });
+  });
+
+  group('isFreshFixRequestBlocking', () {
+    final t0 = DateTime.utc(2026, 8, 20, 12);
+
+    test('떠 있는 요청이 없으면 막지 않는다', () {
+      expect(isFreshFixRequestBlocking(startedAt: null, now: t0), isFalse);
+    });
+
+    test('쏜 지 얼마 안 된 요청은 다음 요청을 막는다', () {
+      expect(
+        isFreshFixRequestBlocking(
+          startedAt: t0,
+          now: t0.add(const Duration(seconds: 2)),
+        ),
+        isTrue,
+      );
+    });
+
+    test('상한을 넘긴 요청은 더 이상 막지 못한다', () {
+      // 이 갈래가 이 함수의 존재 이유다. 끝나지 않는 조회 하나가 겹침 방지
+      // 플래그를 영영 세워 두면, 스트림이 조용한 구간에서 유일한 생명줄이 멎는다.
+      expect(
+        isFreshFixRequestBlocking(startedAt: t0, now: t0.add(oneShotFixMaxWait)),
+        isFalse,
+      );
+    });
+
+    test('상한은 신선도 문턱보다 넉넉해야 한다', () {
+      // 짧으면 정상 응답을 기다리는 중에 요청이 겹쳐, 아끼려던 배터리를 더 쓴다.
+      expect(oneShotFixMaxWait, greaterThan(gpsFixMaxAge));
     });
   });
 }
