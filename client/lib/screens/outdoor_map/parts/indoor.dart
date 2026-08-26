@@ -68,15 +68,16 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     // `_guidanceStarted`를 이미 false로 읽어, 이어받을 안내가 없다고 판단한다 —
     // 출구에서 `안내 시작` 버튼이 다시 뜨던 화면이 이것이다(실기기 증상).
     //
-    // **대중교통 승차 구간도 같은 값으로 본다.** 그쪽은 야외 구간을 예약하지
-    // 않고 안내를 걸 때 통째로 그려 두므로([showIndoorLegToTransitBoarding])
-    // [_pendingOutdoorDestination]이 끝까지 비어 있다. 그 값만 보면 대중교통으로
-    // 나가는 사람은 항상 세션이 끝나 정류장까지 가는 길에 `안내 시작`이 다시
-    // 뜬다 — 지금 실내 구간이 나가는 문으로 향하고 있는지([_exitEntranceOfIndoorRoute],
-    // `_clearIndoorRoute`가 지우기 **전에** 읽어야 한다)로 한 번 더 본다.
+    // **세 수단이 같은 값을 본다.** [_pendingOutdoorDestination]은 도보만 세우고,
+    // 대중교통·자동차는 야외 구간을 예약하지 않고 안내를 걸 때 통째로 그린다
+    // ([showIndoorLegToOutdoorStart]). 그 값만 보면 그 둘로 나가는 사람은 항상
+    // 세션이 끝나, 정류장·차로 가는 길에 `안내 시작`이 다시 뜬다.
+    //
+    // 지금 실내 구간이 **바깥 여정의 앞 구간인가**([_indoorLegIsPrelude])가 곧
+    // 그 질문이고, 셋이 다 세운다. `_clearIndoorRoute`가 이 값을 내리므로 **그
+    // 앞에서** 읽어야 한다.
     final continuesOutdoors =
-        _pendingOutdoorDestination != null ||
-        (_transitItinerary != null && _exitEntranceOfIndoorRoute != null);
+        _indoorLegIsPrelude || _pendingOutdoorDestination != null;
     _clearIndoorRoute(endGuidance: !continuesOutdoors);
     final recorder = _pdrDebugRecorder;
     if (_debugModeController.enabled && recorder != null) {
@@ -364,7 +365,7 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
   ///
   /// 실내 구간의 목적지 노드가 지상 출입구면 그렇다. 실내→야외 도보
   /// ([showIndoorToOutdoorRouteTo])와 실내→대중교통
-  /// ([showIndoorLegToTransitBoarding])이 **둘 다 출구를 목적지로 삼는 실내 경로**를
+  /// ([showIndoorLegToOutdoorStart])이 **둘 다 출구를 목적지로 삼는 실내 경로**를
   /// 그리므로, 한 조건이 두 여정을 함께 잡는다.
   ///
   /// [_pendingOutdoorDestination]으로 가르지 않는 이유가 그것이다 — 대중교통 쪽은
@@ -523,6 +524,23 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
   /// **깨지는 자리 둘.** 위치를 아직 못 잡았거나(GPS null) 출입구 데이터가 없으면
   /// 아무것도 하지 않고 이유만 말한다. 버튼 게이트가 앞의 것을 이미 막지만, 좌표는
   /// 누르는 사이에도 사라질 수 있다.
+  /// 지금 통과한다고 볼 문. 앵커를 찍는 자리와 안내가 향하던 자리를 **하나로**
+  /// 묶는다.
+  ///
+  /// **안내가 향하던 문이 있으면 그것이다**([_journeyEntrance]). 앵커만 GPS
+  /// 최근접으로 따로 고르면, 실내 경로는 A문에서 시작하는데 마커는 B문에 찍혀
+  /// 들어서자마자 둘이 어긋난다 — 문 선택에는 15 m 히스테리시스가 있어
+  /// ([kEntranceSwitchMarginMeters]) 두 값이 실제로 갈리는 구간이 생긴다.
+  ///
+  /// 향하던 문이 없으면(문 재선정 전이거나 여정 그래프를 못 받은 경우) GPS
+  /// 최근접으로 물러선다.
+  BuildingEntrance? _entranceBeingEntered(Position position) =>
+      _journeyEntrance ??
+      nearestEntrance(
+        _groundEntrances,
+        ll.LatLng(position.latitude, position.longitude),
+      );
+
   Future<void> enterIndoorFromGuidance() async {
     if (_indoorEntered) return;
     final position = _position;
@@ -530,10 +548,7 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
       _showSnack('현재 위치를 아직 못 잡았습니다. 신호가 잡히면 다시 눌러주세요.');
       return;
     }
-    final entrance = nearestEntrance(
-      _groundEntrances,
-      ll.LatLng(position.latitude, position.longitude),
-    );
+    final entrance = _entranceBeingEntered(position);
     final floor = _groundEntranceFloor;
     if (entrance == null || floor == null) {
       _showSnack('건물 출입구 정보가 없어 실내로 들어갈 수 없습니다.');
@@ -1103,41 +1118,11 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
           ? IndoorEntrySource.sheetTap
           : IndoorEntrySource.cameraZoom,
     );
-    // 도면만 펴는 진입이지만, GPS가 문 앞이라고 말하면 조용히 앵커까지 찍는다
-    // ([_maybeAnchorOnQuietIndoorEntry]) — 안 그러면 문 앞에서 이 길로 들어온
-    // 사람은 "OO(으)로 진입" 버튼을 다시 찾아 눌러야, 그마저 모르면 위치 마커가
-    // 진입 공백을 메우던 흐린 GPS 점([_indoorGapGpsPoint])에 영영 멈춰 있는
-    // 것처럼 보인다 — 그 공백을 닫아 줄 추적이 애초에 시작되지 않았기 때문이다.
-    unawaited(_maybeAnchorOnQuietIndoorEntry());
-  }
-
-  /// [_triggerIndoorEntry]가 도면만 편 뒤, GPS가 문 앞이라고 말하면 그 문에
-  /// 앵커를 찍고 걸음 추적을 시작한다.
-  ///
-  /// **문턱은 "OO(으)로 진입" 버튼과 같다**([indoorEntryGate]). 두 진입 경로가
-  /// "가깝다"를 다르게 재면, 어느 쪽으로 들어왔는지에 따라 같은 자리에서 한쪽만
-  /// 앵커가 찍히는 것을 사용자는 구분할 이유가 없다.
-  ///
-  /// 멀거나(게이트가 꺼져 있음) GPS·출입구 정보가 아직 없으면 아무것도 하지
-  /// 않는다 — 도면만 보여주는 원래 동작 그대로다. 이미 다른 경로로 앵커가
-  /// 찍혀 있으면([canRenderPosition]) 덮지 않는다 — 시트를 다시 열었다고 걷던
-  /// 위치를 문 앞으로 되돌릴 이유는 없다.
-  Future<void> _maybeAnchorOnQuietIndoorEntry() async {
-    if (!mounted || !_indoorEntered) return;
-    if (indoorNavigationDriver.currentCalibration.canRenderPosition) return;
-    final position = _position;
-    if (position == null || !indoorEntryGate.enabled) return;
-    final entrance = nearestEntrance(
-      _groundEntrances,
-      ll.LatLng(position.latitude, position.longitude),
-    );
-    final floor = _groundEntranceFloor;
-    if (entrance == null || floor == null) return;
-    if (_activeFloor != floor) {
-      await _switchOverlayFloor(floor);
-      if (!mounted || !_indoorEntered) return;
-    }
-    await _startIndoorTracking(entrance: entrance, position: position);
+    // **여기서 앵커를 찍지 않는다.** 이 진입은 도면을 편 것이지 건물에 들어온
+    // 것이 아니다([IndoorEntrySource.isViewingOnly]) — 확대와 시트 탭은 밖에 선
+    // 사람도 하는 조작이라, 그 순간 위치를 찍으면 건물 밖 GPS 좌표 하나가 도면
+    // 위 자리로 굳는다. 들어왔다고 말하는 것은 "OO(으)로 진입" 하나뿐이다
+    // (`docs/client/indoor-entry-rules.md` 6절).
   }
 
   /// 실내 모드에서 건물 바깥을 탭했을 때의 이탈.

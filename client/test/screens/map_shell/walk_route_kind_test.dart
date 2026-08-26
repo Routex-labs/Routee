@@ -61,15 +61,30 @@ void main() {
       );
     });
 
-    test('도면을 닫았으면 실내 위치가 있어도 실내 경로가 아니다', () {
-      // 사용자의 위치는 GPS다. 실내로 보내면 화면에는 GPS 아이콘이 있는데
-      // 경로만 예전에 찍어둔 건물 안 앵커에서 뻗어 나간다.
+    test('도면이 접혀도 실내 위치가 살아 있으면 실내 경로다', () {
+      // **한때 반대로 못 박혀 있었다** — "도면을 닫았으면 사용자의 위치는
+      // GPS다". 그 전제가 틀렸다: 도면은 축소만으로도 접히는데, 그 길은 실내
+      // 위치를 버리지 않는다(정말 나갔을 때만 버린다). 실기기에서 B2에 선
+      // 사용자가 그 상태로 21 km짜리 야외 도보를 받았다.
       expect(
         classifyWalkRoute(
           origin: null,
           destination: indoor(),
           indoorContextActive: false,
           indoorStartReady: true,
+        ),
+        WalkRouteKind.indoorToIndoor,
+      );
+    });
+
+    test('도면도 실내 위치도 없으면 문을 경유한다', () {
+      // 이때는 정말 밖이다 — 위치를 한 번도 안 잡았거나 건물을 나서며 버렸다.
+      expect(
+        classifyWalkRoute(
+          origin: null,
+          destination: indoor(),
+          indoorContextActive: false,
+          indoorStartReady: false,
         ),
         WalkRouteKind.outdoorToIndoor,
       );
@@ -345,6 +360,50 @@ void main() {
         ),
         isFalse,
       );
+    });
+  });
+
+  group('실내에서 출발하는가', () {
+    const indoor = DirectionsCandidate(
+      title: '스타벅스 리저브',
+      subtitle: 'B2',
+      point: LatLng(37.5259, 126.9284),
+      nodeId: 'N-1',
+      floor: 'B2',
+    );
+    const outdoor = DirectionsCandidate(
+      title: '뉴고려병원',
+      subtitle: '',
+      point: LatLng(37.6, 127.1),
+    );
+
+    test('고른 출발지가 실내 지점이면 도면·앵커와 무관하게 참', () {
+      expect(
+        journeyStartsIndoors(
+          origin: indoor,
+          indoorStartReady: false,
+        ),
+        isTrue,
+      );
+    });
+
+    test('고른 출발지가 야외 지점이면 도면이 떠 있어도 거짓', () {
+      expect(
+        journeyStartsIndoors(
+          origin: outdoor,
+          indoorStartReady: true,
+        ),
+        isFalse,
+      );
+    });
+
+    test('출발지가 없으면 **실내 위치 하나로** 정한다', () {
+      // 도면이 떠 있는지는 보지 않는다. 도면은 건물을 확대만 해도 켜지므로 밖에
+      // 선 사람에게도 켜지고, 반대로 축소로 접히는 동안에도 건물 안에 선 사람의
+      // 앵커는 살아 있다 — 실기기에서 B2에 선 사용자가 `도면 false · 실내위치
+      // true` 상태로 21 km짜리 야외 도보를 받았다.
+      expect(journeyStartsIndoors(origin: null, indoorStartReady: false), isFalse);
+      expect(journeyStartsIndoors(origin: null, indoorStartReady: true), isTrue);
     });
   });
 }

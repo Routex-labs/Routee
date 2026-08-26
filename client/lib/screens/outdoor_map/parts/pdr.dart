@@ -58,6 +58,41 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
   /// 실제로 동작을 수행한 탭만 카운트를 올린다 — 위치나 heading을 아직 몰라
   /// 안내만 띄운 탭까지 세면, 사용자가 위치를 잡은 뒤 누른 다음 탭이 "회전"
   /// 차례로 밀려 정작 중앙 정렬이 안 된다.
+  /// GPS 한 건으로 실내 앵커를 찍어 본다. 찍었으면 true.
+  ///
+  /// 이미 위치가 있으면 **덮지 않는다** — 걷던 사람의 자리를 오차 큰 GPS로
+  /// 되돌릴 이유가 없다([_startIndoorTracking]의 같은 갈래와 한 규칙이다).
+  Future<bool> _tryAnchorFromGps() async {
+    if (indoorNavigationDriver.currentCalibration.canRenderPosition) {
+      return false;
+    }
+    final position = _position;
+    if (position == null) {
+      _showSnack('현재 위치를 아직 못 잡았습니다. GPS 신호를 확인해주세요.');
+      return false;
+    }
+    // **층은 사람이 답한다.** GPS는 층을 모른다 — 기압으로도 절대 층수는 못
+    // 낸다. 보고 있는 층에 그냥 찍으면 다른 층을 훑어보던 사용자가 거기 못
+    // 박히고, 그 뒤로는 자기 층으로 돌아와도 마커가 안 보인다(실기기: 지하
+    // 2층에 선 사람의 파란 점이 다른 층에 떴다).
+    //
+    // 묻는 화면은 실내 콜드스타트가 쓰는 것과 **같다**([_askEntryFloor]) —
+    // 같은 질문을 두 모양으로 만들면 한쪽만 고쳐진다. 다만 "진입 한 번에 한 번"
+    // 제한은 건너뛴다. 이 버튼은 사용자가 **다시 잡겠다고** 누른 것이다.
+    final floor = await _askEntryFloor(force: true);
+    if (!mounted || !_indoorEntered) return false;
+    if (floor != null && floor != _activeFloor) {
+      // chip을 누른 것과 같은 경로다 — 도면 교체와 카메라 정렬이 거기 붙어 있다.
+      await _onFloorChipSelected(floor);
+      if (!mounted || !_indoorEntered) return false;
+    }
+    await _startIndoorTracking(position: position);
+    if (!mounted) return false;
+    final ok = indoorNavigationDriver.currentCalibration.canRenderPosition;
+    debugPrint('[anchor] GPS 보정 — 층 $_activeFloor · 답 $floor · 성공 $ok');
+    return ok;
+  }
+
   Future<void> _recalibrateIndoor() async {
     // 다른 층을 보는 중이면 **먼저 내 층으로 되돌린다.** 그 상태에서는
     // `_pdrCurrentWgs84()`가 null이라 아래 갈래가 "위치를 지정하라"며 하단 바
@@ -73,6 +108,19 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
       // 않았더라도 "위치를 먼저 지정하라"는 안내는 먼저 띄운다.
       final target = _pdrCurrentWgs84();
       if (target == null) {
+        // **먼저 GPS로 잡아 본다.** 이 버튼은 야외에서 "내 위치"를 잡는 버튼과
+        // 같은 자리·같은 아이콘인데, 건물 안에서는 위치가 없을 때 아무것도 안
+        // 하고 다른 버튼을 깜빡이기만 했다 — 사용자가 기대하는 동작(누르면 내
+        // 자리를 잡아 준다)과 어긋난다.
+        //
+        // 잡는 방법은 **실내에서 앱을 켰을 때와 같다**([_startIndoorTracking]):
+        // GPS 좌표를 그 층 통로에 붙인다. 건물 안 GPS는 오차가 크지만 통로에
+        // 붙이고 나면 대개 맞는 자리로 떨어지고, 못 붙이면 그쪽이 "위치 지정으로
+        // 직접 지정해주세요"라고 이미 말한다.
+        //
+        // 지도를 탭해 직접 찍는 길은 그대로 남는다 — 여기가 실패했을 때 돌아갈
+        // 곳이라, 그 버튼을 깜빡이는 것도 그대로다.
+        if (await _tryAnchorFromGps()) return;
         // 눌러야 할 버튼을 깜빡여 말한다([OutdoorMapBody.onNeedLocationPlacement]).
         widget.onNeedLocationPlacement?.call();
         return;

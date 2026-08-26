@@ -21,6 +21,7 @@ import '../../domain/route/route_endpoint_swap.dart';
 import '../../domain/route/vertical_preference.dart';
 import '../../core/single_flight.dart';
 import '../../domain/search/store_suggestions.dart';
+import '../../domain/route/transit_indoor_lead.dart';
 import '../../domain/route/transit_walk_fill.dart';
 import '../../features/debug_mode/debug_mode.dart';
 import '../../features/indoor_navigation/contract/floor_transition_ui_state.dart';

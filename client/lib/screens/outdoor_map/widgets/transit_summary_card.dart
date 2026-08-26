@@ -22,6 +22,7 @@ class TransitSummaryCard extends StatefulWidget {
     this.onStartGuidance,
     this.onClosePointerDown,
     this.transition,
+    this.leading,
   });
 
   final TransitItinerary itinerary;
@@ -32,6 +33,11 @@ class TransitSummaryCard extends StatefulWidget {
   final VoidCallback? onStartGuidance;
 
   final ValueChanged<Offset>? onClosePointerDown;
+
+  /// 요약 위에 놓을 선택 영역. 실내 구간이 앞에 붙은 여정에서 수직 이동 선호
+  /// 줄이 여기 온다 — 그 구간의 시간이 이 카드의 총 소요에 들어 있어서다
+  /// (`outdoor_map/parts/ui.dart`의 `_outdoorRouteExtras`와 같은 판단).
+  final Widget? leading;
 
   /// 안내 중 `안내 종료` 왼쪽에 함께 놓을 실내↔야외 전환. 실내에서 타러 나가는
   /// 여정이 이 카드로 안내되므로, 도보 카드([EtaCard])와 같은 손잡이를 받는다.
@@ -65,6 +71,7 @@ class _TransitSummaryCardState extends State<TransitSummaryCard> {
             child: RoutexStack(
               gap: RoutexStackGap.content,
               children: [
+                ?widget.leading,
                 TransitDurationFare(itinerary: itinerary),
                 _details(context, departure),
                 GuidanceActionRow(
@@ -89,7 +96,12 @@ class _TransitSummaryCardState extends State<TransitSummaryCard> {
               if (fare != null && fare > 0)
                 RoutexTripMetric(value: formatTransitFare(fare), label: '요금'),
             ],
-            routeOptions: _details(context, departure),
+            routeOptions: widget.leading == null
+                ? _details(context, departure)
+                : RoutexStack(
+                    gap: RoutexStackGap.inline,
+                    children: [widget.leading!, _details(context, departure)],
+                  ),
             onStart: start,
           );
 
