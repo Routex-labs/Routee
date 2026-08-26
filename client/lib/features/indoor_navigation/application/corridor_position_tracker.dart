@@ -109,6 +109,11 @@ class CorridorPositionTracker {
   String? _routeStraightEpochNodeId;
   final List<OptimisticStepAdvance> _optimisticStepAdvances = [];
 
+  /// 경로 위 preview가 안정됐다는 독립 peak 수. 전역 continuity shadow가 한 번
+  /// 잘못된 평행 복도에 붙었다면, 이 근거가 찬 순간만 즉시 현재 경로 후보로
+  /// 돌려 보낸다. 단순 heartbeat는 여기에 세지 않는다.
+  int _routePreviewRejoinEvidencePeaks = 0;
+
   bool get isInitialized => _beam.isNotEmpty;
 
   double get _headingBiasDeg =>
@@ -159,6 +164,7 @@ class CorridorPositionTracker {
     if (routeChanged) {
       _lastRouteStraightEpochIndex = -1;
       _continuityGraphEdge = null;
+      _routePreviewRejoinEvidencePeaks = 0;
     }
   }
 
@@ -240,6 +246,7 @@ class CorridorPositionTracker {
     _confirmedAdvanceM = 0;
     _leaderRelocated = false;
     _routeStraightEpochNodeId = null;
+    _routePreviewRejoinEvidencePeaks = 0;
     _lastRouteStraightEpochIndex = -1;
     _optimisticStepAdvances.clear();
     _lastConfirmedSegmentHeadingDeg = null;
@@ -1343,6 +1350,28 @@ class CorridorPositionTracker {
     final previewLeaderRelocated =
         _leaderRelocated ||
         _optimisticStepAdvances.any((step) => step.leaderRelocated);
+    final previewOnGuidedRoute = _isPreferredRouteHypothesis(leader);
+    final continuityPosition = _markerContinuity.position;
+    final shadowDistanceToPreviewM = continuityPosition == null
+        ? 0.0
+        : (continuityPosition - _matchedPreviewPosition).distance;
+    final stableGuidedPreview =
+        previewOnGuidedRoute && !previewLeaderRelocated && !_previewIsAmbiguous;
+    if (stableGuidedPreview && _markerContinuity.isActive) {
+      // 하나의 네이티브 batch가 여러 peak를 묶어 줄 수 있으므로, frame 수가
+      // 아니라 이미 중복을 걷어 낸 optimistic peak 수를 센다.
+      _routePreviewRejoinEvidencePeaks += _optimisticStepAdvances.length;
+    } else if (!stableGuidedPreview) {
+      _routePreviewRejoinEvidencePeaks = 0;
+    }
+    final forceGuidedPreview = shouldReleaseShadowToGuidedPreview(
+      shadowActive: _markerContinuity.isActive,
+      previewOnGuidedRoute: previewOnGuidedRoute,
+      previewAmbiguous: _previewIsAmbiguous,
+      previewLeaderRelocated: previewLeaderRelocated,
+      stablePreviewPeakCount: _routePreviewRejoinEvidencePeaks,
+      shadowDistanceToPreviewM: shadowDistanceToPreviewM,
+    );
     _previewPosition = _markerContinuity.update(
       matchedPosition: _matchedPreviewPosition,
       rawPosition: _continuityRawPosition,
@@ -1351,7 +1380,8 @@ class CorridorPositionTracker {
       ambiguous: _previewIsAmbiguous,
       forceMatchedPosition:
           _lockPreferredRouteTerminal &&
-          _isPreferredRouteTerminalHypothesis(leader),
+              _isPreferredRouteTerminalHypothesis(leader) ||
+          forceGuidedPreview,
       projectToNavigableGraph: _nearestContinuityGraphPoint,
     );
     if (!_markerContinuity.isActive) _continuityGraphEdge = leader.edge;
