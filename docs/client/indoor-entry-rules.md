@@ -555,16 +555,32 @@ chrome을 **트리에서 뺀다**. 층 전환 스크림과 같은 구조다(`_fl
 그리고 262 m 경로에 카메라를 맞추면(`_fitCameraToRoute`) 배율이 페이드 구간의 끝이라,
 아무도 켠 적 없는 B2 도면이 거의 불투명하게 그려진다.
 
-### 지금 규칙
+### 지금 규칙 — 활성 층에 주인이 둘이고, **시각**으로 갈린다
 
-`showOutdoorToIndoorRouteTo`가 `returnToOutdoorView` 직후에 활성 층을 **이 여정의 실내
-구간이 시작하는 층**으로 맞춘다. 고르는 규칙은 실내에서 앱을 켠 갈래의 앵커 층과 **같은 함수**
-(`screens/outdoor_map/entry/gps_entry_floor.dart`의 `gpsEntryAnchorFloor`)다 — 지상 출입구 층 → `default_floor` → 보던 층. 두 답이 갈리면
-문을 지나는 순간 도면이 한 번 더 튄다.
+층을 되돌릴 주체를 세우되, 되돌릴 **시각**을 계획 화면이 아니라 안내 시작으로 옮겼다.
+계획 화면은 사용자가 고른 매장을 보여 줘야 하고([카메라 연출](camera-choreography-plan.md)
+5절), 그 매장은 정의상 목적지 층에 있기 때문이다.
 
-폴백 갈래(노드·출입구·그래프 없음)에서도 같은 자리를 지나므로 함께 맞춰진다.
+| 순간 | 활성 층 | 왜 |
+|---|---|---|
+| 목적지를 확정한 직후 | **목적지 매장 층** | 그 매장에 카메라를 맞추므로 그 층 도면이 깔려야 한다 |
+| `안내 시작`을 누른 순간 | **지상 출입구 층** | 지금부터 걸을 구간이 문까지다 — 안 되돌리면 야외선 밑에 목적지 층이 깔린다 |
+| 실내 구간을 못 푼 갈래 | **지상 출입구 층**(즉시) | 안내가 정말 문 앞에서 끝나므로 매장을 보여 줄 이유가 없다 |
 
-검증 기준은 `client/test/screens/outdoor_map/outdoor_to_indoor_journey_floor_test.dart`.
+출입구 층을 고르는 규칙은 실내에서 앱을 켠 갈래의 앵커 층과 **같은 함수**
+(`screens/outdoor_map/entry/gps_entry_floor.dart`의 `gpsEntryAnchorFloor`)다 — 지상 출입구
+층 → `default_floor` → 보던 층. 두 답이 갈리면 문을 지나는 순간 도면이 한 번 더 튄다.
+부르는 자리는 `_alignFloorToJourneyStart` 하나이고, 위 표의 2·3행이 그것을 부른다.
+
+**확대가 진입으로 읽히지 않게 함께 막는다.** 목적지 매장 배율(≈19)은 2절의 진입 임계값
+위라, 그대로 두면 `_triggerIndoorEntry`가 발화해 아직 밖에 선 사용자의 실내 구간이 먼저
+승격된다(`_activatePendingIndoorRoute`). 그래서 **문 경유 예약이 살아 있는 동안에는
+확대 진입을 막는다** — 무장은 내리지 않으므로 예약이 소비되면 다시 살아난다. 실제로
+들어가는 문은 6절의 버튼 하나 그대로다.
+
+검증 기준은 `client/test/screens/outdoor_map/outdoor_to_indoor_journey_floor_test.dart`
+(폴백 갈래)와 `client/test/screens/outdoor_map/outdoor_to_indoor_destination_focus_test.dart`
+(실내 구간이 풀린 갈래와 안내 시작).
 
 ---
 
