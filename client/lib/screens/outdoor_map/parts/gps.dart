@@ -59,6 +59,8 @@ extension OutdoorMapGps on OutdoorMapBodyState {
     // 남겨 두면 돌아온 첫 마커가 끊기기 전 방향을 가리킨다.
     _gpsJumpFilter = const GpsJumpFilterState();
     _outdoorHeading.reset();
+    _lastOutdoorCourseDeg = null;
+    _lastOutdoorCourseAt = null;
     _syncCurrentLayer();
   }
 
@@ -69,6 +71,8 @@ extension OutdoorMapGps on OutdoorMapBodyState {
     // 돌아왔을 때 옳은 좌표를 거른다.
     _gpsJumpFilter = const GpsJumpFilterState();
     _outdoorHeading.reset();
+    _lastOutdoorCourseDeg = null;
+    _lastOutdoorCourseAt = null;
     _syncCurrentLayer();
   }
 
@@ -118,7 +122,7 @@ extension OutdoorMapGps on OutdoorMapBodyState {
     // "밖으로 나오면 한동안 엉뚱한 데를 가리키다 제자리를 찾는다"가 이것이다.
     // 좌표 자체는 이탈 판정에 계속 쓰이므로 여기서만 가른다.
     if (!_indoorEntered) {
-      _outdoorHeading.track(
+      final course = _outdoorHeading.track(
         headingDeg: position.heading,
         headingAccuracyDeg: position.headingAccuracy,
         speedMps: position.speed,
@@ -127,6 +131,11 @@ extension OutdoorMapGps on OutdoorMapBodyState {
         // 재획득 중의 수신기는 "모른다"가 아니라 틀린 값을 자신 있게 준다.
         point: ll.LatLng(position.latitude, position.longitude),
       );
+      // 문 앞에서 나침반을 대조할 근거로 따로 들고 있는다([_entryReferenceCourseDeg]).
+      if (course != null) {
+        _lastOutdoorCourseDeg = course;
+        _lastOutdoorCourseAt = DateTime.now();
+      }
     }
     // 실내에서도 좌표는 **들고 있는다.** 진입/이탈 판정의 유일한 입력이고,
     // 화면에 그릴지는 [_outdoorGpsVisible]이 따로 가른다([_syncCurrentLayer]).
@@ -546,6 +555,12 @@ extension OutdoorMapGps on OutdoorMapBodyState {
     await indoorNavigationDriver.confirmAnchorByPin(
       floorPointM: estimatedPoint,
       axes: axes,
+      // **문 하나를 사이에 두고 방향의 근거가 바뀌는 자리다.** 밖에서 보던
+      // 삼각형은 GPS 진행 방향이었고 안에서는 나침반인데, 그 나침반 값이 이
+      // 앵커의 회전각으로 구워져 이후 실내 궤적 전체를 돌린다. 문 앞은 하필
+      // 자력계에 가장 나쁜 자리(철제 문틀·회전문·보안 게이트)이므로, 넘어가기
+      // 전에 방금 밖에서 걷던 방향과 한 번 맞춰 본다.
+      trueCourseDeg: _entryReferenceCourseDeg,
     );
     if (!mounted) return;
 
@@ -555,7 +570,6 @@ extension OutdoorMapGps on OutdoorMapBodyState {
     if (indoorNavigationDriver.currentCalibration.phase ==
         CalibrationPhase.awaitingHeading) {
       final estimate = _entryFloorDirection(
-        position: position,
         anchorFloorPoint: estimatedPoint,
         graph: graph,
         axes: axes,

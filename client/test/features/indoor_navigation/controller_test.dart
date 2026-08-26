@@ -342,6 +342,57 @@ void main() {
     });
   });
 
+  /// 문 하나를 사이에 두고 방향의 근거가 바뀐다 — 밖은 GPS 진행 방향, 안은
+  /// 나침반이다. 그 나침반 값이 앵커 회전각으로 구워져 이후 실내 궤적 전체를
+  /// 돌리는데, 문 앞은 하필 자력계에 가장 나쁜 자리다(철제 문틀·회전문·보안
+  /// 게이트). 세기는 정상 범위에 남고 방향만 도는 왜곡이라 기존 판정이 못 잡는다.
+  group('문 앞에서 나침반을 밖에서 걷던 방향과 대조한다', () {
+    /// 나침반이 [compassDeg]를 가리키는 상태에서 앵커를 찍는다.
+    Future<void> pinFacing(double compassDeg, {double? trueCourseDeg}) async {
+      await driver.startGuidance(floorId: 'F1');
+      source.emitRaw(motionEvent(tMs: 1000, heading: compassDeg));
+      await settle();
+      await driver.confirmAnchorByPin(
+        floorPointM: const PdrLocalPoint(0, 0),
+        trueCourseDeg: trueCourseDeg,
+      );
+    }
+
+    test('밖에서 걷던 방향과 맞으면 그대로 자편각만 얹는다', () async {
+      // 자북 0° = 진북 -9°. 진행 방향 351°는 그 자리다.
+      await pinFacing(0, trueCourseDeg: 351);
+
+      expect(driver.currentCalibration.phase, CalibrationPhase.calibrated);
+      expect(
+        driver.currentCalibration.anchor!.rotationBasis,
+        AnchorRotationBasis.trustedHeading,
+      );
+    });
+
+    test('크게 어긋나면 그 나침반을 안 쓰고 방향 보정으로 넘긴다', () async {
+      // 밖에서는 동쪽(90°)으로 걸어 문을 지났는데 나침반은 북쪽을 가리킨다.
+      await pinFacing(0, trueCourseDeg: 90);
+
+      expect(driver.currentCalibration.phase, CalibrationPhase.awaitingHeading);
+    });
+
+    test('대조할 방향이 없으면 아무것도 막지 않는다', () async {
+      // 지하에서 앱을 켰거나 문 앞에 오래 서 있었다. 나쁘다는 **증거**가 없다.
+      await pinFacing(0);
+
+      expect(driver.currentCalibration.phase, CalibrationPhase.calibrated);
+    });
+
+    test('문턱 바로 안쪽은 통과한다 — 걷는 방향에도 오차가 있다', () async {
+      await pinFacing(
+        0,
+        trueCourseDeg: 351 + entryCourseDisagreementDeg - 1,
+      );
+
+      expect(driver.currentCalibration.phase, CalibrationPhase.calibrated);
+    });
+  });
+
   group('복도 축으로 잡은 회전각의 앞뒤 뒤집기', () {
     Future<void> anchorOnCorridorAxis() async {
       await driver.startGuidance(floorId: 'F1');

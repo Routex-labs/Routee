@@ -632,23 +632,25 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
   /// 층 좌표계는 데이터셋마다 축이 뒤집혀 있을 수 있어, 나침반 각도는 반드시
   /// [axes]를 거쳐 층 벡터로 바꾼다. 복도 축은 이미 층 좌표라 그대로 쓴다.
   ///
-  /// [position]은 없을 수 있다 — 지도를 직접 찍는 경로는 GPS를 안 지난다.
-  /// 지하에서 앱을 켠 사용자에게는 course도 없으므로, 실질적으로는 복도 축
-  /// 하나로 간다. 둘 다 없으면 null이고, 그때는 앵커를 찍지 않는다.
+  /// 진행 방향은 **좌표 한 건에서 다시 뽑지 않는다.** 야외 마커가 보던 그 값을
+  /// 그대로 쓴다([_entryReferenceCourseDeg]) — 같은 사실을 두 곳에서 계산하면
+  /// 화면이 가리키던 방향과 앵커에 굽는 방향이 갈린다. 그쪽 값은 속도·정확도에
+  /// 더해 **우리가 잰 이동 방향과의 대조**까지 지난 것이라, 재획득 중의 수신기가
+  /// 자신 있게 주는 틀린 course가 여기까지 오지 않는다.
+  ///
+  /// 지하에서 앱을 켠 사용자에게는 그 값이 없으므로 실질적으로는 복도 축 하나로
+  /// 간다. 둘 다 없으면 null이고, 그때는 앵커를 찍지 않는다.
   ({PdrLocalPoint direction, AnchorRotationBasis basis})? _entryFloorDirection({
-    required Position? position,
     required PdrLocalPoint anchorFloorPoint,
     required FloorGraph graph,
     required PdrToFloorAxes axes,
   }) {
-    // 1순위: GPS course. 실제로 측정된 이동 방향이라 가장 정확하다. 다만 멈춰
-    // 있을 때는 값이 의미 없고 플랫폼이 0으로 채우므로 속도로 먼저 거른다.
-    final course = position?.heading;
-    if (position != null &&
-        course != null &&
-        position.speed >= entryCourseMinSpeedMps &&
-        course > 0 &&
-        course < 360) {
+    // 1순위: 밖에서 마지막으로 믿은 진행 방향. 실제로 측정된 이동이라 가장 정확하다.
+    // **여기서는 짧게 잡는다** — 이 값이 그대로 회전각이 되고, 그 회전각은 뒤에서
+    // 스스로 고쳐지지 않는다(앞뒤 뒤집기는 복도 축에만 붙어 있다). 문 앞에 한참
+    // 서 있었으면 그동안 몸이 돌았을 수 있으므로 복도 축으로 내려가는 편이 낫다.
+    final course = _outdoorCourseWithin(outdoorHeadingMemory);
+    if (course != null) {
       return (
         direction: axes.apply(pdrDirectionForBearing(course)),
         basis: AnchorRotationBasis.gpsCourse,

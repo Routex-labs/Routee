@@ -29,7 +29,8 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     );
   }
 
-  /// 센서 세션이 첫 이벤트를 보고할 때까지(최대 [sensorWarmupTimeout]) 기다린다.
+  /// 센서 세션이 첫 이벤트를 보고하고 **방위가 자리를 잡을 때까지**(최대
+  /// [sensorWarmupTimeout]) 기다린다.
   ///
   /// [IndoorNavigationDriver.confirmAnchorByPin]은 **호출 시점의** heading
   /// reference로 분기한다. 자북 heading을 이미 받았으면 회전 0으로 즉시 확정하고,
@@ -38,14 +39,28 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
   /// 자동 배치는 startGuidance 직후 곧바로 찍으므로 그 유예가 없다. 기다리지
   /// 않으면 나침반이 멀쩡한 기기까지 전부 방향 보정 분기로 빠져, 추정한 진입
   /// 방향이 회전각으로 박히고 이후 궤적 전체가 그만큼 돌아간다.
+  ///
+  /// **"값이 왔다"로는 모자란다.** 문 앞에서 나침반을 밖에서 걷던 방향과
+  /// 대조하는데([entryCourseDisagreementDeg]), 흔들리는 중의 각을 넣으면 멀쩡한
+  /// 나침반이 우연히 걸리거나 틀어진 나침반이 우연히 통과한다. 재진입에서는 위
+  /// 기다림이 한 프레임도 안 걸린다 — 세션이 이미 돌고 있어서다.
+  ///
+  /// 수렴을 못 보고 시간이 다 가도 그냥 나아간다. 판정은
+  /// [IndoorNavigationView.isHeadingConverged]가 소유한다.
   Future<void> _awaitSensorWarmup() async {
     bool reported(PdrRuntimeState state) =>
         state == PdrRuntimeState.running || state == PdrRuntimeState.degraded;
-    if (reported(indoorNavigationDriver.currentRuntimeStatus.state)) return;
     try {
-      await indoorNavigationDriver.runtimeStatuses
-          .firstWhere((status) => reported(status.state))
-          .timeout(sensorWarmupTimeout);
+      if (!reported(indoorNavigationDriver.currentRuntimeStatus.state)) {
+        await indoorNavigationDriver.runtimeStatuses
+            .firstWhere((status) => reported(status.state))
+            .timeout(sensorWarmupTimeout);
+      }
+      if (!indoorNavigationDriver.isHeadingConverged) {
+        await indoorNavigationDriver.headings
+            .firstWhere((_) => indoorNavigationDriver.isHeadingConverged)
+            .timeout(sensorWarmupTimeout);
+      }
     } on Object {
       // 센서가 끝내 조용해도(권한 거부·미지원 기기·타임아웃) 앵커는 찍는다 —
       // 걸음이 쌓이지 않더라도 "어느 입구로 들어왔는지"는 지도에 보여야 한다.
@@ -1155,6 +1170,9 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     await indoorNavigationDriver.confirmAnchorByPin(
       floorPointM: floorPoint,
       axes: axes,
+      // 자동 진입과 **같은 대조**를 지난다. 걸어 들어와 바로 위치를 찍는
+      // 사용자에게는 문 앞 나침반이 틀어져 있을 이유가 똑같이 있다.
+      trueCourseDeg: _entryReferenceCourseDeg,
     );
     if (!mounted) return;
     // **방향은 사용자에게 묻지 않는다.**
@@ -1172,7 +1190,6 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
       final estimate = graph == null
           ? null
           : _entryFloorDirection(
-              position: _position,
               anchorFloorPoint: floorPoint,
               graph: graph,
               axes: axes,

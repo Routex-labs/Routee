@@ -642,6 +642,31 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   /// 서 있거나 기기가 방향을 못 주는 동안이다.
   double? get _outdoorHeadingDeg => _outdoorHeading.headingDeg;
 
+  /// 야외에서 **마지막으로 믿은** 진행 방향과 그 시각.
+  ///
+  /// [_outdoorHeading]과 따로 두는 이유는 실내로 넘어가는 순간 그쪽을 비우기
+  /// 때문이다([_setIndoorEntered]) — 정작 그 값이 필요한 자리가 그 직후다.
+  /// 진입 버튼은 멈춰 서서 누르므로, 그 순간의 좌표에는 진행 방향이 없다.
+  double? _lastOutdoorCourseDeg;
+  DateTime? _lastOutdoorCourseAt;
+
+  /// [maxAge] 안에 믿었던 야외 진행 방향. 낡았으면 null.
+  ///
+  /// **쓰는 자리마다 기한이 다르다.** 나침반을 물리는 근거로는 조금 낡아도
+  /// 되지만([entryCourseMemory]), 회전각으로 **직접 굽는** 자리에서는 그사이
+  /// 몸이 돌았을 수 있어 짧아야 한다([outdoorHeadingMemory]).
+  double? _outdoorCourseWithin(Duration maxAge) {
+    final course = _lastOutdoorCourseDeg;
+    final at = _lastOutdoorCourseAt;
+    if (course == null || at == null) return null;
+    return DateTime.now().difference(at).abs() > maxAge ? null : course;
+  }
+
+  /// 문 앞에서 **나침반을 믿어도 되는지 대조하는** 근거. 회전각으로 쓰지 않으므로
+  /// 조금 낡아도 된다 — 틀렸다고 판정해도 회전각은 다음 사다리가 정한다.
+  double? get _entryReferenceCourseDeg =>
+      _outdoorCourseWithin(entryCourseMemory);
+
   /// 이번에 그려지는 경로의 개요 카메라를 **한 번 건너뛴다.**
   ///
   /// 카메라의 주인이 경로가 아니라 다른 것일 때 세운다 — 지금은 문 경유 여정의

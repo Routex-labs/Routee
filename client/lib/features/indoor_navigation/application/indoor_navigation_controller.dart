@@ -189,6 +189,7 @@ class IndoorNavigationDriver implements IndoorNavigationController {
     required PdrLocalPoint floorPointM,
     PdrToFloorAxes axes = const PdrToFloorAxes.identity(),
     String? floorId,
+    double? trueCourseDeg,
   }) async {
     if (!_guiding) {
       return;
@@ -209,7 +210,8 @@ class IndoorNavigationDriver implements IndoorNavigationController {
     // **frame이 자북인 것만으로는 부족하다.** 안드로이드는 gyro hold 중에도
     // frame을 자북으로 신고하므로, 그것만 보면 철골 건물 안에서 통째로 돌아간
     // 방위를 보정 없이 앵커에 구워 넣는다([PdrSession.headingTrustworthy]).
-    if (_session.headingTrustworthy) {
+    if (_session.headingTrustworthy &&
+        !_courseContradictsHeading(trueCourseDeg)) {
       // 믿을 수 있는 자북 기준이어도 회전각은 0이 아니다. floor 축은 진북
       // 기준이라 자편각을 더해야 한다 — 여기를 0으로 두면 실내 heading 전체가
       // 그만큼 통째로 돌아간다.
@@ -220,9 +222,26 @@ class IndoorNavigationDriver implements IndoorNavigationController {
       );
     } else {
       // frame이 arbitrary이거나, 자북이어도 센서가 스스로 오차가 크다고 보고한
-      // 경우다. 둘 다 진행 방향으로 보정해야 한다(§4).
+      // 경우다. 둘 다 진행 방향으로 보정해야 한다(§4). 방금 밖에서 걷던 방향과
+      // 어긋난 나침반도 여기로 온다 — 문 앞 철제 구조물이 흔한 원인이고, 그
+      // 왜곡은 세기·신고 오차로는 안 잡힌다([entryCourseDisagreementDeg]).
       _updateCalibration(CalibrationPhase.awaitingHeading);
     }
+  }
+
+  /// 방금 밖에서 걷던 진행 방향이 지금 나침반과 어긋나는가.
+  ///
+  /// 나침반이 말하는 진행 방향은 `걸음 방위 + 자편각`이다 — [_finalizeAnchor]가
+  /// 자북 갈래에서 쓰는 회전각과 **같은 식**이라, 여기서 통과한 값이 곧 그
+  /// 회전각의 근거가 된다. 잴 값이 없으면 어긋난다고 하지 않는다 — 나쁘다는
+  /// 증거가 있을 때만 거부한다는 규칙은 여기서도 같다.
+  bool _courseContradictsHeading(double? trueCourseDeg) {
+    if (trueCourseDeg == null) return false;
+    final compassCourseDeg = normalizePdrBearing(
+      _session.walkingHeadingDeg + magneticDeclinationDeg,
+    );
+    final gapDeg = normalizePdrRotation(compassCourseDeg - trueCourseDeg).abs();
+    return gapDeg > entryCourseDisagreementDeg;
   }
 
   @override
