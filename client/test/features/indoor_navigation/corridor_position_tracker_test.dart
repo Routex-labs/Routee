@@ -379,6 +379,73 @@ void main() {
       );
       expect(afterBatch.previewUsesContinuityShadow, isTrue);
       expect(afterBatch.optimisticLeadM, closeTo(1.4, 1e-9));
+
+      final snapped = tracker.snapMarkerToMatchedPreview();
+      expect(snapped.previewPosition, snapped.matchedPreviewPosition);
+      expect(snapped.previewUsesContinuityShadow, isFalse);
+    });
+
+    test('preview tail이 비어도 안정된 경로 확정 걸음으로 shadow를 복귀시킨다', () {
+      final tracker =
+          CorridorPositionTracker(
+              _parallelGraph,
+              config: const CorridorTrackerConfig(
+                seedRadiusM: 8,
+                seedPenaltyDegM: 0,
+                positionalToleranceM: 0,
+                positionalWeightDegPerM: 10,
+              ),
+            )
+            ..setPreferredRoute(
+              edgeIds: const ['high'],
+              nodeIds: const ['high-start', 'high-end'],
+            )
+            ..reset(
+              initialPosition: const PdrLocalPoint(1, 0),
+              initialHeadingDeg: 90,
+              timestampMs: 0,
+            );
+
+      final relocated = tracker.update(
+        _observation(
+          atMs: 1000,
+          confirmedSteps: 1,
+          confirmedDistanceM: 0.7,
+          previewSteps: 0,
+          headingDeg: 90,
+          raw: const PdrLocalPoint(1.7, 7),
+          rawConfirmedStepPositions: const [PdrLocalPoint(1.7, 7)],
+        ),
+      );
+      expect(relocated.matchedPreviewPosition.northM, 7);
+      expect(relocated.previewUsesContinuityShadow, isTrue);
+
+      tracker.update(
+        _observation(
+          atMs: 1500,
+          confirmedSteps: 2,
+          confirmedDistanceM: 1.4,
+          previewSteps: 0,
+          headingDeg: 90,
+          raw: const PdrLocalPoint(2.4, 7),
+          rawConfirmedStepPositions: const [PdrLocalPoint(2.4, 7)],
+        ),
+      );
+      final released = tracker.update(
+        _observation(
+          atMs: 2000,
+          confirmedSteps: 3,
+          confirmedDistanceM: 2.1,
+          previewSteps: 0,
+          headingDeg: 90,
+          raw: const PdrLocalPoint(3.1, 7),
+          rawConfirmedStepPositions: const [PdrLocalPoint(3.1, 7)],
+        ),
+      );
+
+      expect(released.matchedPreviewPosition.northM, 7);
+      expect(released.previewPosition.northM, 7);
+      expect(released.previewUsesContinuityShadow, isFalse);
     });
 
     test('큰 preview 선행분은 배치 한 번으로 폐기하지 않는다', () {
@@ -796,6 +863,11 @@ void main() {
     expect(transform.toFloorBearing(0), closeTo(180, 1e-9));
     expect(transform.toFloorBearing(90), closeTo(90, 1e-9));
     expect(transform.floorBearingToMapBearing(180), closeTo(0, 1e-9));
+    expect(
+      transform.mapBearingForPdrBearing(0, floorBiasDeg: 20),
+      closeTo(340, 1e-9),
+      reason: '복도 bias는 floor 좌표에서 더한 뒤 지도 방위로 되돌려야 한다',
+    );
   });
 
   group('교차점 전후 회전 허용 구간', () {

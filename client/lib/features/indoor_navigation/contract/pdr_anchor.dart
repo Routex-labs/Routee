@@ -197,4 +197,17 @@ class FloorCoordinateTransform {
     }
     return pdrBearingForDirection(alignedPdrDirection);
   }
+
+  /// PDR 나침반 방향에 복도 tracker가 학습한 floor-frame 보정각을 더해 지도
+  /// bearing으로 되돌린다.
+  ///
+  /// 보정각은 graph/floor 좌표계에서 얻은 값이므로 PDR heading에 바로 더하면
+  /// 축 반전 도면에서 부호가 뒤집힌다. 반드시 floor 방향으로 바꾼 뒤 더하고,
+  /// 그 결과를 지도 기준으로 역변환한다.
+  double mapBearingForPdrBearing(
+    double pdrBearingDeg, {
+    double floorBiasDeg = 0,
+  }) => floorBearingToMapBearing(
+    normalizePdrBearing(toFloorBearing(pdrBearingDeg) + floorBiasDeg),
+  );
 }
