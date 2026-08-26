@@ -307,15 +307,21 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
   /// 이유가 없다. 다음 목표가 오면 [_syncPdrCurrentLayer]나
   /// [_moveFollowCamera]가 다시 켠다.
   void _syncMarkerGlideTicker() {
-    if (_markerGlide.isSettled && !_followCameraNeedsFrame) {
+    if (_markerGlideIdle) {
       _stopMarkerGlideTicker();
       return;
     }
     if (_markerGlideTicker != null) return;
     _markerGlideTickAt = Duration.zero;
     _markerSourceWriteAt = Duration.zero;
+    _gpsSourceWriteAt = Duration.zero;
     _markerGlideTicker = createTicker(_onMarkerGlideFrame)..start();
   }
+
+  /// 틱을 돌릴 이유가 하나도 없는가. **야외 마커도 같은 틱을 탄다** — 둘이 따로
+  /// 돌면 실내↔야외 전환 구간에 두 타이머가 동시에 서서 프레임을 나눠 먹는다.
+  bool get _markerGlideIdle =>
+      _markerGlide.isSettled && _gpsGlide.isSettled && !_followCameraNeedsFrame;
 
   /// 프레임 하나. [total]은 틱이 시작된 뒤의 **누적** 경과라 직전 값과 뺀다.
   void _onMarkerGlideFrame(Duration total) {
@@ -340,12 +346,19 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
       _markerSourceWriteAt = total;
       unawaited(_writePdrMarkerSource(controller));
     }
+    // 야외 마커도 같은 틱·같은 간격으로 흐른다. 둘 중 하나만 그려지는 구간이
+    // 대부분이라 서로의 쓰기를 밀어내지 않는다([_outdoorGpsVisible]).
+    final gpsMoved = _gpsGlide.advance(elapsed);
+    if (gpsMoved &&
+        (_gpsGlide.isSettled ||
+            total - _gpsSourceWriteAt >= markerSourceWriteInterval)) {
+      _gpsSourceWriteAt = total;
+      unawaited(_writeGpsMarkerSource(controller));
+    }
     // 마커를 옮긴 **뒤에** 카메라를 잡는다. 카메라 목표점이 방금 옮긴 자리라,
     // 순서를 뒤집으면 화면이 한 프레임 지난 자리를 가운데 둔다.
     _driveFollowCamera(controller, elapsed);
-    if (_markerGlide.isSettled && !_followCameraNeedsFrame) {
-      _stopMarkerGlideTicker();
-    }
+    if (_markerGlideIdle) _stopMarkerGlideTicker();
   }
 
   void _stopMarkerGlideTicker() {

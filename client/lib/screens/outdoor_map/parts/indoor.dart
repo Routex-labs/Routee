@@ -282,6 +282,13 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
   @visibleForTesting
   bool get outdoorGpsMarkerVisibleForTest => _outdoorGpsVisible;
 
+  /// 야외 GPS 마커가 **지금 그리는 자리**. 없으면 null(마커가 사라진 상태).
+  ///
+  /// [indoorMarkerPointForTest]와 같은 이유로 열어 둔다 — MapLibre 레이어는
+  /// 위젯 트리에 없어 픽셀을 볼 수 없다.
+  @visibleForTesting
+  ll.LatLng? get outdoorMarkerPointForTest => _gpsGlide.point;
+
   /// 좌표 한 건이 실내 쪽에 하는 일 **전부**. 부르는 자리가 둘이다 — 좌표
   /// 스트림([_handlePosition])과, 건물이 좌표보다 늦게 도착한 뒤의 재판정
   /// ([_onBuildingLoaded]).
@@ -1255,7 +1262,7 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     // 야외 좌표가 실내 도면 위에 그대로 남아, 사용자는 실내 위치 아이콘과 건물
     // 밖 파란 점을 **동시에** 보게 된다. 위치 아이콘의 주인이 바뀌는 시점은
     // 다음 좌표가 아니라 지금이다.
-    unawaited(_syncCurrentLayer());
+    unawaited(_syncCurrentLayer(snap: true));
     // 위치 아이콘의 주인이 바뀌는 순간이다. 야외로 나가면 실내 위치 마커를
     // 지우고(GPS 마커가 그 역할을 받는다), 실내로 들어가면 다시 그린다.
     unawaited(_syncPdrCurrentLayer(snap: true));

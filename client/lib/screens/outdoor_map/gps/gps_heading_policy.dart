@@ -86,10 +86,10 @@ double outdoorTravelBearingDeg(ll.LatLng from, ll.LatLng to) {
 /// 상태를 갖는 이유가 둘이다.
 ///   - [outdoorHeadingMemory] — 방금까지 알던 방향을 잠깐 들고 있으려면 그 값과
 ///     시각이 필요하다.
-///   - **대조** — 수신기가 말하는 진행 방향을 우리가 잰 이동 방향과 맞춰 보려면
-///     직전 좌표가 필요하다. 건물을 나선 직후가 이 대조가 필요한 자리다: 실내에
-///     있는 동안 위성 신호는 벽에 반사돼 들어오고, 그 상태로 계산된 course는
-///     실제로 걷는 방향과 무관하다. 밖으로 나와 다시 잡히기까지 십수 초가 걸리는데,
+///   - **직접 재기** — 직전 좌표가 있어야 "우리가 본 이동 방향"을 잴 수 있다.
+///     그 값이 두 가지 일을 한다. 수신기가 말하는 방향을 거르고, 걸렸을 때
+///     대신 쓴다. 건물을 나선 직후가 그 자리다: 실내에 있는 동안 위성 신호는
+///     벽에 반사돼 들어오고, 밖으로 나와 다시 잡히기까지 십수 초가 걸리는데
 ///     그동안 수신기는 "모른다"가 아니라 **틀린 값을 자신 있게** 준다.
 class OutdoorHeadingTracker {
   double? _deg;
@@ -105,9 +105,10 @@ class OutdoorHeadingTracker {
   /// [at]은 **좌표를 찍은 시각**이다. 앱이 받은 시각을 쓰면 프레임이 밀린 만큼
   /// 기억이 길어진다(같은 이유로 위치 스트림의 신선도도 기기 시각으로 잰다).
   ///
-  /// [point]를 주면 직전 좌표와의 실제 이동 방향으로 한 번 더 거른다. 대조가
-  /// 성립하지 않는 자리(움직임이 짧다·간격이 길다·직전 좌표가 없다)에서는 아무것도
-  /// 거부하지 않는다 — **틀렸다는 증거가 있을 때만** 버린다.
+  /// [point]를 주면 직전 좌표와의 실제 이동 방향을 함께 잰다. 그 값은 수신기가
+  /// 말하는 방향을 거르는 자이자, 걸렸을 때 **대신 쓰는 값**이다. 잴 자격이
+  /// 없으면(움직임이 짧다·간격이 길다·직전 좌표가 없다) 아무것도 거부하지 않는다 —
+  /// **틀렸다는 증거가 있을 때만** 버린다.
   double? track({
     required double headingDeg,
     required double headingAccuracyDeg,
@@ -115,37 +116,37 @@ class OutdoorHeadingTracker {
     required DateTime at,
     ll.LatLng? point,
   }) {
-    var fresh = usableGpsHeadingDeg(
+    final reported = usableGpsHeadingDeg(
       headingDeg: headingDeg,
       headingAccuracyDeg: headingAccuracyDeg,
       speedMps: speedMps,
     );
-    var contradicted = false;
-    if (fresh != null && point != null) {
-      final measured = _measuredBearingDeg(point, at);
-      contradicted =
-          measured != null &&
-          outdoorHeadingGapDeg(fresh, measured) >
-              outdoorHeadingCrossCheckMaxGapDeg;
-      if (contradicted) fresh = null;
-    }
+    final measured = point == null ? null : _measuredBearingDeg(point, at);
     if (point != null) {
       _lastPoint = point;
       _lastPointAt = at;
     }
+    // **점이 실제로 간 쪽과 삼각형이 가리키는 쪽이 어긋나면 안 된다.** 사용자가
+    // 보는 것은 그 둘의 관계뿐이라, 수신기가 뭐라고 하든 화면에서는 그것이 곧
+    // 오류로 읽힌다. 그래서 사다리가 셋이다.
+    //   1. 수신기 값이 우리 관측과 맞는다 — 가장 촘촘하고 정확하다.
+    //   2. 어긋나거나 수신기가 값을 못 준다 — **우리가 잰 쪽**을 쓴다. 두
+    //      좌표는 도약 거르기를 통과한 것이고, 그 사이를 마커도 실제로 지나간다.
+    //   3. 잴 것도 없다(서 있다·좌표 간격이 길다) — 마지막으로 믿은 값을 잠깐
+    //      들고 있다가([outdoorHeadingMemory]) 잊는다.
+    final fresh = reported != null &&
+            (measured == null ||
+                outdoorHeadingGapDeg(reported, measured) <=
+                    outdoorHeadingCrossCheckMaxGapDeg)
+        ? reported
+        : measured;
     if (fresh != null) {
       _deg = fresh;
       _at = at;
       return fresh;
     }
-    // **대조에 걸린 것과 값이 안 온 것은 다르다.** 값이 안 오는 것(서 있다)은
-    // 방금 알던 방향이 여전히 맞다는 뜻이라 들고 있어도 되지만, 대조에 걸렸다는
-    // 것은 이 수신기가 지금 방향을 **틀리게** 말하고 있다는 증거다. 들고 있던
-    // 값도 같은 수신기가 같은 상태에서 준 것이라 함께 버린다 — 안 버리면 문을
-    // 나선 첫 좌표의 틀린 각이 [outdoorHeadingMemory]만큼 화면에 남는다.
     final rememberedAt = _at;
-    if (contradicted ||
-        rememberedAt == null ||
+    if (rememberedAt == null ||
         at.difference(rememberedAt).abs() > outdoorHeadingMemory) {
       _deg = null;
       _at = null;

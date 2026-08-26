@@ -52,6 +52,8 @@ extension OutdoorMapGps on OutdoorMapBodyState {
     // 그려지거나("GPS 기반 위치가 보이면 안 된다"), 다시 야외로 나왔을 때 옛
     // 좌표가 잠깐 현재 위치인 것처럼 보인다.
     _pendingCenterOnPosition = false;
+    _positionDropTimer?.cancel();
+    _positionDropTimer = null;
     if (!mounted) return;
     setState(() => _position = null);
     // 구독이 끊긴 동안 사용자는 어디로든 갈 수 있다. 옛 기준점을 들고 있으면
@@ -64,16 +66,33 @@ extension OutdoorMapGps on OutdoorMapBodyState {
     _syncCurrentLayer();
   }
 
+  /// 위치 스트림이 **에러로** 닫혔다.
+  ///
+  /// **마커를 그 자리에서 지우지 않는다.** 에러는 "스트림이 끊겼다"이지 "이
+  /// 사람이 사라졌다"가 아니다. 재구독은 [streamRetryMinDelay](2초) 뒤에 돌고
+  /// 일회성 조회는 그동안에도 1초마다 나가므로 대개 몇 초 안에 좌표가 다시
+  /// 온다 — 그 사이 지웠다 그리면 사용자에게는 **깜빡임**으로만 보인다.
+  ///
+  /// 그래도 영영 안 오는 경우(권한 회수·위치 서비스 종료)에는 옛 자리를 계속
+  /// 그리면 안 된다. 그건 시간으로 끊는다([_positionDropTimer]).
+  ///
+  /// **방향은 지금 버린다.** 자리는 "몇 초 전에는 여기였다"로 여전히 쓸모가
+  /// 있지만, 진행 방향은 끊긴 순간부터 아무 근거가 없다.
   void _handlePositionError() {
     if (!mounted) return;
-    setState(() => _position = null);
-    // 구독이 끊긴 동안 사용자는 어디로든 갈 수 있다. 옛 기준점을 들고 있으면
-    // 돌아왔을 때 옳은 좌표를 거른다.
     _gpsJumpFilter = const GpsJumpFilterState();
     _outdoorHeading.reset();
     _lastOutdoorCourseDeg = null;
     _lastOutdoorCourseAt = null;
-    _syncCurrentLayer();
+    if (_position == null) return;
+    _positionDropTimer?.cancel();
+    _positionDropTimer = Timer(streamSilenceTimeout, () {
+      _positionDropTimer = null;
+      if (!mounted || _position == null) return;
+      setState(() => _position = null);
+      unawaited(_syncCurrentLayer());
+    });
+    unawaited(_syncCurrentLayer());
   }
 
   void _handlePosition(Position position, {bool fromStream = false}) {
@@ -137,6 +156,9 @@ extension OutdoorMapGps on OutdoorMapBodyState {
         _lastOutdoorCourseAt = DateTime.now();
       }
     }
+    // 좌표가 왔으니 스트림 에러로 예약해 둔 "마지막 자리 버리기"는 접는다.
+    _positionDropTimer?.cancel();
+    _positionDropTimer = null;
     // 실내에서도 좌표는 **들고 있는다.** 진입/이탈 판정의 유일한 입력이고,
     // 화면에 그릴지는 [_outdoorGpsVisible]이 따로 가른다([_syncCurrentLayer]).
     setState(() => _position = position);

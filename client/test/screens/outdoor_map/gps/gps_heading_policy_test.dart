@@ -123,6 +123,9 @@ void main() {
   /// 건물을 나선 직후를 지킨다. 수신기가 아직 위성을 다시 못 잡은 동안 course는
   /// "모른다"가 아니라 **틀린 값이 자신 있게** 온다 — 그 값과 우리가 잰 이동
   /// 방향을 맞춰 봐야 가려낼 수 있다.
+  ///
+  /// 사용자가 보는 것은 **점이 간 쪽과 삼각형이 가리키는 쪽의 관계**뿐이라,
+  /// 그 둘이 어긋나면 수신기가 뭐라고 하든 화면에서는 오류로 읽힌다.
   group('OutdoorHeadingTracker — 이동 방향과 대조', () {
     /// [northM]만큼 북쪽으로 옮긴 좌표. 위도 1도 ≈ 111,320m.
     ll.LatLng north(ll.LatLng from, double northM) =>
@@ -130,7 +133,7 @@ void main() {
 
     final door = ll.LatLng(37.5259, 126.9285);
 
-    test('실제로 북쪽으로 걸었는데 course가 남쪽이면 버린다', () {
+    test('실제로 북쪽으로 걸었는데 course가 남쪽이면 걸어온 쪽을 쓴다', () {
       final tracker = OutdoorHeadingTracker();
       tracker.track(
         headingDeg: 180,
@@ -146,7 +149,34 @@ void main() {
         at: t0.add(const Duration(seconds: 6)),
         point: north(door, 8),
       );
-      expect(drawn, isNull, reason: '반사 신호가 만든 course는 걸어온 방향과 등을 진다');
+      expect(
+        drawn,
+        closeTo(0, 0.5),
+        reason: '반사 신호가 만든 course는 등을 진다 — 점이 실제로 간 쪽을 그린다',
+      );
+    });
+
+    test('수신기가 방향을 아예 못 줘도 걸어온 쪽으로 삼각형을 그린다', () {
+      final tracker = OutdoorHeadingTracker();
+      tracker.track(
+        headingDeg: -1,
+        headingAccuracyDeg: -1,
+        speedMps: 0,
+        at: t0,
+        point: door,
+      );
+      final drawn = tracker.track(
+        headingDeg: -1,
+        headingAccuracyDeg: -1,
+        speedMps: 0,
+        at: t0.add(const Duration(seconds: 6)),
+        point: north(door, 8),
+      );
+      expect(
+        drawn,
+        closeTo(0, 0.5),
+        reason: '기기가 못 주는 값이지 우리가 모르는 방향이 아니다',
+      );
     });
 
     test('걸어온 방향과 맞으면 그대로 쓴다', () {

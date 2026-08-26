@@ -106,6 +106,7 @@ import '../../map/icon/place_pin.dart';
 import 'widgets/map_overlay_tap_guard.dart';
 import 'entry/anchor_corridor_axis.dart';
 import 'entry/floor_outline.dart';
+import 'gps/gps_freshness_policy.dart';
 import 'gps/gps_heading_policy.dart';
 import 'gps/gps_jump_filter.dart';
 import 'entry/heading_debug.dart';
@@ -854,6 +855,33 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   /// 잔상 ↔ GPS 폴백)은 걸어서 간 이동이 아니므로 보간하지 않고 옮긴다.
   _MarkerGlideKind _markerGlideKind = _MarkerGlideKind.none;
 
+  /// 야외 GPS 마커의 보간기·쓰기 큐. **실내 마커와 같은 장치를 쓴다.**
+  ///
+  /// 예전에는 이쪽만 좌표가 올 때마다 소스를 곧장 덮어썼다. 그래서 셋이 함께
+  /// 어긋났다.
+  ///   - 부르는 자리가 여섯인데 전부 fire-and-forget이라, 오래된 쓰기가 최신
+  ///     쓰기 뒤에 완료되면 화면에 **빈 소스**가 남았다(마커가 깜빡 사라짐).
+  ///   - 좌표가 초당 한 번 1.4m씩 뛰어 와, 그 도약이 그대로 보였다.
+  ///   - 방향도 좌표마다 통째로 갈려서 삼각형이 각을 튀며 돌았다.
+  ///
+  /// 같은 값이면 다시 쓰지 않고([_lastWrittenGpsMarker]) 한 줄 큐로 순서를
+  /// 지키는 것까지 실내 마커와 같다.
+  final LocationMarkerGlide _gpsGlide = LocationMarkerGlide();
+  int _gpsMarkerRevision = 0;
+  Future<void> _gpsMarkerWriteQueue = Future<void>.value();
+  ({ll.LatLng? point, double? headingDeg})? _lastWrittenGpsMarker;
+  Duration _gpsSourceWriteAt = Duration.zero;
+
+  /// 스트림이 에러로 닫힌 뒤 마지막 좌표를 **버리기까지** 기다리는 타이머.
+  ///
+  /// 에러가 곧 "위치를 모른다"는 아니다. 재구독은 2초 뒤에 돌고 일회성 조회는
+  /// 그동안에도 1초마다 나가므로, 대개 몇 초 안에 좌표가 다시 온다. 그 사이
+  /// 마커를 지웠다 그리면 사용자에게는 **깜빡임**으로만 보인다. 그래도 영영
+  /// 안 오는 경우(권한 회수·위치 서비스 종료)에는 옛 자리를 계속 그리면 안 되니
+  /// 시간으로 끊는다([streamSilenceTimeout]과 같은 길이 — 스트림이 죽었다고
+  /// 보는 기준을 둘이 나눠 쓸 이유가 없다).
+  Timer? _positionDropTimer;
+
   /// 회색/파란 경로 source도 센서 틱·GPS 틱·재탐색 확정에서 동시에 갱신된다.
   /// native MapLibre 쓰기가 호출 순서와 다른 순서로 완료될 수 있으므로 한 줄의
   /// queue에서 순서대로 반영한다. 이 큐가 없으면 최신 진행률로 만든 회색선이
@@ -1396,6 +1424,7 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
     _escalatorGlideTimer?.cancel();
     _elevatorGlideTimer?.cancel();
     _markerGlideTicker?.dispose();
+    _positionDropTimer?.cancel();
     _indoorRouteRevealTicker?.dispose();
     _arrivalRouteClearTimer?.cancel();
     _floorSwapVeilTimer?.cancel();

@@ -115,7 +115,9 @@ extension OutdoorMapMap on OutdoorMapBodyState {
     setState(() => _styleReady = true);
     if (!_styleReadySignal.isCompleted) _styleReadySignal.complete();
     _syncBuildingLayer();
-    _syncCurrentLayer();
+    // 소스가 방금 새로 만들어졌다. 같은 값이라도 한 번은 다시 써야 하고, 그
+    // 자리에서 보간을 이어 붙일 이유도 없다.
+    _syncCurrentLayer(snap: true);
     _syncDestinationLayer();
     _syncRouteLayer();
     _syncIndoorDestinationLayer();
@@ -422,24 +424,77 @@ extension OutdoorMapMap on OutdoorMapBodyState {
   /// 경로로 들어와도 실내 마커와 GPS 마커가 함께 뜨지 않게 한다.
   ///
   /// 방향은 [_outdoorHeadingDeg]가 정한다. null이면 삼각형 없이 도트만 그려진다.
-  Future<void> _syncCurrentLayer() async {
+  /// 야외 GPS 마커의 **목표**를 잡는다. 지도에 쓰는 일은 보간 틱이 한다
+  /// ([_writeGpsMarkerSource]) — 좌표가 초당 한 번 1.4m씩 뛰어 오므로, 그대로
+  /// 그리면 도약이 그대로 보이고 삼각형도 각을 튀며 돈다.
+  ///
+  /// [snap]은 걸어서 간 이동이 아닌 경우다(실내 진입·이탈, 스타일 재로드).
+  /// 호출부가 모르는 도약은 [locationMarkerGlideSnapM]가 뒤에서 한 번 더 잡는다.
+  Future<void> _syncCurrentLayer({bool snap = false}) async {
     // 실내 마커 쪽이 이 값을 보고 "GPS 마커도 다시 써야 하는가"를 가린다
     // ([_syncPdrCurrentLayer]). 컨트롤러가 없어 되돌아가는 길에서도 맞춰 둬야,
     // 지도가 붙는 순간의 첫 쓰기가 빠지지 않는다.
     _outdoorGpsMarkerShown = _outdoorGpsVisible;
+    // **지도가 없어도 목표는 잡는다.** 보간기가 들고 있는 것은 화면 상태이지
+    // 지도 상태가 아니다 — 여기서 돌아서면 스타일이 뜨기 전 좌표가 통째로
+    // 사라지고, 테스트도 마커의 자리를 볼 창이 없어진다.
+    final pos = _outdoorGpsVisible ? _position : null;
+    if (snap) _lastWrittenGpsMarker = null;
+    _gpsGlide.aimAt(
+      pos == null ? null : ll.LatLng(pos.latitude, pos.longitude),
+      headingDeg: pos == null ? null : _outdoorHeadingDeg,
+      snap: snap,
+    );
     final controller = _mapController;
     if (controller == null || !_styleReady) {
       _pendingCenterOnPosition = _outdoorGpsVisible && _position != null;
+      // 지도가 붙는 순간의 첫 쓰기는 같은 값이라도 나가야 한다 — 소스가 새로
+      // 만들어졌을 수 있다.
+      _lastWrittenGpsMarker = null;
       return;
     }
-    final pos = _outdoorGpsVisible ? _position : null;
-    await controller.setGeoJsonSource(
-      kOutdoorCurrentSourceId,
-      locationMarkerData(
-        pos == null ? null : ll.LatLng(pos.latitude, pos.longitude),
-        headingDeg: pos == null ? null : _outdoorHeadingDeg,
-      ),
+    _syncMarkerGlideTicker();
+    // 마커가 사라지는 쪽은 **틱을 기다리지 않는다.** 보간기가 목표를 비우는
+    // 순간 표시값도 함께 비워지고, 그 뒤로는 그릴 것이 없어 틱이 서기 때문이다.
+    return _writeGpsMarkerSource(controller);
+  }
+
+  /// 보간기가 지금 그리라는 자리를 GPS 마커 소스에 쓴다.
+  ///
+  /// 실내 마커([_writePdrMarkerSource])와 **같은 규칙**이다 — 같은 값이면 안 쓰고,
+  /// 한 줄 큐로 순서를 지키고, 큐에서 기다리는 사이 더 최신 그림이 오면 버린다.
+  /// 예전에는 이쪽만 여섯 곳에서 fire-and-forget으로 소스를 곧장 덮어써서, 오래된
+  /// 쓰기가 최신 쓰기 뒤에 완료되면 빈 소스가 화면에 남았다(마커가 깜빡 사라짐).
+  Future<void> _writeGpsMarkerSource(MapLibreMapController controller) {
+    final drawn = (point: _gpsGlide.point, headingDeg: _gpsGlide.headingDeg);
+    if (drawn == _lastWrittenGpsMarker) return Future<void>.value();
+    _lastWrittenGpsMarker = drawn;
+
+    final revision = ++_gpsMarkerRevision;
+    final data = locationMarkerData(
+      drawn.point,
+      headingDeg: drawn.headingDeg,
     );
+    final previous = _gpsMarkerWriteQueue;
+    _gpsMarkerWriteQueue = () async {
+      try {
+        await previous;
+      } catch (error, stackTrace) {
+        debugPrint('GPS marker update failed: $error\n$stackTrace');
+      }
+      if (revision != _gpsMarkerRevision ||
+          !mounted ||
+          controller != _mapController ||
+          !_styleReady) {
+        return;
+      }
+      try {
+        await controller.setGeoJsonSource(kOutdoorCurrentSourceId, data);
+      } catch (error, stackTrace) {
+        debugPrint('GPS marker update failed: $error\n$stackTrace');
+      }
+    }();
+    return _gpsMarkerWriteQueue;
   }
 
   /// 출발·도착 행 편집 중 매장이 아닌 곳을 눌렀을 때. 넘겼으면 true.
