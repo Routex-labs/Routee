@@ -16,8 +16,13 @@ extension OutdoorMapGps on OutdoorMapBodyState {
 
   /// GPS 기반 **표시**를 써도 되는 상태인지 — 위치 마커·'신호 약함' 배지·첫 위치
   /// 카메라가 여기 걸린다. [_gpsTrackingWanted](구독 여부)와 반드시 구분한다 —
-  /// 겸하면 실내 도면 위에 건물 밖 GPS 점이 찍힌다.
-  bool get _outdoorGpsVisible => widget.active && !_indoorEntered;
+  /// 겸하면 실내 위치가 있는 사람의 도면 위에 건물 밖 GPS 점이 함께 찍힌다.
+  ///
+  /// **도면을 편 것만으로는 꺼지지 않는다.** 밖에 서서 매장을 찾아보는 사람의
+  /// 위치를 그리는 것은 여전히 GPS다([_indoorViewedFromOutside]) — 그때 이 마커를
+  /// 끄면 화면에 자기 자리가 하나도 없거나, 실내 마커가 건물 밖 좌표를 도면 위에
+  /// 흐리게 찍어 "안에 있다"고 거짓말한다.
+  bool get _outdoorGpsVisible => widget.active && !_indoorLocationVisible;
 
   /// 진입 직후 실내 위치가 아직 없을 때 **자리만 지키는** GPS 좌표. 없으면 null.
   ///

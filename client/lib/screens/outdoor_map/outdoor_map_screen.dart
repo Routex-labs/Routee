@@ -116,6 +116,7 @@ import 'entry/indoor_entry_gps.dart';
 import 'entry/initial_camera.dart';
 import 'camera/building_orientation.dart';
 import 'entry/indoor_entry_proximity.dart';
+import 'entry/indoor_entry_source.dart';
 import 'entry/indoor_entry_zoom.dart';
 import 'entry/manual_transition_gate.dart';
 import 'outdoor_map_tuning.dart';
@@ -640,6 +641,14 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   /// 지금 GPS 마커에 그릴 방향(진북 기준). null이면 삼각형 없이 도트만 그린다 —
   /// 서 있거나 기기가 방향을 못 주는 동안이다.
   double? get _outdoorHeadingDeg => _outdoorHeading.headingDeg;
+
+  /// 이번에 도면을 편 것이 **화면 조작**이었는지(확대·건물 시트 탭).
+  ///
+  /// 참이면 사용자는 아직 건물 밖에 서 있는 것으로 본다 — 위치의 주인은 GPS다
+  /// ([_indoorViewedFromOutside]). 어느 조작이 이 값을 세우는지는
+  /// [IndoorEntrySource.isViewingOnly]가 정하고, 세우는 자리는
+  /// [_setIndoorEntered] 하나다.
+  bool _indoorOpenedByViewing = false;
 
   /// GPS 마커를 마지막으로 **그리기로 한** 상태.
   ///
