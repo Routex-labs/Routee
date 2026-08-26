@@ -532,7 +532,8 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
   /// 들어서자마자 둘이 어긋난다 — 문 선택에는 15 m 히스테리시스가 있어
   /// ([kEntranceSwitchMarginMeters]) 두 값이 실제로 갈리는 구간이 생긴다.
   ///
-  /// 향하던 문이 없으면(안내 없이 탭으로 들어온 경우) GPS 최근접이다.
+  /// 향하던 문이 없으면(문 재선정 전이거나 여정 그래프를 못 받은 경우) GPS
+  /// 최근접으로 물러선다.
   BuildingEntrance? _entranceBeingEntered(Position position) =>
       _journeyEntrance ??
       nearestEntrance(
@@ -1117,48 +1118,11 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
           ? IndoorEntrySource.sheetTap
           : IndoorEntrySource.cameraZoom,
     );
-    // 도면만 펴는 진입이지만, GPS가 문 앞이라고 말하면 조용히 앵커까지 찍는다
-    // ([_maybeAnchorOnQuietIndoorEntry]) — 안 그러면 문 앞에서 이 길로 들어온
-    // 사람은 "OO(으)로 진입" 버튼을 다시 찾아 눌러야, 그마저 모르면 위치 마커가
-    // 진입 공백을 메우던 흐린 GPS 점([_indoorGapGpsPoint])에 영영 멈춰 있는
-    // 것처럼 보인다 — 그 공백을 닫아 줄 추적이 애초에 시작되지 않았기 때문이다.
-    unawaited(_maybeAnchorOnQuietIndoorEntry());
-  }
-
-  /// [_triggerIndoorEntry]가 도면만 편 뒤, GPS가 문 앞이라고 말하면 그 문에
-  /// 앵커를 찍고 걸음 추적을 시작한다.
-  ///
-  /// **문턱은 "OO(으)로 진입" 버튼과 같다**([indoorEntryGate]). 두 진입 경로가
-  /// "가깝다"를 다르게 재면, 어느 쪽으로 들어왔는지에 따라 같은 자리에서 한쪽만
-  /// 앵커가 찍히는 것을 사용자는 구분할 이유가 없다.
-  ///
-  /// 멀거나(게이트가 꺼져 있음) GPS·출입구 정보가 아직 없으면 아무것도 하지
-  /// 않는다 — 도면만 보여주는 원래 동작 그대로다. 이미 다른 경로로 앵커가
-  /// 찍혀 있으면([canRenderPosition]) 덮지 않는다 — 시트를 다시 열었다고 걷던
-  /// 위치를 문 앞으로 되돌릴 이유는 없다.
-  ///
-  /// **보고 있는 층을 바꾸지 않는다.** 한때 지상 출입구 층으로 끌어와 앵커를
-  /// 찍었는데, 그 한 줄이 실기기에서 가장 크게 어긋난 자리였다 — 근거는
-  /// `docs/client/indoor-leg-in-outdoor-journey.md`의 「조용한 앵커는 층을 바꾸지
-  /// 않는다」.
-  Future<void> _maybeAnchorOnQuietIndoorEntry() async {
-    if (!mounted || !_indoorEntered) return;
-    if (indoorNavigationDriver.currentCalibration.canRenderPosition) return;
-    final position = _position;
-    if (position == null || !indoorEntryGate.enabled) return;
-    final entrance = _entranceBeingEntered(position);
-    final floor = _groundEntranceFloor;
-    if (entrance == null || floor == null) return;
-    // 이 갈래의 전제는 "방금 저 문으로 들어왔다"이고, 그 사람은 **그 문이 있는
-    // 층을 보고 있다.** 다른 층을 보고 있다면 전제가 이미 깨진 것이라 조용히
-    // 물러난다 — 위치는 사람이 잡는다(하단 바 두 버튼).
-    if (_activeFloor != floor) {
-      debugPrint(
-        '[anchor] 조용한 앵커 건너뜀 — 보는 층 $_activeFloor · 문 층 $floor',
-      );
-      return;
-    }
-    await _startIndoorTracking(entrance: entrance, position: position);
+    // **여기서 앵커를 찍지 않는다.** 이 진입은 도면을 편 것이지 건물에 들어온
+    // 것이 아니다([IndoorEntrySource.isViewingOnly]) — 확대와 시트 탭은 밖에 선
+    // 사람도 하는 조작이라, 그 순간 위치를 찍으면 건물 밖 GPS 좌표 하나가 도면
+    // 위 자리로 굳는다. 들어왔다고 말하는 것은 "OO(으)로 진입" 하나뿐이다
+    // (`docs/client/indoor-entry-rules.md` 6절).
   }
 
   /// 실내 모드에서 건물 바깥을 탭했을 때의 이탈.
