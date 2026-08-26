@@ -1,14 +1,18 @@
-/// 지금 층의 **편의시설을 종류로 골라 지도에 띄우고, 그중 하나를 도착지로
-/// 삼는** 시트.
+/// **가까운 편의시설을 종류로 골라 지도에 띄우고, 그중 하나를 도착지로 삼는** 시트.
 ///
 /// 종류 줄은 필터이고 아래 목록은 그 결과다. 고른 종류가 도면 위에 파랗게 칠해져
 /// (`facility_highlight.dart`) 어디인지 보이고, 줄을 누르면 그리로 경로가 그려진다.
+///
+/// 목록은 보고 있는 층이 아니라 **선 자리 기준**이다 — 근거는
+/// `facility_order.dart`.
 library;
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:routex_design_system/routex_design_system.dart';
 
+import '../../../../domain/route/dijkstra.dart';
+import '../../../../domain/store/facility_order.dart';
+import '../../../../domain/store/reach_label.dart';
 import '../../../../map/style/floor_facility_style.dart';
 import '../../../../models/place/store_index_entry.dart';
 import '../../../../widgets/map_pass_through_sheet_route.dart';
@@ -39,15 +43,16 @@ const String kFacilityDefaultFilter = '화장실';
 
 /// 시설 필터 시트를 띄운다. 줄을 고르면 그 시설로, 그냥 닫으면 null로 끝난다.
 ///
-/// [floorLabel]을 값이 아니라 listenable로 받는다 — 시트가 떠 있는 동안에도 층
-/// 선택기는 그대로 눌리므로, 값으로 받으면 제목과 목록이 옛 층에 머문다.
+/// [reachByNodeId]는 **사용자가 선 자리**에서 돌린 `reachableFrom` 결과다. 목록을
+/// 이 값으로 세우므로, 경로를 그릴 때와 같은 시작 노드에서 나온 것이어야 한다.
+/// 모르면(PDR 미시작) null을 넘긴다 — 그때는 순서를 건드리지 않고 거리도 안 적는다.
 ///
 /// **barrier가 없다**([MapPassThroughSheetRoute]). 고른 시설을 지도에서 확인하는
 /// 것이 이 시트의 목적이라, 지도가 그동안 잠기면 안 된다.
 Future<StoreIndexEntry?> showFacilityFilterSheet(
   BuildContext context, {
-  required ValueListenable<String?> floorLabel,
   required List<StoreIndexEntry> facilities,
+  required Map<String, NodeReach>? reachByNodeId,
   required String? selected,
   required ValueChanged<String?> onSelected,
 }) {
@@ -66,8 +71,8 @@ Future<StoreIndexEntry?> showFacilityFilterSheet(
         child: RoutexBottomSheet(
           contentInset: RoutexBottomSheetContentInset.content,
           child: _FacilityFilterBody(
-            floorLabel: floorLabel,
             facilities: facilities,
+            reachByNodeId: reachByNodeId,
             selected: selected,
             onSelected: onSelected,
           ),
@@ -79,17 +84,18 @@ Future<StoreIndexEntry?> showFacilityFilterSheet(
 
 class _FacilityFilterBody extends StatefulWidget {
   const _FacilityFilterBody({
-    required this.floorLabel,
     required this.facilities,
+    required this.reachByNodeId,
     required this.selected,
     required this.onSelected,
   });
 
-  final ValueListenable<String?> floorLabel;
-
-  /// 건물 전체의 시설 색인. 층으로 거르는 일은 이 위젯이 한다 — 층은 시트가 떠
-  /// 있는 동안에도 바뀐다.
+  /// 건물 전체의 시설 색인. **층으로 거르지 않는다** — 가장 가까운 화장실이 아래
+  /// 층에 있으면 그것이 답이다.
   final List<StoreIndexEntry> facilities;
+
+  /// 선 자리에서의 보행 거리. null이면 거리를 모른다.
+  final Map<String, NodeReach>? reachByNodeId;
 
   final String? selected;
   final ValueChanged<String?> onSelected;
@@ -122,98 +128,99 @@ class _FacilityFilterBodyState extends State<_FacilityFilterBody> {
     widget.onSelected(next);
   }
 
-  /// 지금 층의 고른 종류만. 이름 → id 순으로 고정한다 — 응답 순서에 기대면 같은
-  /// 층을 다시 열었을 때 줄 순서가 바뀐다.
-  List<StoreIndexEntry> _rows(String? floor) {
+  /// 고른 종류를 **가까운 순**으로. 층으로 거르지 않는다.
+  ///
+  /// 거리를 알기 전에 먼저 이름 → id로 세워 둔다. 응답 순서에 기대면 같은 종류를
+  /// 다시 열었을 때 줄 순서가 바뀌고, **거리를 모를 때 화면에 남는 순서가 바로
+  /// 이것**이다([facilitiesByWalkingDistance]는 그 경우 입력 순서를 보존한다).
+  List<FacilityReach> _rows() {
     final subcategory = _selected;
     if (subcategory == null) return const [];
-    return widget.facilities
-        .where(
-          (entry) =>
-              entry.subcategory == subcategory &&
-              (floor == null || entry.floorName == floor),
-        )
-        .toList()
-      ..sort((a, b) {
-        final byName = a.name.compareTo(b.name);
-        return byName != 0 ? byName : a.id.compareTo(b.id);
-      });
+    final picked =
+        widget.facilities
+            .where((entry) => entry.subcategory == subcategory)
+            .toList()
+          ..sort((a, b) {
+            final byName = a.name.compareTo(b.name);
+            return byName != 0 ? byName : a.id.compareTo(b.id);
+          });
+    return facilitiesByWalkingDistance(
+      facilities: picked,
+      reachByNodeId: widget.reachByNodeId,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.routexColors;
-    return ValueListenableBuilder<String?>(
-      valueListenable: widget.floorLabel,
-      builder: (context, floor, _) => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const RoutexSheetHandle(),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-              RoutexSpacing.contentGap,
-              0,
-              RoutexSpacing.inlineGap,
-              0,
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: RoutexSectionHeader(
-                    // 층을 모르면 층 없이 적는다. `null층 편의시설`을 띄우느니
-                    // 한 단어를 잃는 편이 낫다.
-                    title: floor == null ? '편의시설' : '$floor 편의시설',
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const RoutexSheetHandle(),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            RoutexSpacing.contentGap,
+            0,
+            RoutexSpacing.inlineGap,
+            0,
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: RoutexSectionHeader(
+                  // 층을 적지 않는다 — 목록이 건물 전체에서 가까운 순으로
+                  // 뽑히므로 한 층을 제목에 걸면 거짓말이 된다.
+                  title: '가까운 편의시설',
+                ),
+              ),
+              IconButton(
+                key: const Key('facility-filter-close'),
+                icon: const Icon(RoutexIcons.close),
+                color: colors.contentSecondary,
+                tooltip: '닫기',
+                onPressed: () => Navigator.of(context).maybePop(),
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            RoutexSpacing.contentGap,
+            RoutexSpacing.inlineGap,
+            RoutexSpacing.contentGap,
+            RoutexSpacing.inlineGap,
+          ),
+          child: Row(
+            children: [
+              for (final filter in kFacilityFilters)
+                Padding(
+                  padding: const EdgeInsets.only(
+                    right: RoutexSpacing.contentGap,
+                  ),
+                  child: _FacilityPick(
+                    value: filter.value,
+                    icon: filter.icon,
+                    selected: _selected == filter.value,
+                    onPressed: () => _pick(filter.value),
                   ),
                 ),
-                IconButton(
-                  key: const Key('facility-filter-close'),
-                  icon: const Icon(RoutexIcons.close),
-                  color: colors.contentSecondary,
-                  tooltip: '닫기',
-                  onPressed: () => Navigator.of(context).maybePop(),
-                ),
-              ],
-            ),
+            ],
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-              RoutexSpacing.contentGap,
-              RoutexSpacing.inlineGap,
-              RoutexSpacing.contentGap,
-              RoutexSpacing.inlineGap,
-            ),
-            child: Row(
-              children: [
-                for (final filter in kFacilityFilters)
-                  Padding(
-                    padding: const EdgeInsets.only(
-                      right: RoutexSpacing.contentGap,
-                    ),
-                    child: _FacilityPick(
-                      value: filter.value,
-                      icon: filter.icon,
-                      selected: _selected == filter.value,
-                      onPressed: () => _pick(filter.value),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          const RoutexDivider(role: RoutexDividerRole.section),
-          Expanded(child: _list(context, _rows(floor))),
-        ],
-      ),
+        ),
+        const RoutexDivider(role: RoutexDividerRole.section),
+        Expanded(child: _list(context, _rows())),
+      ],
     );
   }
 
-  Widget _list(BuildContext context, List<StoreIndexEntry> rows) {
+  Widget _list(BuildContext context, List<FacilityReach> rows) {
     if (_selected == null) {
-      return _note(context, '종류를 고르면 이 층의 시설을 보여드려요');
+      return _note(context, '종류를 고르면 가까운 순으로 보여드려요');
     }
     if (rows.isEmpty) {
-      // 목록을 통째로 비우면 "이 층에 없음"과 "목록이 고장남"이 구분되지 않는다
+      // 목록을 통째로 비우면 "없음"과 "목록이 고장남"이 구분되지 않는다
       // (`category_stores_sheet.dart`와 같은 규칙).
-      return _note(context, '이 층에는 없습니다.');
+      return _note(context, '이 건물에는 없습니다.');
     }
     return ListView.separated(
       padding: EdgeInsets.zero,
@@ -221,11 +228,16 @@ class _FacilityFilterBodyState extends State<_FacilityFilterBody> {
       separatorBuilder: (_, _) =>
           const RoutexDivider(role: RoutexDividerRole.row),
       itemBuilder: (context, index) {
-        final entry = rows[index];
+        final entry = rows[index].facility;
+        final reach = rows[index].reach;
         return RoutexListCell(
           key: ValueKey('facility-row-${entry.id}'),
           title: entry.name,
-          subtitle: entry.floorName,
+          // 층은 늘 적는다 — 목록이 층을 넘나들므로 어느 층인지가 곧 이 줄의
+          // 정체다. 거리는 **알 때만** 붙인다(모르는 것을 0으로 적지 않는다).
+          subtitle: reach == null
+              ? entry.floorName
+              : '${entry.floorName} · ${reachLabel(reach)}',
           leadingIcon: _iconFor(entry.subcategory),
           // 이 줄은 **누르면 곧장 경로가 된다.** 다른 조작이 없으므로 끝 버튼(⋯)이
           // 아니라 그 동작의 글리프를 둔다([RoutexListCell.trailingActionIcon]의 규칙).
