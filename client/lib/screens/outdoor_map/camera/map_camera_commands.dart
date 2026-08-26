@@ -221,6 +221,7 @@ Future<void> animateCameraToPoint(
   MapLibreMapController controller,
   ll.LatLng point, {
   double? zoom,
+  Duration? duration,
 }) async {
   final camera = controller.cameraPosition;
   await controller.animateCamera(
@@ -232,6 +233,7 @@ Future<void> animateCameraToPoint(
         tilt: 0,
       ),
     ),
+    duration: duration,
   );
 }
 
@@ -280,20 +282,45 @@ Future<void> resetCameraToNorthUp(
 /// 배율은 [minZoom]까지만 당기고 그보다 확대돼 있으면 그대로 둔다 — 무언가를
 /// 들여다보려 당겨 둔 배율을 버튼 한 번에 되돌리면, 위치로 돌아가는 대신 방금
 /// 보던 것을 잃는다.
+///
+/// [topChromePx]·[bottomChromePx]는 [animateCameraToFitBox]와 같은 보정을
+/// 준다 — 안 주면(기본값 0) 화면 **기하학적** 한가운데에 놓이는데, 아래
+/// chrome(탭 바·안내 카드)이 위쪽 chrome(검색창)보다 대개 더 높아서 실제로
+/// 보이는 자리는 중앙보다 위로 치우친다(실기기 확인).
 Future<void> recenterKeepingBearing(
   MapLibreMapController controller,
   ll.LatLng point, {
   required double minZoom,
   required Duration duration,
   bool keepBearing = true,
+  double topChromePx = 0,
+  double bottomChromePx = 0,
 }) async {
   final camera = controller.cameraPosition;
+  final zoom = math.max(camera?.zoom ?? minZoom, minZoom);
+  final bearing = keepBearing ? (camera?.bearing ?? 0) : 0.0;
+  // 같은 원리: 목표점을 화면 위쪽으로 그만큼 밀면, 실제 좌표([point])는 그만큼
+  // 아래로 내려와 가려지지 않는 띠의 한가운데에 온다.
+  final shiftPx = (topChromePx - bottomChromePx) / 2;
+  final target = shiftPx == 0
+      ? point
+      : offsetByMeters(
+          point,
+          azimuthDeg: bearing,
+          meters:
+              shiftPx *
+              visibleWidthMeters(
+                zoom: zoom,
+                availablePx: 1,
+                latitude: point.latitude,
+              ),
+        );
   await controller.animateCamera(
     CameraUpdate.newCameraPosition(
       CameraPosition(
-        target: toGlLatLng(point),
-        zoom: math.max(camera?.zoom ?? minZoom, minZoom),
-        bearing: keepBearing ? (camera?.bearing ?? 0) : 0,
+        target: toGlLatLng(target),
+        zoom: zoom,
+        bearing: bearing,
         tilt: keepBearing ? (camera?.tilt ?? 0) : 0,
       ),
     ),

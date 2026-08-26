@@ -203,6 +203,15 @@ extension OutdoorMapGps on OutdoorMapBodyState {
     // 시작 화면은 **모든 갈래에서** 걷힌다. 위치를 잡은 시점이 곧 가릴 이유가
     // 없어진 시점이다.
     _notifyStartupReady();
+    if (_guidancePlanned) return;
+    // 시작 화면이 걷히는 애니메이션과 겹치면 그 위로 시트가 반쯤 가려진 채
+    // 뜬다 — 예전에 이 자동 오픈을 걷어냈던 이유가 그 겹침이었다. 시작 화면과
+    // 같은 전환 길이만큼 물러선 뒤 연다.
+    await Future<void>.delayed(RoutexMotion.transition);
+    if (!mounted || !_indoorEntered) return;
+    // 자동으로 띄우는 것은 **진입 한 번에 한 번뿐이다**. 버튼으로 다시 여는
+    // 쪽은 이 제한을 받지 않는다([_nearbyStoreAsked]).
+    await _askNearbyStoreForAnchor(once: true);
   }
 
   /// 진입 근거가 가리키는 층으로 도면을 옮긴다. 옮길 근거가 없거나 이미 그
@@ -233,9 +242,11 @@ extension OutdoorMapGps on OutdoorMapBodyState {
   /// 어림 위치조차 없으면(층 그래프가 없거나 스냅 실패) 묻지 않는다 — 거리를
   /// 잴 기준이 없어 "가까운 순"이 성립하지 않는다. 그때는 지금까지처럼 하단
   /// 바의 "위치 지정"이 출구다.
-  Future<void> _askNearbyStoreForAnchor() async {
+  Future<void> _askNearbyStoreForAnchor({bool once = false}) async {
+    if (once && _nearbyStoreAsked) return;
     final rows = _nearbyStoreRows();
     if (rows.isEmpty) return;
+    if (once) _nearbyStoreAsked = true;
     final picked = await showNearbyStoreSheet(context, rows: rows);
     if (picked == null || !mounted || !_indoorEntered) return;
     await _anchorAtNearbyStore(picked);
@@ -554,14 +565,20 @@ extension OutdoorMapGps on OutdoorMapBodyState {
   /// 따라가지 못한다. 대신 지금 아무 일도 안 일어나는 이유는 알린다.
   Future<void> startFollowingCurrentLocation({
     double zoom = carGuidanceZoom,
+    Duration? duration,
   }) async {
-    _followingUser = true;
     final position = _position;
     if (position == null) {
+      // 아직 옮길 좌표가 없으니 지금 켜 둬야 신호가 잡히는 순간 놓치지 않는다.
+      _followingUser = true;
       _showSnack('현재 위치를 아직 못 잡았습니다. 신호가 잡히면 그 자리로 지도를 옮깁니다.');
       return;
     }
-    await _moveCameraToUser(position, zoom: zoom);
+    // **애니메이션이 끝난 뒤에 켠다.** 먼저 켜면 도는 동안 들어오는 GPS 틱마다
+    // [_handlePosition]이 배율 없이 또 한 번 옮겨, 두 애니메이션이 겹쳐 화면이
+    // 튄다 — 전체 경로 개요에서 확대해 들어올 때 특히 두드러졌다.
+    await _moveCameraToUser(position, zoom: zoom, duration: duration);
+    _followingUser = true;
   }
 
   /// 따라가기를 멈춘다. 안내가 끝나거나(경로 삭제) 카메라의 주인이 바뀌는
@@ -581,7 +598,10 @@ extension OutdoorMapGps on OutdoorMapBodyState {
   /// **실내·야외 어느 쪽이든 이 버튼 하나다.** 실내는 PDR 위치로, 야외는 마지막
   /// 좌표로 돌아간다 — 사용자에게는 같은 "내 위치로"라, 어느 쪽인지 가려 두 개를
   /// 만들 이유가 없다.
-  Future<void> _recenterOnCurrentPosition() async {
+  Future<void> _recenterOnCurrentPosition({
+    Duration duration = recenterDuration,
+    double minZoom = walkingViewZoom,
+  }) async {
     final controller = _mapController;
     if (controller == null || !_styleReady) return;
     final here = _pdrCurrentWgs84() ?? _positionPoint;
@@ -593,15 +613,38 @@ extension OutdoorMapGps on OutdoorMapBodyState {
     // 내 자리"가 아니라 **"다시 나를 따라와라"**다 — 한 번 데려다 놓고 그대로
     // 두면 다음 걸음부터 또 뒤에 남는다.
     if (_guidanceActive && !_indoorLocationVisible) _followingUser = true;
+    // **걸음 팔로우가 도는 중이면 그쪽과 같은 구도로 간다.**
+    //
+    // 팔로우는 내 위치를 화면 한가운데가 아니라 조금 아래에 둔다 — 진행 방향이
+    // 보여야 하기 때문이다([_followCameraTargetFor]). 여기서 정중앙으로 데려다
+    // 놓으면, 유예가 풀리는 순간 팔로우가 곧바로 자기 구도로 되돌려 버튼 한 번에
+    // 화면이 갔다가 돌아온다(실기기: "위치 갱신을 누르면 왔다갔다"). 두 명령이
+    // 같은 자리를 목표로 하면 되돌릴 것이 없다.
+    final target = _indoorFollowActive
+        ? _followCameraTargetFor(
+            here,
+            controller.cameraPosition?.bearing ?? 0,
+          )
+        : here;
     // 이 애니메이션이 도는 동안은 팔로우를 재운다. 안 재우면 같은 프레임에 두
     // 명령이 겹쳐, 눌러서 돌아가는 도중에 화면이 한 번 튄다.
-    _holdFollowCamera(recenterDuration);
+    _holdFollowCamera(duration);
     await recenterKeepingBearing(
       controller,
-      here,
-      minZoom: walkingViewZoom,
-      duration: recenterDuration,
+      target,
+      minZoom: minZoom,
+      duration: duration,
       keepBearing: _indoorLocationVisible,
+      // 가려지지 않는 띠의 한가운데에 놓는다 — 안 주면 하단 chrome(탭 줄·안내
+      // 카드)이 상단보다 대개 높아서 화면 중앙보다 위로 치우친다.
+      //
+      // **실내에서는 주지 않는다.** 이 호출이 끝나자마자 매 프레임 팔로우
+      // 루프([_indoorFollowActive] → `_driveFollowCamera`)가 곧바로 카메라를
+      // 다시 잡는데, 그 루프는 이 보정을 모른다 — 한 번 밀어 놔도 다음
+      // 프레임에 보정 없는 자리로 도로 끌려가 어긋나 보였다(실기기에서
+      // "헤딩이 튄다"로 보임). 경쟁자가 없는 순수 야외 재정렬에만 준다.
+      topChromePx: _indoorLocationVisible ? 0 : _topChromeBottomPx(),
+      bottomChromePx: _indoorLocationVisible ? 0 : _bottomChromePx(),
     );
   }
 

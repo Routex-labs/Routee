@@ -10,18 +10,26 @@ extension OutdoorMapMap on OutdoorMapBodyState {
   /// 카메라를 [position]으로 옮긴다. [zoom]을 주면 그 값으로 확대하고, 없으면
   /// 지금 배율을 유지한다 — 따라가는 동안 사용자가 맞춘 배율을 빼앗지 않는다.
   /// bearing·tilt는 [animateCameraToPoint]가 항상 정북·평면으로 되돌린다.
-  Future<void> _moveCameraToUser(Position position, {double? zoom}) =>
-      _moveCameraToPoint(
-        ll.LatLng(position.latitude, position.longitude),
-        zoom: zoom,
-      );
+  Future<void> _moveCameraToUser(
+    Position position, {
+    double? zoom,
+    Duration? duration,
+  }) => _moveCameraToPoint(
+    ll.LatLng(position.latitude, position.longitude),
+    zoom: zoom,
+    duration: duration,
+  );
 
   /// [_moveCameraToUser]와 같은 동작을 좌표 하나로 부른다. GPS 좌표가 없는
   /// 이탈 경로(문으로 걸어 나감)가 문 좌표로 화면을 되돌릴 때 쓴다.
-  Future<void> _moveCameraToPoint(ll.LatLng point, {double? zoom}) async {
+  Future<void> _moveCameraToPoint(
+    ll.LatLng point, {
+    double? zoom,
+    Duration? duration,
+  }) async {
     final controller = _mapController;
     if (controller == null || !_styleReady) return;
-    await animateCameraToPoint(controller, point, zoom: zoom);
+    await animateCameraToPoint(controller, point, zoom: zoom, duration: duration);
   }
 
   /// 실내 위치 마커를 화면 정중앙에 놓고, **바라보는 방향이 화면 위쪽**이 되게
@@ -30,6 +38,11 @@ extension OutdoorMapMap on OutdoorMapBodyState {
   /// 위치를 아직 모르면 아무것도 하지 않는다 — 중앙에 놓을 자리가 없다. 방향만
   /// 모르면 지금 방위를 유지한 채 중앙 정렬까지만 한다(모르는 방향으로 지도를
   /// 돌리면 화면 위쪽이 갈 방향과 어긋난다).
+  ///
+  /// **가려지지 않는 띠 중앙 보정을 일부러 안 한다.** 이 호출이 끝나자마자
+  /// 매 프레임 팔로우 루프([_driveFollowCamera])가 곧바로 카메라를 다시 잡는데,
+  /// 그 루프는 그 보정을 모른다 — 한 번 밀어 놔도 다음 프레임에 보정 없는
+  /// 자리로 도로 끌려가 어긋나 보였다(실기기에서 "헤딩이 튄다"로 보임).
   Future<void> _centerOnIndoorMarker({double? zoom}) async {
     final controller = _mapController;
     final here = _pdrCurrentWgs84();

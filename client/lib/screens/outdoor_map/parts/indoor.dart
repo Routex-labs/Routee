@@ -652,6 +652,14 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     // 카드는 방금 setState로 바뀌었다. 한 프레임 뒤라야 **새** 카드를 잰다.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || _mapController != controller || !_styleReady) return;
+      // **그 사이 안내가 시작됐으면 접는다.** 경로 전체 담기는 *계획* 화면의
+      // 카메라다. 예약과 실행 사이에 `안내 시작`이 눌리면(대중교통 흐름은
+      // 시트에서 경로를 그린 직후 곧바로 시작을 태운다) 이미 내 자리로
+      // 확대해 들어가는 중인 화면을 도로 도시 축척까지 밀어냈다 — 실기기에서
+      // "확대됐다가 다시 전체 경로가 떴다가 또 확대되는" 그 자리다.
+      // 프레임이 밀리면 이 콜백은 반 초씩도 늦으므로, 위 셋과 같은 이유로
+      // 여기서 다시 확인해야 한다.
+      if (_guidanceStarted) return;
       final viewport = MediaQuery.sizeOf(context);
       final topChrome = _topChromeBottomPx();
       unawaited(
@@ -671,10 +679,14 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
               routeFitPinAllowancePx,
           // 카드는 탭 줄 **위에** 앉는다([_bottomDockedCard]) — 아래가 가려지는
           // 높이는 카드 높이 + 그 리프트다. 리프트를 빼먹었더니 경로가 카드 쪽으로
-          // 밀려 화면 가운데에 오지 않았다(실기기 확인).
+          // 밀려 화면 가운데에 오지 않았다(실기기 확인). 위쪽과 같은 틈
+          // ([routeFitChromeGapPx])을 여기도 더한다 — 안 더하면 위아래 여백이
+          // 어긋나 카드가 짧을 때(하한이 대신 메워 줄 때)만 우연히 안 보이다가,
+          // 대중교통 요약 카드처럼 하한을 넘어서는 순간 경로 아래쪽이 살짝 잘렸다.
           bottomInsetPx: math.max(
             _bottomCardHeightPx() +
                 widget.bottomCardLiftPx +
+                routeFitChromeGapPx +
                 routeFitPinAllowancePx,
             viewport.height * bottomSheetFraction,
           ),
@@ -703,6 +715,31 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
       if (edge > bottom) bottom = edge;
     }
     return bottom;
+  }
+
+  /// 지금 화면 **아래쪽**을 덮고 있는 chrome의 높이(논리 px). [_topChromeBottomPx]의
+  /// 아래쪽 짝이다 — "내 위치로" 재정렬이 화면 기하학적 중앙이 아니라 **가려지지
+  /// 않는 띠**의 중앙에 오도록 [recenterKeepingBearing]에 넘긴다.
+  ///
+  /// 두 값 중 큰 쪽을 쓴다: 하단 탭 줄(`outerOverlayKeys`의 아래쪽 절반)은 안내
+  /// 중이 아니어도 늘 떠 있고, 안내 카드는 뜨면 탭 줄보다 훨씬 높이 덮는다.
+  double _bottomChromePx() {
+    final viewportHeight = MediaQuery.sizeOf(context).height;
+    final half = viewportHeight / 2;
+    var top = viewportHeight;
+    for (final key in widget.outerOverlayKeys) {
+      final box = key.currentContext?.findRenderObject() as RenderBox?;
+      if (box == null || !box.hasSize) continue;
+      final boxTop = box.localToGlobal(Offset.zero).dy;
+      if (boxTop <= half) continue;
+      if (boxTop < top) top = boxTop;
+    }
+    final navChrome = viewportHeight - top;
+    final cardHeight = _bottomCardHeightPx();
+    final cardChrome = cardHeight > 0
+        ? cardHeight + widget.bottomCardLiftPx
+        : 0.0;
+    return math.max(navChrome, cardChrome);
   }
 
   /// 지금 화면 아래를 덮고 있는 카드(ETA·대중교통 요약)의 높이(논리 px).
@@ -1115,6 +1152,7 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     // 자리에 그대로 있어서, 다시 펼 때마다 묻는 것은 답을 아는 질문을 되묻는 것이다.
     if (!value && leftBuilding) {
       _entryFloorAsked = false;
+      _nearbyStoreAsked = false;
     }
     // 실내 안내를 켜고 끄는 유일한 지점이다.
     //
@@ -1122,6 +1160,13 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     // 야외를 걸어 다닌 거리가 실내 좌표계에 누적되다가, 다시 들어오는 순간
     // 걸어 본 적 없는 자리에서 시작했다.
     if (value) {
+      // **카메라 주인을 실내 쪽으로 완전히 넘긴다.** 안 끄면 야외 GPS
+      // 따라가기([_followingUser])가 실내로 들어온 뒤에도 GPS 틱마다 카메라를
+      // 끌어당겨, 실내 PDR 팔로우([_indoorFollowActive])와 같은 카메라를 두고
+      // 서로 다른 자리로 당긴다 — "GPS 위치와 실내 위치가 번갈아 온다"로 보인
+      // 자리다. 실내에서도 GPS 좌표는 계속 들고 있지만(진입/이탈 판정용),
+      // 화면을 끄는 것은 이제부터 PDR뿐이어야 한다.
+      _stopFollowingUser();
       _ensureGuidanceAttached();
     } else {
       _guidance.detach();

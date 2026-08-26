@@ -351,16 +351,37 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
     //
     // 배율이 갈리는 이유는 보는 거리가 달라서다 — 자동차는 다음 교차로가 화면에
     // 들어와야 하고, 걸을 때는 지금 서 있는 통로가 보여야 한다.
+    // 방금까지는 경로 전체를 담으려 물러서 있던 배율이라, 여기서 붙는
+    // 배율까지 여러 단계를 한 번에 건넌다. [recenterDuration](손끝 조작용
+    // 300ms)을 그대로 쓰면 중간 단계 없이 화면이 튀어 보였다(실기기 확인) —
+    // 물러서는 연출과 같은 길이로 되짚어 온다([guidanceStartRecenterDuration]).
     if (_indoorLocationVisible) {
       // **실내 위치로 서 있는 사람을 GPS로 데려가지 않는다.** 그 좌표는 건물
       // 밖이라(도면을 펴 놓고 손으로 위치를 찍은 경우가 특히 그렇다) 화면이
       // 통째로 튀고 보던 도면과 경로를 잃는다. 실내는 걸음이 카메라를 끌고
       // 간다([_indoorFollowActive]) — 여기서는 첫 자리만 잡아 준다.
-      await _recenterOnCurrentPosition();
+      await _recenterOnCurrentPosition(
+        duration: guidanceStartRecenterDuration,
+        minZoom: guidanceStartZoom,
+      );
     } else if (_transitItinerary == null) {
       await startFollowingCurrentLocation(
-        zoom: _routeIsDriving ? carGuidanceZoom : walkingViewZoom,
+        zoom: _routeIsDriving ? carGuidanceZoom : guidanceStartZoom,
+        duration: guidanceStartRecenterDuration,
       );
+    } else {
+      // 대중교통은 계속 따라가지 **않는다** — [startFollowingCurrentLocation]이
+      // 켜는 지속 팔로우를 그대로 쓰면 타는 구간에서 여정 전체가 화면 귀퉁이로
+      // 밀린다. 그래도 시작 순간 첫 자리로 한 번 옮기는 것은 실내 갈래와
+      // 같아야 한다 — 야외에서 출발하는 대중교통만 이 한 번을 빠뜨리고 있었다.
+      final position = _positionPoint;
+      if (position != null) {
+        await _moveCameraToPoint(
+          position,
+          zoom: guidanceStartZoom,
+          duration: guidanceStartRecenterDuration,
+        );
+      }
     }
   }
 
