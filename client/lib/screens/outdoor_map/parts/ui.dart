@@ -517,16 +517,20 @@ extension OutdoorMapUi on OutdoorMapBodyState {
         // 이 버튼이 실제로 필요로 하는 것은 지금 보고 있는 층 하나뿐이므로
         // ([_debugForceFloorTransition]의 첫 줄), 조건도 그것으로 맞춘다.
         //
-        // 버튼에 적히는 것은 방향이 아니라 **가는 층**이다. 그 층은 도면의 탑승
-        // 노드 이름이 정하며(두 층을 건너뛰기도 한다), 그 자리에 화살표만 그리면
-        // 눌러 보기 전에는 어디로 가는지 알 수 없다.
+        // 그림은 **방향 화살표**다. 실제로 가는 층은 도면의 탑승 노드 이름이
+        // 정하고 두 층을 건너뛰기도 하지만, 그 층을 버튼에 적을 수는 없다 —
+        // [RoutexMapControl]은 그림을 하나만 받는다(아래 주석).
         if (debugEnabled && _activeFloor != null)
           AnimatedPositioned(
             duration: const Duration(milliseconds: 200),
             curve: Curves.easeOut,
-            right: 16,
+            right: RoutexSpacing.componentPadding,
+            // 축척 막대([_aboveBottomBarPx]) **한 칸 위**다. 예전에는 하단 바
+            // baseline에서 한 칸만 올렸는데, 그 자리는 축척 막대와 "위치 보정"
+            // (GPS) 버튼이 이미 쓰고 있어 셋이 겹쳤다 — 디버그 버튼이 GPS
+            // 버튼을 덮어 안내 중에 위치 보정을 누를 수 없었다.
             bottom:
-                floorSelectorBottomOffset +
+                _aboveBottomBarPx +
                 (indoorRouteVisible ? bottomBarLiftPx : 0) +
                 RoutexMetrics.minimumTouchTarget +
                 RoutexSpacing.controlGap,
@@ -546,13 +550,15 @@ extension OutdoorMapUi on OutdoorMapBodyState {
                               'debug-force-floor-transition-${up ? 'up' : 'down'}',
                             ),
                             label: up ? '위층으로 층 전환' : '아래층으로 층 전환',
-                            // 방향 화살표는 디자인 시스템에 없다. 층 이동은
-                            // 접기/펼치기가 아니라 위아래 이동이라 그쪽 아이콘을
-                            // 빌려 쓰지 않는다.
+                            // **글리프는 화살표 하나뿐이다.** 층 라벨(`text`)을
+                            // 같이 넘기면 [RoutexMapControl]의 assert
+                            // (`icon`·`glyphBuilder`·`text` 중 정확히 하나)에
+                            // 걸려, 디버그 빌드에서 이 자리가 통째로
+                            // ErrorWidget(붉은 사각형)이 된다 — Stack의 비배치
+                            // 자식이라 지도 전체를 덮는다(2026-08-26 실기기).
                             icon: up
                                 ? Icons.arrow_upward_rounded
                                 : Icons.arrow_downward_rounded,
-                            text: boarding?.name.otherFloorLabel,
                             onPressed: boarding == null
                                 ? null
                                 : () => _debugForceFloorTransition(up: up),
