@@ -296,7 +296,13 @@ extension OutdoorMapRouteLayers on OutdoorMapBodyState {
         scopeId != CompletedRouteHistory.outdoorScope &&
         scopeId == _activeFloor) {
       final features = <Map<String, dynamic>>[];
-      for (final segment in _guidanceTrailSession.segmentsForFloor(scopeId)) {
+      // 확정 궤적은 영구 이력으로 쓰고, 아직 확정되지 않은 마지막 몇 걸음은
+      // 화면 반환값에만 붙인다. 그래야 회색선이 마커보다 한두 배치 늦게 따라오지
+      // 않으면서도 후보가 뒤집혔을 때 과거 궤적을 오염시키지 않는다.
+      for (final segment in _guidanceTrailSession.segmentsForFloor(
+        scopeId,
+        previewPath: _pdrCorrectedPreviewFloorPath,
+      )) {
         final points = _floorPathToWgs84(segment);
         if (points.length < 2) continue;
         features.add(
