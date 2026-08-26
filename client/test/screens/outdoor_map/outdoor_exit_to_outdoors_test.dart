@@ -357,6 +357,43 @@ void main() {
     expect(card.distanceMeters, greaterThan(150));
   });
 
+  testWidgets('실내→야외 여정은 카드를 닫으면 실내 구간까지 함께 끝난다', (
+    WidgetTester tester,
+  ) async {
+    // 실측 증상: `안내 종료`를 눌러도 `안내 시작` 카드가 도로 떴다.
+    //
+    // 이 여정의 하단 카드는 **바깥 여정 카드**다([indoorCardOwnsSlot]). 그
+    // 카드의 닫기가 야외 구간만 지우면 실내 구간이 남고, 다음 프레임에 실내
+    // 카드가 그 자리를 도로 받는다 — 사용자에게는 닫기가 안 먹는 화면이다.
+    final positions = StreamController<Position>.broadcast();
+    await enterIndoorByButton(tester, positions);
+    await settleSensorWarmup(tester);
+
+    final state = tester.state<OutdoorMapBodyState>(find.byType(OutdoorMapBody));
+    await state.showIndoorToOutdoorRouteTo(
+      outsideDestination,
+      label: '계양도서관',
+      origin: const PoiSearchResult(
+        name: '매장',
+        floor: '1F',
+        point: LatLng(37.5664976, 126.978244),
+        nodeId: 'n-b',
+      ),
+    );
+    await drain(tester);
+    expect(find.text('안내 시작'), findsOneWidget, reason: '테스트 전제(계획 카드가 떴다)');
+
+    tester.widget<EtaCard>(find.byType(EtaCard)).onClose!();
+    await drain(tester);
+
+    expect(
+      find.text('안내 시작'),
+      findsNothing,
+      reason: '닫았는데 카드가 도로 뜨면 사용자는 닫는 방법을 잃는다',
+    );
+    expect(find.byType(EtaCard), findsNothing);
+  });
+
   testWidgets('나가기 버튼은 대중교통 승차 여정의 안내도 끊지 않는다', (WidgetTester tester) async {
     // 실측 증상: 실내에서 대중교통(버스 등) 목적지로 안내를 걸고 건물을 나가면
     // 도보 여정과 달리 `안내 시작` 버튼이 다시 떴다.

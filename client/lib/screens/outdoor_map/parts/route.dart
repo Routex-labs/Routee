@@ -1424,6 +1424,15 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
   void _dismissUserDestinationFromEtaCard() {
     _retainEtaClosePointer();
     _clearUserDestination();
+    // **앞 구간도 함께 끝낸다.** 이 카드가 실내→야외 여정을 대표할 때
+    // ([_indoorLegIsPrelude]) 야외 구간만 지우면 실내 구간이 남고, 다음 프레임에
+    // 실내 카드가 그 자리를 도로 받아 `안내 시작`이 다시 뜬다 — 사용자에게는
+    // **`안내 종료`가 안 먹는 화면**이다(실기기).
+    //
+    // 조건을 다는 이유는 거울상 때문이다. 야외→실내 여정의 실내 구간은 아직
+    // 예약(`_pendingIndoorRoute`)이라 [_clearUserDestination]이 이미 걷어내고,
+    // 그때 여기서 한 번 더 지우면 끝난 적 없는 안내 세션까지 닫는다.
+    if (_indoorLegIsPrelude) _clearIndoorRoute();
     widget.onGuidanceDismissed?.call();
   }
 
