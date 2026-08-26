@@ -125,6 +125,11 @@ class _MapShellScreenState extends State<MapShellScreen> {
   /// 그대로라 어느 모드에서든 같은 여백으로 보인다.
   static const _overlayGap = RoutexSpacing.controlGap;
 
+  // 검색 결과는 입력창의 연장선이라 바로 이어져야 한다. 일반 지도 조작 간격을
+  // 그대로 쓰면 키보드가 열린 화면에서 검색창과 첫 결과가 서로 무관한 카드처럼
+  // 멀어 보였다. 길찾기 후보는 두 입력칸의 묶음 뒤에 오므로 기존 간격을 유지한다.
+  static const _searchOverlayGap = 8.0;
+
   /// 지도 위 카테고리 필터에서 지금 고른 것. null이면 강조 없음(기본 상태).
   /// 실내·야외 지도에 같은 값을 내려 두 화면의 강조가 어긋나지 않게 한다.
   CategorySelection? _categorySelection;
@@ -1073,7 +1078,7 @@ class _MapShellScreenState extends State<MapShellScreen> {
       child: Padding(
         padding: const EdgeInsets.fromLTRB(
           RoutexSpacing.screenGutter,
-          _overlayGap,
+          _searchOverlayGap,
           RoutexSpacing.screenGutter,
           RoutexSpacing.contentGap,
         ),
