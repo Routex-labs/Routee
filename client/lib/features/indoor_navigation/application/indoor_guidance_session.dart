@@ -113,6 +113,73 @@ PdrLocalPoint? clampBoardingHold({
   return (holdPoint - currentM).distance <= radiusM ? holdPoint : currentM;
 }
 
+/// 탑승점으로 끝나는 경로 폴리라인 위에서 [point]가 나아간 거리(m).
+///
+/// 붙일 선분이 없으면 null. 고정 지점이 경로를 따라 얼마나 남았는지를 재는 자
+/// 하나를 여기 두어, 거는 자리와 미는 자리가 같은 값을 본다.
+double? routeProgressOf(List<PdrLocalPoint> routePoints, PdrLocalPoint point) {
+  if (routePoints.length < 2) return null;
+  var travelledM = 0.0;
+  double? bestProgressM;
+  var bestGapM = double.infinity;
+  for (var index = 1; index < routePoints.length; index += 1) {
+    final from = routePoints[index - 1];
+    final to = routePoints[index];
+    final deltaE = to.eastM - from.eastM;
+    final deltaN = to.northM - from.northM;
+    final squared = deltaE * deltaE + deltaN * deltaN;
+    if (squared > 1e-12) {
+      final t =
+          (((point.eastM - from.eastM) * deltaE +
+                      (point.northM - from.northM) * deltaN) /
+                  squared)
+              .clamp(0.0, 1.0)
+              .toDouble();
+      final projected = PdrLocalPoint(
+        from.eastM + deltaE * t,
+        from.northM + deltaN * t,
+      );
+      final gapM = (point - projected).distance;
+      if (gapM < bestGapM) {
+        bestGapM = gapM;
+        bestProgressM = travelledM + math.sqrt(squared) * t;
+      }
+    }
+    travelledM += math.sqrt(squared);
+  }
+  return bestProgressM;
+}
+
+/// 경로 폴리라인 전체 길이(m).
+double routeLengthOf(List<PdrLocalPoint> routePoints) {
+  var total = 0.0;
+  for (var index = 1; index < routePoints.length; index += 1) {
+    total += (routePoints[index] - routePoints[index - 1]).distance;
+  }
+  return total;
+}
+
+/// 경로 폴리라인 위 [progressM] 지점의 좌표.
+PdrLocalPoint routePointAt(List<PdrLocalPoint> routePoints, double progressM) {
+  if (routePoints.isEmpty) return PdrLocalPoint.zero;
+  var remainingM = progressM;
+  for (var index = 1; index < routePoints.length; index += 1) {
+    final from = routePoints[index - 1];
+    final to = routePoints[index];
+    final segmentM = (to - from).distance;
+    if (segmentM <= 1e-12) continue;
+    if (remainingM <= segmentM || index == routePoints.length - 1) {
+      final t = (remainingM / segmentM).clamp(0.0, 1.0).toDouble();
+      return PdrLocalPoint(
+        from.eastM + (to.eastM - from.eastM) * t,
+        from.northM + (to.northM - from.northM) * t,
+      );
+    }
+    remainingM -= segmentM;
+  }
+  return routePoints.last;
+}
+
 /// 이 층에서 걸을 거리가 이보다 짧으면 **내리자마자 바로 다음 에스컬레이터**로
 /// 본다.
 ///
@@ -187,8 +254,28 @@ class IndoorGuidanceSession {
   ///
   /// 위 둘과 달리 단계 전이가 아니라 [_syncBoardingApproach]가 매 스냅샷 갱신한다.
   /// 탑승 직후 몇 초는 판정기가 idle이라 단계가 아예 안 나오기 때문이다.
+  ///
+  /// **얼려 두는 것이 아니라 천장이다**([_advanceBoardingApproachHold]). 걸린
+  /// 자리에 못 박아 두면, 탑승점 몇 m 앞(대개 바로 앞 노드)에서 마커가 멈춰
+  /// 사용자가 에스컬레이터에 다 와서도 자기 자리를 못 읽는다.
   PdrLocalPoint? _approachHoldPointM;
   int? _approachHoldEnteredAtMs;
+
+  /// 고정 지점이 **경로 폴리라인 위에서** 나아간 거리(m). 폴리라인의 끝이 탑승점이다.
+  ///
+  /// 고정이 따라 움직여도 되는 방향을 이 값 하나가 정한다 — 경로를 따라 앞으로만
+  /// 늘고, 탑승점에서 멈춘다. 원래 막으려던 것("탑승점을 지나 앞 매장으로 흘러가는
+  /// 것")은 그 상한 하나뿐이었다.
+  ///
+  /// **tracker 위치를 따라가지 않는 이유.** 고정이 걸리는 순간 같은 근거로
+  /// [_corridor]의 종점 잠금도 함께 켜져, 그 뒤 `previewPosition`은 실제로 걸었든
+  /// 아니든 경로 종점에 앉는다. 그걸 따라가면 몸만 돌린 사용자의 마커가 발판으로
+  /// 순간이동한다. 미는 근거는 계속 흐르는 **자유보행 그림자가 탑승점에 가까워진
+  /// 만큼**이고, 그 값은 이 고정을 풀지 말지를 재는 자와 같은 것이다.
+  double? _approachHoldRouteProgressM;
+
+  /// 고정을 민 마지막 갱신에서의 탑승점까지 거리(m). 줄어든 만큼만 민다.
+  double? _approachHoldLastDistanceM;
 
   /// 경로가 지목한 탑승점까지의 거리(m). 그런 탑승점이 없으면 null.
   double? _boardingApproachDistanceM;
@@ -285,8 +372,7 @@ class IndoorGuidanceSession {
     _boardingHoldPointM = null;
     _rideHoldPointM = null;
     _verticalObservationHoldPointM = null;
-    _approachHoldPointM = null;
-    _approachHoldEnteredAtMs = null;
+    _clearApproachHold();
   }
 
   /// 접근 근거 자체를 버린다. [clearBoardingHold]와 나눈 이유는 **시간 상한** 때문이다 —
@@ -558,7 +644,8 @@ class IndoorGuidanceSession {
   ///   경로를 따라 전진하는 서로 다른 peak를 센다.
   /// - **위치 고정**: 후보가 [boardingApproachVisiblePeakCount]번 이어지거나 탑승
   ///   노드를 실제 통과하면 건다. 노드에서 [boardingApproachVisibleSnapRadiusM]
-  ///   안일 때만 노드에 붙이고, 아니면 그 순간 보이던 위치를 붙든다.
+  ///   안일 때만 노드에 붙이고, 아니면 그 순간 보이던 위치를 붙든다. 걸린 뒤에도
+  ///   **탑승점 쪽으로는 계속 따라 움직인다**([_advanceBoardingApproachHold]).
   ///
   /// 짧은 기압 인계 유예 뒤 `boardingAbandonRadiusM`에서 풀리고,
   /// 반경 안에서도 새 걸음 없이 `boardingPhaseTimeoutMs`(40초)가 지나면 접는다.
@@ -588,6 +675,12 @@ class IndoorGuidanceSession {
     final distanceM = holdPoint == null || distanceProbeM == null
         ? null
         : (holdPoint - distanceProbeM).distance;
+    // **고정은 천장이지 못이 아니다.** 아래 두 갈래(유예 중·고정 중)가 모두 여기서
+    // 돌아서므로, 따라 움직이는 일은 그 앞인 이 자리 한 곳에서 한다 — 갈래마다
+    // 두면 하나를 빠뜨렸을 때 "어떤 때는 따라오고 어떤 때는 멈춘다"가 된다.
+    if (holdPoint != null) {
+      _advanceBoardingApproachHold(holdPoint: holdPoint, distanceM: distanceM);
+    }
     final holdGraceActive =
         _approachHoldPointM != null &&
         _approachHoldEnteredAtMs != null &&
@@ -598,8 +691,7 @@ class IndoorGuidanceSession {
       return;
     }
     if (distanceM == null || distanceM > config.routeApproachArmRadiusM) {
-      _approachHoldPointM = null;
-      _approachHoldEnteredAtMs = null;
+      _clearApproachHold();
       _clearBoardingApproach();
       _boardingApproachDistanceM = distanceM;
       return;
@@ -624,16 +716,14 @@ class IndoorGuidanceSession {
       // 움직임 없는 상태의 시간 상한. 천천히 접근하는 실제 걸음은 위에서 lease를
       // 갱신하지만, 탑승점 앞에 놓인 기기는 결국 풀려야 한다.
       _boardingApproachGateOpen = false;
-      _approachHoldPointM = null;
-      _approachHoldEnteredAtMs = null;
+      _clearApproachHold();
       _clearBoardingApproachEvidence();
       return;
     }
     _boardingApproachGateOpen = true;
     if (_approachHoldPointM != null) {
       if (distanceM > config.boardingAbandonRadiusM) {
-        _approachHoldPointM = null;
-        _approachHoldEnteredAtMs = null;
+        _clearApproachHold();
         _clearBoardingApproachEvidence();
       }
       return;
@@ -921,6 +1011,69 @@ class IndoorGuidanceSession {
         ? holdPoint
         : currentM;
     _approachHoldEnteredAtMs = atMs;
+    _approachHoldRouteProgressM = routeProgressOf(
+      _approachRoutePoints(),
+      _approachHoldPointM!,
+    );
+    // 다음 갱신에서 씨앗을 다시 심는다 — 거는 자리와 미는 자리가 거리를 재는
+    // 기준(경로 위치 vs 자유보행 그림자)이 달라, 이어 붙이면 첫 걸음이 그 차이만큼
+    // 부풀어 밀린다.
+    _approachHoldLastDistanceM = null;
+  }
+
+  void _clearApproachHold() {
+    _approachHoldPointM = null;
+    _approachHoldEnteredAtMs = null;
+    _approachHoldRouteProgressM = null;
+    _approachHoldLastDistanceM = null;
+  }
+
+  /// 탑승점으로 끝나는 이 층 경로의 폴리라인. 고정을 미는 자와 같은 값이다.
+  List<PdrLocalPoint> _approachRoutePoints() {
+    final points = _routeSegment?.pointsLocalM;
+    if (points == null || points.length < 2) return const [];
+    return [for (final point in points) PdrLocalPoint(point.x, point.y)];
+  }
+
+  /// 이미 걸린 고정을 **경로를 따라 탑승점 쪽으로만** 민다.
+  ///
+  /// 고정이 걸리는 자리는 대개 탑승점이 아니라 그 **바로 앞 노드**다(전실 근거는
+  /// 그 노드를 밟는 순간 성립하고, 거기서 발판까지는 연결 간선 길이 — 실측
+  /// 4.8~6.2m — 만큼 남아 있다). 예전에는 그 자리에 못을 박았고, 그래서 사용자가
+  /// 에스컬레이터 앞에 다 가서도 마커는 한 노드 뒤에 서 있었다. "지금 내가 어디
+  /// 있는가"를 못 읽는 상태가 되고, 화면이 가리키는 발판과 눈앞의 발판이 다르다.
+  ///
+  /// 고정이 원래 막으려던 것은 **지나쳐 흘러가는 것** 하나였다. 그래서 남는 규칙도
+  /// 상한 하나다 — 경로를 따라 앞으로만 밀고 탑승점에서 멈춘다.
+  /// [boardingApproachVisibleSnapRadiusM] 안에 들면 발판 노드에 붙인다.
+  ///
+  /// 미는 양은 **탑승점까지 남은 거리가 줄어든 만큼**이다. 뒤로 걷거나 제자리에서
+  /// 몸만 돌리면 그 값이 늘거나 그대로라 아무것도 밀지 않는다.
+  void _advanceBoardingApproachHold({
+    required PdrLocalPoint holdPoint,
+    required double? distanceM,
+  }) {
+    if (_approachHoldPointM == null || distanceM == null) return;
+    final previousM = _approachHoldLastDistanceM;
+    _approachHoldLastDistanceM = distanceM;
+    var progressM = _approachHoldRouteProgressM;
+    if (previousM == null || progressM == null) return;
+    final gainM = previousM - distanceM;
+    // 멀어졌거나 제자리면 아무것도 밀지 않는다. 그것이 이 고정이 원래 막으려던
+    // 것(지나쳐 흘러가기)이고, 여기서 되돌리면 마커가 뒤로 튄다.
+    if (gainM <= 0) return;
+
+    final routePoints = _approachRoutePoints();
+    if (routePoints.length < 2) return;
+    final totalM = routeLengthOf(routePoints);
+    progressM = math.min(totalM, progressM + gainM);
+    _approachHoldRouteProgressM = progressM;
+    // **스냅은 경로 위 남은 거리로 판단한다.** 직선거리로 판단하면 ㄱ자 복도를
+    // 잘라 가는 자유보행에서 마커가 몇 m를 순간이동한다 — 그림자는 탑승 근거로만
+    // 쓰고 화면은 경로를 따라 걷게 두는 것이 이 파일의 규칙이다.
+    _approachHoldPointM = totalM - progressM <= boardingApproachVisibleSnapRadiusM
+        ? holdPoint
+        : routePointAt(routePoints, progressM);
   }
 
   bool _isConfirmedForwardOnFinalRouteEdge({

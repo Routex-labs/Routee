@@ -302,6 +302,35 @@ PdrSnapshot _walkedEast(int steps) {
   );
 }
 
+/// 전실(0,7)까지 북쪽으로 걷고, 거기서 서쪽 발판(-3.4,7)으로 꺾어 든다.
+/// 실기기에서 "에스컬레이터 앞까지 갔는데 마커가 한 노드 뒤에 선다"가 나온 모양이다.
+PdrSnapshot _walkedNorthThenWest(int steps) {
+  final path = [
+    for (var index = 0; index <= steps; index += 1)
+      index <= 10
+          ? PdrLocalPoint(0, index * 0.7)
+          : PdrLocalPoint(-(index - 10) * 0.7, 7),
+  ];
+  final heading = steps <= 10 ? 0.0 : 270.0;
+  return PdrSnapshot(
+    position: path.last,
+    path: path,
+    steps: steps,
+    distanceM: steps * 0.7,
+    orientationHeadingDeg: heading,
+    walkingHeadingDeg: heading,
+    hasHeading: true,
+    preview: PdrPreview(
+      position: path.last,
+      path: path,
+      steps: steps,
+      distanceM: steps * 0.7,
+      acceptedPeakTimesMs: List<int?>.filled(path.length, null),
+    ),
+    quality: _quality,
+  );
+}
+
 PdrSnapshot _walkedNorth(int steps) {
   final path = [for (var i = 0; i <= steps; i++) PdrLocalPoint(0, i * 0.7)];
   return PdrSnapshot(
@@ -575,7 +604,14 @@ void main() {
       expect(firstHeld, isNotNull);
       expect(firstHeld!.eastM, closeTo(0, 0.1));
       expect(firstHeld.northM, closeTo(5.6, 0.1));
-      expect(session.position!.localM, firstHeld);
+      // 이 궤적은 발판(-3.4, 7)이 아니라 그 너머 북쪽으로 곧장 간다. 고정은
+      // 탑승점에 **가까워진 만큼만** 밀리므로 여기서는 거의 움직이지 않는다.
+      expect(session.position!.localM.eastM, closeTo(0, 0.1));
+      expect(
+        session.position!.localM.northM,
+        inInclusiveRange(firstHeld.northM, 7),
+        reason: '뒤로도, 전실 너머로도 가지 않는다',
+      );
       expect(
         session.trackingResult!.optimisticEdgeId,
         isNot('vw-wrong'),
@@ -590,6 +626,30 @@ void main() {
         closeTo(7, 0.1),
         reason: '화면 hold가 생긴 뒤 내부 tracker는 경로 종점에 잠긴다',
       );
+    });
+
+    test('전실에서 붙든 뒤에도 발판 쪽으로 계속 걸으면 마커가 발판 노드까지 간다', () {
+      final session = vestibuleEscalatorSession();
+      PdrLocalPoint? firstHeld;
+      for (var step = 0; step <= 15; step++) {
+        final atMs = 1000 + step * 500;
+        final result = session.onSnapshot(
+          _walkedNorthThenWest(step),
+          timestampMs: atMs,
+        );
+        session.updateProgress(result, previewSteps: step, nowMs: atMs);
+        if (session.isPositionHeld) firstHeld ??= session.position!.localM;
+      }
+
+      expect(firstHeld, isNotNull);
+      expect(
+        firstHeld!.northM,
+        lessThan(7),
+        reason: '고정은 발판이 아니라 그 앞에서 걸린다 — 여기서 멈추던 것이 실기기 증상이었다',
+      );
+      expect(session.isPositionHeld, isTrue);
+      expect(session.position!.localM.eastM, closeTo(-3.4, 0.1));
+      expect(session.position!.localM.northM, closeTo(7, 0.1));
     });
 
     test('같은 전실을 지나도 경로가 에스컬레이터 탑승을 지목하지 않으면 붙들지 않는다', () {
