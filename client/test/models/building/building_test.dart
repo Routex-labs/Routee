@@ -16,6 +16,27 @@ void main() {
     expect(building.initialFloor, '1F');
   });
 
+  test('서버 주소를 진입 화면용 표기로 쓴다', () {
+    final building = Building.fromJson({
+      'id': 'thehyundai-seoul',
+      'name': '더현대 서울',
+      'address': '서울특별시 영등포구 여의대로 108',
+      'floors': ['1F'],
+    });
+
+    expect(building.displayAddress, '서울특별시 영등포구 여의대로 108');
+  });
+
+  test('더현대 서울 구버전 응답에는 검증된 주소를 보완한다', () {
+    final building = Building.fromJson({
+      'id': 'thehyundai-seoul',
+      'name': '더현대 서울',
+      'floors': ['1F'],
+    });
+
+    expect(building.displayAddress, '서울 영등포구 여의대로 108');
+  });
+
   test('default_floor가 없는 응답은 목록 첫 층으로 폴백한다', () {
     final building = Building.fromJson({
       'id': 'legacy',

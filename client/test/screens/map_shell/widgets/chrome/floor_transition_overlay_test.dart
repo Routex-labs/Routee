@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:navigation_client/theme/app_theme.dart';
+import 'package:routex_design_system/routex_design_system.dart';
 import 'package:navigation_client/domain/guidance/escalator_ride.dart';
 import 'package:navigation_client/features/indoor_navigation/contract/floor_transition_ui_state.dart';
 import 'package:navigation_client/screens/map_shell/widgets/chrome/floor_transition_overlay.dart';
@@ -225,6 +226,32 @@ void main() {
       expect(find.text('B1'), findsOneWidget);
       expect(find.text('B2'), findsOneWidget);
       expect(find.textContaining('이동 중'), findsOneWidget);
+    });
+
+    testWidgets('도착 층 라벨은 안내 포인트 초록으로 강조한다', (tester) async {
+      await tester.pumpWidget(
+        _host(
+          FloorTransitionScrim(
+            opacity: 1,
+            fadeIn: Duration.zero,
+            fadeOut: Duration.zero,
+            state: _state(
+              FloorTransitionStage.moving,
+              from: 'B1',
+              to: '1F',
+              goingUp: true,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final destination = tester.widget<Text>(find.text('1F'));
+      expect(
+        destination.style?.color,
+        RoutexColorTokens.light.actionPrimary,
+        reason: '층 이동의 도착 지점은 앱의 안내 포인트 색으로 읽혀야 한다',
+      );
     });
 
     testWidgets('점은 한 번의 스위프로 도착 쪽까지 완주한다', (tester) async {

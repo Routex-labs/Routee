@@ -593,7 +593,9 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
   /// 사용자가 바라보는 방향(true north 기준, 시계방향 도). PDR 세션이 heading을
   /// 아직 못 얻은 상태(예: 자북 못 잡음 + 수동 방향 보정 아직 안 함, 첫 걸음
   /// 전)에는 null을 돌려주고, 이 경우 마커도 방향 삼각형 없이 도트만 뜬다.
-  /// 계산식은 실내와 동일하며 walkOffset·복도 bias를 섞지 않는다.
+  /// 계산식은 실내와 동일하다. 복도에서 학습한 bias는 floor frame에서 적용한
+  /// 뒤 지도 방위로 되돌린다. 그렇지 않으면 위치는 복도를 따라가는데 삼각형과
+  /// 카메라만 보정 전 나침반을 바라보게 된다.
   double? get _pdrCurrentHeadingDeg => _mapBearingOf(
     _liveHeading?.orientationDeg ??
         _pdrTrailState.snapshot?.orientationHeadingDeg,
@@ -644,8 +646,9 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
         _liveHeading?.converged ?? _pdrTrailState.snapshot?.hasHeading ?? false;
     if (sessionDeg == null || anchor == null || !hasHeading) return null;
     final transform = FloorCoordinateTransform(anchor);
-    return transform.floorBearingToMapBearing(
-      transform.toFloorBearing(sessionDeg),
+    return transform.mapBearingForPdrBearing(
+      sessionDeg,
+      floorBiasDeg: _guidance.trackingResult?.headingBiasDeg ?? 0,
     );
   }
 

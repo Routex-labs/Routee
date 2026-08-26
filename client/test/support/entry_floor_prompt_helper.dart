@@ -22,5 +22,9 @@ Future<void> answerEntryFloorPrompt(WidgetTester tester, String floor) async {
   final option = find.byKey(ValueKey('entry-floor-$floor'));
   if (option.evaluate().isEmpty) return;
   await tester.tap(option);
+  await tester.pump();
+  final confirm = find.byKey(const Key('entry-floor-confirm'));
+  if (confirm.evaluate().isEmpty) return;
+  await tester.tap(confirm);
   await tester.pumpAndSettle();
 }
