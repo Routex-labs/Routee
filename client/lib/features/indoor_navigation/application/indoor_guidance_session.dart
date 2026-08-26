@@ -245,21 +245,18 @@ class IndoorGuidanceSession {
   /// 뿐이지만, 위치 고정은 틀리면 걸어가는 사용자의 마커가 안 따라간다.
   bool get isNearRouteBoarding => _boardingApproachGateOpen;
 
-  /// 탑승 감지 직전까지 이 경로를 정상 전진했는가.
-  ///
-  /// 화면의 탑승점 활강은 이 근거가 있을 때만 시작한다. 단순 근접·오인식에서
-  /// 멀리 있는 에스컬레이터로 marker를 끌고 가면 안 된다.
+  /// 탑승 감지 직전까지 이 경로를 정상 전진했는가. 진단·후보 선택에는 쓰되,
+  /// 실제로 경로의 탑승 노드가 감지된 뒤 화면 활강을 막는 조건은 아니다.
   bool get wasFollowingRouteIntoBoarding => _wasFollowingRouteIntoBoarding;
 
   /// 화면 활강이 실제 탑승 노드에 닿았을 때 그 자리에 고정한다.
   ///
   /// PDR이 직각 코너를 자르면 실제 좌표는 노드를 스치지 않을 수 있다. 하지만
-  /// 경로를 따라 정상 접근해 `boardingDetected`까지 도달했다면, 화면은 남은
-  /// 경로 간선을 따라 도착한 뒤 그 노드에서 탑승 lock을 시작해야 한다.
+  /// 경로가 지목한 탑승 노드의 `boardingDetected`가 났다면, 화면은 남은 경로
+  /// 간선을 따라 도착한 뒤 그 노드에서 탑승 lock을 시작해야 한다.
   bool lockRouteBoardingTerminal({required String boardingNodeId}) {
-    if (!_wasFollowingRouteIntoBoarding ||
-        (_escalator.phase != EscalatorPhase.boardingDetected &&
-            _escalator.phase != EscalatorPhase.verticalMotionDetected)) {
+    if (_escalator.phase != EscalatorPhase.boardingDetected &&
+        _escalator.phase != EscalatorPhase.verticalMotionDetected) {
       return false;
     }
     final holdPoint = routeBoardingHoldPoint(
@@ -440,13 +437,13 @@ class IndoorGuidanceSession {
     final anchor = _anchor;
     if (anchor == null || anchor.floorId != _floorId) return null;
     final atMs = timestampMs ?? _nowMs();
-    // 종점 강제 후보는 경로를 정상 전진해 탑승 감지까지 도달한 경우에만 쓴다.
-    // raw PDR이 마지막 모퉁이를 자르면 내부 후보는 이 경로에 남기되, 화면은
-    // continuity shadow가 연결된 간선을 따라 뒤늦게 합류한다.
+    // 탑승 감지가 난 예상 경로의 종점은 강제 후보로 쓴다. raw PDR이 마지막
+    // 모퉁이를 자르더라도 화면은 continuity shadow가 연결된 간선을 따라
+    // 뒤늦게 합류한다.
     final lockBoardingTerminal =
         _approachHoldPointM != null ||
         (_escalator.phase == EscalatorPhase.boardingDetected &&
-            _wasFollowingRouteIntoBoarding);
+            _boardingApproachGateOpen);
     final result = _corridor.update(
       graph: _graph,
       anchor: anchor,
@@ -948,7 +945,7 @@ class IndoorGuidanceSession {
           // 3m 반경의 탑승 판정은 노드보다 앞에서 날 수 있다. 기존처럼 이
           // 위치를 잠시 고정하되, 화면은 이 지점에서 남은 경로 polyline을 따라
           // 탑승 노드까지 별도 활강한다. 활강이 끝나야 실제 노드 lock으로 바뀐다.
-          if (_wasFollowingRouteIntoBoarding) {
+          if (_boardingApproachGateOpen) {
             _boardingHoldPointM =
                 _approachHoldPointM ??
                 _visibleBoardingHold(

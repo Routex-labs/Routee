@@ -975,6 +975,52 @@ void main() {
       expect(tracker.result.correctedPosition.northM, closeTo(2.4, 0.1));
     });
 
+    test('탑승 직전 ㄱ자 간선에서 heading이 늦어도 예상 경로를 계속 따른다', () {
+      final tracker = CorridorPositionTracker(_doubleTurnGraph)
+        ..setPreferredRoute(
+          edgeIds: const ['ab', 'bc', 'c-es'],
+          nodeIds: const ['a', 'b', 'c', 'es'],
+          preferContinuity: true,
+        )
+        ..reset(
+          initialPosition: const PdrLocalPoint(6.5, 0),
+          initialHeadingDeg: 90,
+          timestampMs: 0,
+        );
+      final points = <PdrLocalPoint>[
+        const PdrLocalPoint(7.2, 0),
+        const PdrLocalPoint(7.9, 0.1),
+        const PdrLocalPoint(8.5, 0.35),
+        const PdrLocalPoint(9.0, 0.8),
+        const PdrLocalPoint(9.5, 1.3),
+        const PdrLocalPoint(10.0, 1.8),
+        const PdrLocalPoint(10.6, 2.15),
+        const PdrLocalPoint(11.3, 2.35),
+        const PdrLocalPoint(12.0, 2.4),
+      ];
+      var distanceM = 0.0;
+      var previous = const PdrLocalPoint(6.5, 0);
+      for (var index = 0; index < points.length; index++) {
+        final point = points[index];
+        distanceM += (point - previous).distance;
+        tracker.update(
+          _observation(
+            atMs: (index + 1) * 500,
+            confirmedSteps: index + 1,
+            confirmedDistanceM: distanceM,
+            previewSteps: index + 1,
+            headingDeg: 90,
+            raw: point,
+            rawConfirmedStepPositions: [point],
+          ),
+        );
+        previous = point;
+      }
+
+      expect(tracker.result.currentEdgeId, 'c-es');
+      expect(tracker.result.previewPosition.northM, closeTo(2.4, 0.2));
+    });
+
     test('다음 경로 간선에서 두 걸음이 확인된 뒤에만 새 직선 epoch를 연다', () {
       final tracker = CorridorPositionTracker(_crossGraph)
         ..setPreferredRoute(

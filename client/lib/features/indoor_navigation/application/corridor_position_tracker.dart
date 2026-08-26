@@ -551,13 +551,12 @@ class CorridorPositionTracker {
     void openAt(String nodeId, double rawSkipM, {required bool ahead}) {
       // 회전 중에는 이 간선을 따라 걷고 있지 않다. 그 구간만큼 창을 되돌린다.
       final skipM = math.max(0.0, rawSkipM - advanced.offEdgeDistanceM);
-      if (skipM <= 1e-6 || skipM > _junctionZoneRadiusM(edge)) return;
+      if (skipM <= 1e-6) return;
       if (!_network.isDirectionDecisionNode(edge, nodeId)) return;
       final node = _network.nodes[nodeId];
       if (node == null) return;
       for (final option in _network.recoveryOptionsFromNode(nodeId)) {
         if (option.edge.id == edge.id) continue;
-        if (skipM > _junctionZoneRadiusM(option.edge)) continue;
         // 보통은 관측이 지금 간선보다 이쪽을 더 잘 설명할 때만 후보를 연다.
         // 다만 활성 경로의 **정확한 다음 간선**은 후보만 살린다. graph 꼭짓점을
         // 잘라 걷는 동안 센서 방향이 늦게 돌아도 경로 가설 자체를 잃지 않는다.
@@ -566,6 +565,13 @@ class CorridorPositionTracker {
           nodeId: nodeId,
           optionEdgeId: option.edge.id,
         );
+        final transitionRadiusM = preferred && _preferRouteContinuity
+            ? config.routeApproachTurnRadiusM
+            : math.min(
+                _junctionZoneRadiusM(edge),
+                _junctionZoneRadiusM(option.edge),
+              );
+        if (skipM > transitionRadiusM) continue;
         if (!preferred &&
             headingError(observedHeadingDeg, option.bearingDeg) >=
                 headingError(observedHeadingDeg, currentBearing)) {

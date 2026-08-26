@@ -5,7 +5,7 @@ class CorridorTrackerConfig {
     this.progressBucketM = 1.5,
     this.transitionPenaltyDegM = 3,
     this.deadEndPenaltyDeg = 90,
-    this.reverseTriggerDeg = 115,
+    this.reverseTriggerDeg = 170,
     this.absoluteErrorWeight = 0.25,
     this.costHorizonM = 25,
     this.maxSegmentErrorDeg = 60,
@@ -31,6 +31,7 @@ class CorridorTrackerConfig {
     this.junctionZoneEdgeLengthRatio = 0.4,
     this.junctionShortcutPenaltyDegM = 4,
     this.junctionLeaderSwitchMarginDeg = 0.5,
+    this.routeApproachTurnRadiusM = 6,
     this.routePreferenceMarginDeg = 2,
     this.routeStraightEpochMinProgressM = 1.4,
   });
@@ -49,7 +50,11 @@ class CorridorTrackerConfig {
   /// 크게 벌점만 줘서, 다른 가설이 없을 때도 위치가 멈추지 않게 한다.
   final double deadEndPenaltyDeg;
 
-  /// 관측 방향이 현재 진행 방향과 이만큼 어긋나면 유턴 가설을 함께 만든다.
+  /// 관측 방향이 현재 진행 방향과 거의 정반대일 때만 유턴 가설을 함께 만든다.
+  ///
+  /// 탑승점 앞의 ㄱ자·가로 연결 간선은 실제 몸/센서 heading이 90도 이상 늦게
+  /// 돌아도 정상 경로일 수 있다. 그 상태를 이탈로 만들지 않도록 180도에 가깝게
+  /// 둔다.
   final double reverseTriggerDeg;
 
   /// 비용에서 절대 방위 오차가 차지하는 비중. 나머지는 형태(방위 변화) 오차다.
@@ -194,6 +199,15 @@ class CorridorTrackerConfig {
   /// 걸음 늦게 반영된다. 전환 구간에서 연결된 간선으로 넘어가는 경우에만
   /// 관성을 줄인다 — 연결되지 않은 평행 간선에는 여전히 원래 여유를 쓴다.
   final double junctionLeaderSwitchMarginDeg;
+
+  /// 활성 경로가 에스컬레이터 탑승점으로 향하는 마지막 구간에서, 정확한 다음
+  /// 경로 간선을 미리 열어 둘 반경.
+  ///
+  /// 일반 교차점 반경은 짧은 연결 간선을 통째로 삼키지 않게 3.5m 이하로
+  /// 제한한다. 그러나 탑승 직전의 ㄱ자 연결은 PDR가 꼭짓점을 5m가량 잘라
+  /// 지나가도 계속 따라가야 하므로, 이 경우에만 6m까지 허용한다. 실제
+  /// 역방향은 [reverseTriggerDeg]가 별도로 막는다.
+  final double routeApproachTurnRadiusM;
 
   /// 활성 안내 경로 가설이 비경로 1등보다 이 값 안에서만 뒤지면 경로를 유지한다.
   ///

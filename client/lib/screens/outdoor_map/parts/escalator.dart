@@ -379,13 +379,11 @@ extension OutdoorMapEscalator on OutdoorMapBodyState {
   /// 탑승 감지 직후 마지막 복도 간선을 따라 탑승 노드로 붙는다.
   ///
   /// 감지 반경은 3m라 PDR이 직각 코너를 자르면 실제 좌표가 노드를 스치지 않을
-  /// 수 있다. 다만 같은 경로를 정상 전진해 온 marker라면 현재 보이는 자리부터
-  /// 남은 경로 polyline을 따라 실제 탑승 노드에 도착시킨다.
+  /// 수 있다. 경로가 지목한 같은 탑승 노드에서 감지가 났다면, 복도 tracker의
+  /// 한 프레임 판정보다 그 전이를 우선해 현재 보이는 자리부터 남은 경로
+  /// polyline을 따라 실제 탑승 노드에 도착시킨다.
   void _startBoardingApproachGlide(EscalatorPhaseChange change) {
-    if (_boardingApproachGlide != null ||
-        !_guidance.wasFollowingRouteIntoBoarding) {
-      return;
-    }
+    if (_boardingApproachGlide != null) return;
     final route = _indoorRouteSegment;
     final nodeId = change.boardingNodeId;
     final position = _guidance.position;
