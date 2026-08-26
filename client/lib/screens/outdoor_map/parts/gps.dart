@@ -203,6 +203,15 @@ extension OutdoorMapGps on OutdoorMapBodyState {
     // 시작 화면은 **모든 갈래에서** 걷힌다. 위치를 잡은 시점이 곧 가릴 이유가
     // 없어진 시점이다.
     _notifyStartupReady();
+    if (_guidancePlanned) return;
+    // 시작 화면이 걷히는 애니메이션과 겹치면 그 위로 시트가 반쯤 가려진 채
+    // 뜬다 — 예전에 이 자동 오픈을 걷어냈던 이유가 그 겹침이었다. 시작 화면과
+    // 같은 전환 길이만큼 물러선 뒤 연다.
+    await Future<void>.delayed(RoutexMotion.transition);
+    if (!mounted || !_indoorEntered) return;
+    // 자동으로 띄우는 것은 **진입 한 번에 한 번뿐이다**. 버튼으로 다시 여는
+    // 쪽은 이 제한을 받지 않는다([_nearbyStoreAsked]).
+    await _askNearbyStoreForAnchor(once: true);
   }
 
   /// 진입 근거가 가리키는 층으로 도면을 옮긴다. 옮길 근거가 없거나 이미 그
@@ -233,9 +242,11 @@ extension OutdoorMapGps on OutdoorMapBodyState {
   /// 어림 위치조차 없으면(층 그래프가 없거나 스냅 실패) 묻지 않는다 — 거리를
   /// 잴 기준이 없어 "가까운 순"이 성립하지 않는다. 그때는 지금까지처럼 하단
   /// 바의 "위치 지정"이 출구다.
-  Future<void> _askNearbyStoreForAnchor() async {
+  Future<void> _askNearbyStoreForAnchor({bool once = false}) async {
+    if (once && _nearbyStoreAsked) return;
     final rows = _nearbyStoreRows();
     if (rows.isEmpty) return;
+    if (once) _nearbyStoreAsked = true;
     final picked = await showNearbyStoreSheet(context, rows: rows);
     if (picked == null || !mounted || !_indoorEntered) return;
     await _anchorAtNearbyStore(picked);

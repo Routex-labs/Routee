@@ -1115,6 +1115,7 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     // 자리에 그대로 있어서, 다시 펼 때마다 묻는 것은 답을 아는 질문을 되묻는 것이다.
     if (!value && leftBuilding) {
       _entryFloorAsked = false;
+      _nearbyStoreAsked = false;
     }
     // 실내 안내를 켜고 끄는 유일한 지점이다.
     //

@@ -1416,6 +1416,14 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   /// 것은 답을 아는 질문을 되묻는 것이다.
   bool _entryFloorAsked = false;
 
+  /// 이번 진입에서 근처 매장 시트를 이미 자동으로 띄웠는지
+  /// ([_askNearbyStoreForAnchor]).
+  ///
+  /// [_entryFloorAsked]와 같은 규칙이다 — 자동으로는 진입 한 번에 한 번만 묻고,
+  /// 하단 바 "가까운 매장으로 위치 지정" 버튼으로 다시 여는 것은 이 제한을
+  /// 받지 않는다.
+  bool _nearbyStoreAsked = false;
+
   /// GPS 구독을 [_gpsTrackingWanted] 상태에 맞춘다. 구독 시작/해제의 유일한
   /// 진입점이라 중복 구독이나 해제 누락이 생기지 않는다.
   /// 위치 스트림의 수명(구독·재연결·벙어리 감시·일회성 조회)은 여기가 소유한다.
