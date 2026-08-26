@@ -307,11 +307,14 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
     // 다른 실내 미리 보기가 남긴 낡은 값일 수 있고(`outdoor_to_indoor_guidance_
     // start_test.dart`가 그 자리를 지킨다), 그러면 정의상 밖에서 시작해야 하는
     // 문 경유 안내(실외 → 건물 안 매장)가 "건물에 도착하면…"에 거꾸로 막힌다.
-    // 그래서 **지금 이 여정이 실내→야외라는 확실한 증거**
-    // ([_pendingOutdoorDestination], 이 함수 하나만 세운다)까지 함께 본다.
+    // 그래서 **지금 이 여정이 실내에서 출발한다는 확실한 증거**까지 함께 본다.
+    //
+    // 그 증거는 [_indoorLegIsPrelude]다. 한때 `_pendingOutdoorDestination`을
+    // 봤는데 그 값은 **도보만** 세운다 — 그래서 실내에서 대중교통·자동차로
+    // 나가는 사람은 이 갈래를 못 타고, 문 밖에서 시작하는 좌표열과 건물 안
+    // 자기 위치 사이 거리에 걸려 `경로 근처에 있을 때…`로 막혔다.
     if ((points.isEmpty && _indoorRoutePreviewOrigin != null) ||
-        (_indoorRouteDestination != null &&
-            _pendingOutdoorDestination != null)) {
+        (_indoorRouteDestination != null && _indoorLegIsPrelude)) {
       await _startIndoorGuidance();
       return;
     }

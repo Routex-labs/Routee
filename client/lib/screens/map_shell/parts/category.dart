@@ -151,13 +151,19 @@ extension _MapShellCategory on _MapShellScreenState {
             kFacilityFilters.any((f) => f.value == entry.subcategory))
           entry,
     ];
+    // **여기서 새로 재는 이유.** `_reachByNodeId`는 검색 패널이 갱신하는 값이라
+    // 시트를 열 때 비어 있거나 몇 걸음 전 자리에 머물러 있을 수 있다. "가장 가까운
+    // 화장실"은 **지금 선 자리**에서 나와야 하므로 이 순간의 값을 쓴다. 시작 노드는
+    // 경로 계산과 같은 규칙으로 고른다([reachFromCurrentPosition]).
+    final reach = await _outdoorKey.currentState?.reachFromCurrentPosition();
+    if (!mounted) return;
     setState(() => _facilitiesSheetOpen = true);
     // 지도 강조가 이 시트의 결과물이라 지도를 잠그지 않는다([_withMapsLocked]를
     // 쓰지 않는 이유). 시트를 놔둔 채 도면을 움직여 확인할 수 있어야 한다.
     final picked = await showFacilityFilterSheet(
       context,
-      floorLabel: _activeFloorNotifier,
       facilities: facilities,
+      reachByNodeId: reach,
       selected: _categorySelection?.category == kFacilityCategory
           ? _categorySelection?.subcategory
           : null,

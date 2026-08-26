@@ -36,6 +36,7 @@ import '../../domain/guidance/location_marker_glide.dart';
 import '../../domain/guidance/multi_floor_eta.dart';
 import '../../features/debug_mode/debug_mode.dart';
 import '../../domain/route/dijkstra.dart';
+import '../../domain/route/indoor_exit_legs.dart';
 import '../../domain/route/route_endpoint_fill.dart';
 import '../../domain/route/vertical_preference.dart';
 import '../../domain/guidance/route_guidance.dart';
@@ -598,6 +599,18 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
 
   String? _pendingOutdoorLabel;
 
+  /// 지금 그려진 실내 구간이 **바깥 여정의 앞 구간**인가.
+  ///
+  /// 실내 구간이 화면에 있다는 사실만으로는 이것을 알 수 없다. 같은 상태가 세
+  /// 가지 뜻을 가진다 — 실내→실내(여정 전체), 야외→실내(뒷 구간, 그쪽은 아직
+  /// [_pendingIndoorRoute]에 있다), 실내→야외·대중교통·자동차(앞 구간). 앞
+  /// 구간일 때만 하단 카드가 **바깥 여정을 말하면서 실내 시간을 함께 세야**
+  /// 하고, 경로 레이어도 두 선을 함께 그려야 한다.
+  ///
+  /// [showIndoorRouteTo]가 매번 거짓으로 되돌리고, 앞 구간으로 쓰는 셋이 그
+  /// 뒤에 참으로 세운다. 그래서 평범한 실내 길찾기 한 번이면 저절로 풀린다.
+  bool _indoorLegIsPrelude = false;
+
   /// 방금 걸어 나온 문의 좌표. 야외 구간을 **여기서부터** 다시 그린다
   /// ([_activatePendingOutdoorRoute]).
   ///
@@ -1068,6 +1081,18 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
 
   Timer? _escalatorGlideTimer;
 
+  /// 탑승 감지 뒤 마지막 복도 간선을 따라 탑승 노드로 붙는 짧은 활강.
+  ///
+  /// 수직 이동 활강([_escalatorGlide])과는 다른 구간이다. 원시 PDR가 마지막
+  /// 직각을 가로질러도 여기서는 경로 polyline만 따라가며, 끝에서야 탑승 lock을
+  /// 건다.
+  EscalatorGlide? _boardingApproachGlide;
+  Timer? _boardingApproachGlideTimer;
+  String? _boardingApproachGlideNodeId;
+  DateTime? _boardingApproachGlideStartedAt;
+  Duration _boardingApproachGlideDuration = Duration.zero;
+  double _boardingApproachGlideProgress = 0;
+
   /// 활강 진행률(0 = 탑승 노드, 1 = 하차 노드). 층 전환 덮개의 점이 이 값을
   /// 듣는다 — 지도 위 마커와 같은 값이라 덮개를 사이에 두고도 하나의 움직임이다.
   /// 객체 정체성이 유지돼야 셸이 매 프레임 다시 그리지 않는다.
@@ -1421,6 +1446,7 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
     _pdrAltitudeSub?.cancel();
     _pdrRawMotionSub?.cancel();
     _pdrHeadingSub?.cancel();
+    _boardingApproachGlideTimer?.cancel();
     _escalatorGlideTimer?.cancel();
     _elevatorGlideTimer?.cancel();
     _markerGlideTicker?.dispose();
@@ -1572,7 +1598,7 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
     );
   }
 
-  /// 현재 실내 계획 경로를 displayProgress 기준으로 나눈다.
+  /// 현재 실내 계획 경로를 지도용 진행률 기준으로 나눈다.
   ///
   /// 진행률이 없거나 현재 층 그래프가 아직 준비되지 않은 동안은 파란 경로
   /// 전체를 유지한다. 회색선을 만들기 위해 위치를 임의로 경로 위에 붙이지
@@ -1586,7 +1612,7 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
     }
     final split = splitRouteAtProgress(
       route.pointsLocalM,
-      _guidance.displayProgress,
+      _guidance.routeLineProgress,
     );
     final graph = _floorGraph;
     if (split == null || graph == null || graph.nodes.isEmpty) {
@@ -1824,6 +1850,8 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
         ..setRoute(null);
       _indoorMultiFloorRoute = null;
       _indoorRouteDestination = null;
+      // 거울상 여정이 여기서 시작한다 — 실내 구간은 **뒤에** 붙는다.
+      _indoorLegIsPrelude = false;
     });
     _syncDestinationLayer();
     _syncIndoorDestinationLayer();
@@ -2043,6 +2071,10 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
     // 실내 구간이 실제로 그려졌을 때만 다음으로 간다. 위 호출은 실패해도
     // 스낵바만 띄우고 조용히 돌아오므로, 성공 여부는 결과 상태로 확인한다.
     if (_indoorRouteDestination == null) return;
+    // 여기서부터 실내 구간은 **바깥 여정의 앞 구간**이다. 이 한 줄이 하단 카드가
+    // 문까지가 아니라 목적지까지를 말하게 하고([_outdoorEta]), 경로 레이어가 두
+    // 선을 함께 그리게 한다([_syncRouteLayerNow]).
+    setState(() => _indoorLegIsPrelude = true);
 
     // **야외 구간도 지금 함께 그린다.** 예전에는 예약만 걸어 두고 건물을 나가는
     // 순간에야 그렸는데, 그러면 "자동차·대중교통·도보 어느 것을 눌러도 실내
@@ -2053,7 +2085,15 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
     // 않고, `_route`를 null로 되돌렸다가 채우므로 카메라도 새 경로 전체에 맞춰
     // 다시 잡힌다([_applyRoute]) — 그 상자가 출구(=건물)부터 목적지까지라 실내
     // 구간도 그 안에 든다.
-    await showRouteTo(destination, label: label, origin: exit.point);
+    //
+    // **카드 라벨에 문을 적는다.** 안 적으면 "계양도서관까지"라고만 쓰인 카드가
+    // 건물 모서리로 향하는 선을 가리켜, 왜 목적지가 아닌 데로 가는지 알 수 없다.
+    // 거울상인 야외→실내가 [_journeyEtaLabel]로 같은 일을 한다.
+    await showRouteTo(
+      destination,
+      label: '$label까지 · $exitLabel 경유',
+      origin: exit.point,
+    );
     if (!mounted || _indoorRouteDestination == null) return;
 
     // **예약은 그래도 남긴다.** 방금 그린 야외 구간은 출구에서 출발하는 미리
@@ -2075,58 +2115,117 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
     _showSnack('$exitLabel로 나가 목적지까지 이어집니다');
   }
 
-  /// 건물 안에서 **타러 나가는** 대중교통 여정의 실내 구간을 그리고, 고른 문
+  /// 건물 안에서 **바깥 여정을 시작하러 나가는** 실내 구간을 그리고, 고른 문
   /// 좌표를 돌려준다. 실내 구간을 못 그렸으면 null이라 호출부가 예전처럼 야외
   /// 좌표를 그대로 쓴다([prepareIndoorLegFromDrop]의 거울상).
   ///
+  /// 대중교통(첫 승차 정류장)과 자동차(도로에 올라타는 자리)가 함께 쓴다. 도보만
+  /// [showIndoorToOutdoorRouteTo]로 따로 가는데, 그쪽은 실내·야외 두 구간을 한
+  /// 함수가 다 그리기 때문이다 — 여기는 바깥 구간을 호출부가 그린다.
+  ///
   /// **문은 실내 길찾기가 실제로 안내하는 문을 쓴다**
-  /// ([_nearestReachableEntrance]) — [boardingPoint](처음 타는 정류장) 직선거리가
+  /// ([_nearestReachableEntrance]) — [outdoorStart](정류장·도로 진입점) 직선거리가
   /// 아니다. 근거는 [showIndoorToOutdoorRouteTo]와 같다: 지도상 가까운 문이
   /// 실제로는 복도가 반대편으로 돌아 나가는 문일 수 있다.
   ///
-  /// 대중교통 경로를 그리기 **전에** 불러야 한다 — [showIndoorRouteTo]가
+  /// 바깥 경로를 그리기 **전에** 불러야 한다 — [showIndoorRouteTo]가
   /// `_userDestination`을 비우므로, 뒤에 부르면 방금 세운 도착 핀이 지워진다.
-  Future<ll.LatLng?> showIndoorLegToTransitBoarding(
-    ll.LatLng boardingPoint, {
+  Future<({ll.LatLng point, String label})?> showIndoorLegToOutdoorStart(
+    ll.LatLng outdoorStart, {
     PoiSearchResult? origin,
   }) async {
     final exitFloor = _groundEntranceFloor;
     if (exitFloor == null || _groundEntrances.isEmpty) return null;
 
-    final boardingBuilding = _building;
-    final boardingGraph = boardingBuilding == null
+    final exitBuilding = _building;
+    // **수직 이동 선호를 여기서도 싣는다.** 빠뜨리는 동안 대중교통만 기본
+    // (`auto`) 그래프로 문을 고르고, 그 다음 [showIndoorRouteTo]는 선호가 실린
+    // 그래프로 경로를 풀었다 — 같은 여정이 서로 다른 간선 집합 위에서 계산되고,
+    // 캐시 키가 `건물/정책`이라 그래프도 한 벌 더 받았다([_verticalQuery]).
+    final exitGraph = exitBuilding == null
         ? null
-        : await buildingRepository.getBuildingGraph(boardingBuilding.id);
+        : await buildingRepository.getBuildingGraph(
+            exitBuilding.id,
+            vertical: _verticalQuery,
+          );
     if (!mounted) return null;
 
     final exit =
         _nearestReachableEntrance(
-          graph: boardingGraph,
+          graph: exitGraph,
           origin: origin,
-          destination: boardingPoint,
+          destination: outdoorStart,
         ) ??
-        nearestEntrance(_groundEntrances, boardingPoint);
+        nearestEntrance(_groundEntrances, outdoorStart);
     if (exit == null) return null;
 
+    final exitLabel = entranceDirectionLabel(
+      exit,
+      _buildingCenter(_buildingFootprint ?? const []),
+    );
     await showIndoorRouteTo(
       PoiSearchResult(
-        name: entranceDirectionLabel(
-          exit,
-          _buildingCenter(_buildingFootprint ?? const []),
-        ),
+        name: exitLabel,
         floor: exitFloor,
         point: exit.point,
-        nodeId: entranceRouteNodeId(boardingGraph?.nodes, exit),
+        nodeId: entranceRouteNodeId(exitGraph?.nodes, exit),
       ),
       origin: origin,
     );
     if (!mounted) return null;
     // 위 호출은 실패해도 스낵바만 띄우고 조용히 돌아온다. 성공 여부는 결과
     // 상태로 확인한다 — 실내 구간이 없으면 문을 출발점으로 삼을 근거도 없다.
-    return _indoorRouteDestination == null ? null : exit.point;
+    if (_indoorRouteDestination == null) return null;
+    // 실내 구간은 여기서부터 바깥 여정의 앞 구간이다([_indoorLegIsPrelude]).
+    setState(() => _indoorLegIsPrelude = true);
+    // **문 이름도 함께 돌려준다.** 호출부가 카드 라벨에 적어야 왜 바깥 선이
+    // 목적지가 아니라 건물 모서리에서 시작하는지 화면에서 읽힌다.
+    return (point: exit.point, label: exitLabel);
   }
 
-  /// [showIndoorToOutdoorRouteTo]·[showIndoorLegToTransitBoarding]이 함께 쓰는
+  /// 지금 서 있는 곳(또는 [origin])에서 **지상 출입구들까지의 실내 구간**을 한
+  /// 번에 잰다. 나가는 방향이 여럿인 화면이 쓴다 — 대중교통 후보 목록은 후보마다
+  /// 처음 타는 정류장이 달라 문도 갈릴 수 있는데, 후보마다 그래프를 다시 훑으면
+  /// 같은 다익스트라를 후보 수만큼 돌린다([IndoorExitReach]).
+  ///
+  /// 그래프·앵커·출입구 중 하나라도 없으면 null이다. 호출부는 그것을 **정상
+  /// 상황으로** 다뤄야 한다 — 실내 시간이 목록에서 빠질 뿐, 목록 자체는 뜬다.
+  Future<IndoorExitReach?> indoorExitReach({PoiSearchResult? origin}) async {
+    final building = _building;
+    if (building == null || _groundEntrances.isEmpty) return null;
+    final graph = await buildingRepository.getBuildingGraph(
+      building.id,
+      vertical: _verticalQuery,
+    );
+    if (!mounted) return null;
+    final reach = _indoorExitReach(graph: graph, origin: origin);
+    return reach == null || reach.isEmpty ? null : reach;
+  }
+
+  /// [reach]를 들고 [target] 쪽으로 나갈 때 앞에 붙는 실내 구간 — 몇 초, 몇 m,
+  /// 어느 문. 닿는 문이 없으면 null.
+  ///
+  /// 시간은 **비용**(costM)으로 잰다. 엘리베이터 대기·탑승이 거기 들어 있어,
+  /// 실거리로 재면 층을 옮기는 구간이 실제보다 짧게 나온다([_indoorEta]와 같은
+  /// 규칙). 초로 바꾸는 일을 화면이 아니라 여기서 하는 이유는 보행 속도가 이
+  /// 화면의 튜닝 상수이기 때문이다([indoorWalkingSpeedMetersPerSecond]).
+  ({int seconds, double meters, String exitName})? indoorLeadFor(
+    IndoorExitReach reach,
+    ll.LatLng target,
+  ) {
+    final leg = reach.towards(target);
+    if (leg == null) return null;
+    return (
+      seconds: (leg.costM / indoorWalkingSpeedMetersPerSecond).round(),
+      meters: leg.distanceM,
+      exitName: entranceDirectionLabel(
+        leg.entrance,
+        _buildingCenter(_buildingFootprint ?? const []),
+      ),
+    );
+  }
+
+  /// [showIndoorToOutdoorRouteTo]·[showIndoorLegToOutdoorStart]이 함께 쓰는
   /// 출구 선택. **실내 복도 거리와 [destination]까지의 야외 직선거리를 더한
   /// 총 이동거리**가 가장 작은 문을 고른다([nearestEntranceByTotalJourney]).
   ///
@@ -2142,6 +2241,19 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
     required BuildingGraph? graph,
     required PoiSearchResult? origin,
     required ll.LatLng destination,
+  }) => _indoorExitReach(
+    graph: graph,
+    origin: origin,
+  )?.towards(destination)?.entrance;
+
+  /// 위 문 선택의 재료. 문마다 **거리와 비용**을 함께 담는다 — 화면에 적는
+  /// "몇 m"는 거리이고 "몇 분"은 엘리베이터 대기까지 든 비용이다.
+  ///
+  /// 문 고르기와 나누어 둔 이유는 [indoorExitReach]에 있다(목적지가 여럿인
+  /// 화면이 이 계산을 한 번만 하게 한다).
+  IndoorExitReach? _indoorExitReach({
+    required BuildingGraph? graph,
+    required PoiSearchResult? origin,
   }) {
     if (graph == null || _groundEntrances.isEmpty) return null;
     final originNodeId = origin?.nodeId;
@@ -2167,12 +2279,11 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
       return null;
     }
 
-    final reachable = <({BuildingEntrance entrance, double indoorDistanceM})>[
+    return IndoorExitReach([
       for (final entrance in _groundEntrances)
         if (reach[entranceRouteNodeId(graph.nodes, entrance)] case final r?)
-          (entrance: entrance, indoorDistanceM: r.distanceM),
-    ];
-    return nearestEntranceByTotalJourney(reachable, destination);
+          (entrance: entrance, distanceM: r.distanceM, costM: r.costM),
+    ]);
   }
 
   /// 이 화면에 그려진 안내를 **전부** 지운다 — 야외 도보 구간과 실내 구간까지.
@@ -2246,6 +2357,9 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
       _userDestinationLabel = null;
       _indoorRouteDestination = destination;
       _indoorRoutePreviewOrigin = preview ? origin : null;
+      // 이 호출만 놓고 보면 실내 구간이 여정 전체다. 앞 구간으로 쓰는 셋은 이
+      // 함수를 부른 **뒤에** 다시 세운다([_indoorLegIsPrelude]).
+      _indoorLegIsPrelude = false;
       _arrivedDestination = null;
       _guidanceStarted = false;
       // 목적지가 바뀌면 새로운 길안내다. 기존 궤적을 남기면 새 파란 경로와
@@ -2347,23 +2461,47 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
     return nearest?.id;
   }
 
-  /// 야외 구간 ETA. 문 경유 안내 중이면 실내 구간까지 더한다 — 안 더하면 "이솝까지"
-  /// 라고 적어 두고 **문까지의** 값을 보여 준다.
+  /// 바깥 여정 **앞에 붙은** 실내 구간의 거리·비용. 앞 구간이 아니거나 실내
+  /// 구간이 안 그려져 있으면 null이다([_indoorLegIsPrelude]).
+  ///
+  /// 값은 [_indoorEta]를 그대로 쓴다 — 걸은 만큼 줄어드는 것도, 층 전환 비용이
+  /// 시간에만 들어가는 것도 실내 카드와 같아야 한다. 규칙이 갈리면 문을 나서기
+  /// 전과 후에 같은 여정의 남은 시간이 어긋난다.
+  ({double distanceM, double costM})? _indoorPreludeEta() {
+    if (!_indoorLegIsPrelude) return null;
+    if (_indoorMultiFloorRoute == null && _indoorRouteSegment == null) {
+      return null;
+    }
+    return _indoorEta();
+  }
+
+  /// 야외 구간 ETA. 같은 여정에 실내 구간이 붙어 있으면 함께 더한다 — 안 더하면
+  /// "이솝까지"라고 적어 두고 **문까지의** 값을 보여 준다.
+  ///
+  /// 실내 구간은 앞·뒤 두 자리에 붙을 수 있고 **한 여정에 둘이 함께 오지는
+  /// 않는다.** 뒤는 야외→실내의 [_pendingIndoorRoute](아직 승격 전), 앞은
+  /// 실내→야외·대중교통·자동차의 [_indoorPreludeEta]다. 그래도 그냥 더한다 —
+  /// 배타적이라는 것을 이 함수가 다시 검사하면, 언젠가 한쪽이 남았을 때 조용히
+  /// 빠지는 쪽이 생긴다.
   ///
   /// 시간은 실내 구간의 **비용**(costM)으로 잰다(엘리베이터 대기가 거기 있다).
   /// 거리는 실거리로 더한다. [_indoorEta]와 같은 규칙이다.
   ({double distanceM, int minutes}) _outdoorEta(DirectionsRoute route) {
-    final leg = _pendingIndoorRoute;
-    if (leg == null) {
+    final trailing = _pendingIndoorRoute;
+    final leading = _indoorPreludeEta();
+    final indoorDistanceM =
+        (trailing?.totalDistanceMeters ?? 0) + (leading?.distanceM ?? 0);
+    final indoorCostM =
+        (trailing?.totalCostMeters ?? 0) + (leading?.costM ?? 0);
+    if (indoorDistanceM <= 0 && indoorCostM <= 0) {
       return (
         distanceM: route.distanceMeters,
         minutes: (route.durationSeconds / 60).ceil().clamp(1, 999),
       );
     }
-    final indoorSeconds =
-        leg.totalCostMeters / indoorWalkingSpeedMetersPerSecond;
+    final indoorSeconds = indoorCostM / indoorWalkingSpeedMetersPerSecond;
     return (
-      distanceM: route.distanceMeters + leg.totalDistanceMeters,
+      distanceM: route.distanceMeters + indoorDistanceM,
       minutes: ((route.durationSeconds + indoorSeconds) / 60).ceil().clamp(
         1,
         999,
@@ -2794,13 +2932,17 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   ///
   /// **목록을 실제로 만들어 보지 않는다.** 상위 build마다 불리는 값이라, 매장
   /// 전부를 층 좌표로 되돌리는 일을 여기서 하면 프레임마다 반복된다. 전제
-  /// (도면·그래프·기준점)만 확인하고, 목록이 비는 드문 경우는 시트를 여는
-  /// 쪽이 조용히 되돌린다([_askNearbyStoreForAnchor]).
+  /// (도면·그래프)만 확인하고, 목록이 비는 드문 경우는 시트를 여는 쪽이 조용히
+  /// 되돌린다([_askNearbyStoreForAnchor]).
+  ///
+  /// **기준점은 묻지 않는다.** 한때 앵커나 어림 위치를 요구했는데, 그러면 이
+  /// 버튼이 **정작 위치를 고치려는 순간에 사라진다** — 앵커가 엉뚱한 층에 찍혀
+  /// 있거나 아예 없을 때가 이 목록이 가장 필요한 때다. 기준점이 없으면 목록은
+  /// 화면 한가운데를 기준으로 세운다([_nearbyStoreRows]).
   bool get canPickNearbyStore =>
       _indoorEntered &&
       _floorPlan != null &&
-      (_floorGraph?.nodes.isNotEmpty ?? false) &&
-      (_pdrTrailState.anchor != null || _estimatedFloorPoint() != null);
+      (_floorGraph?.nodes.isNotEmpty ?? false);
 
   /// 하단 바 "위치 지정" 버튼 진입점. PDR 세션이 꺼져 있으면 활성 층으로 시작
   /// 하고, 이미 켜져 있으면(다른 층에서 이어서 진입 등) 앵커만 다시 잡도록

@@ -505,6 +505,8 @@ extension _MapShellRoutePlan on _MapShellScreenState {
     origin: _selectedOrigin,
     destination: _routeDraftDestination,
     indoorContextActive: _indoorContextActive,
+    indoorStartReady:
+        indoorNavigationDriver.currentCalibration.canRenderPosition,
   );
 
   /// 두 끝점이 검색어가 아니라 실제 위치로 확정됐는지.

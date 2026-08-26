@@ -19,11 +19,6 @@ class CorridorTrackingSession {
 
   CorridorTrackingResult? get result => _tracker?.result;
 
-  /// 경로 이탈이 확정된 경우에만 호출한다. 일반 후보 교체의 연속성 보호는
-  /// tracker가 계속 맡고, 여기서는 화면 마커의 shadow만 현재 후보로 복귀시킨다.
-  CorridorTrackingResult? snapMarkerToMatchedPreview() =>
-      _tracker?.snapMarkerToMatchedPreview();
-
   /// 직전 [update]가 tracker에 실제로 넘긴 관측. 디버그 레코더가 정확 재생용
   /// 입력 이벤트로 기록한다. 재초기화(reset) 경로였다면 null이다.
   CorridorObservation? get lastObservation => _lastObservation;

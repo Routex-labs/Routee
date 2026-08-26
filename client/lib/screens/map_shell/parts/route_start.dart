@@ -71,19 +71,50 @@ extension _MapShellRouteStart on _MapShellScreenState {
     DirectionsCandidate destination,
   ) async {
     final outdoor = _outdoorKey.currentState;
-    // 실내 지점이 출발지면 건물 문으로 바꾼다. 건물 안 좌표를 그대로 보내면
-    // TMAP이 건물 반대편 도로에 스냅해, 실제로 나가는 문과 다른 곳에서 경로가
-    // 시작한다. 도착지도 같은 이유로 문으로 바꾼다.
-    final from = origin == null
-        ? outdoor?.routeOriginPoint
-        : (outdoor?.entranceIfInsideBuilding(origin.point) ?? origin.point);
-    if (outdoor == null || from == null) {
+    if (outdoor == null) {
       _showSnack('현재 위치를 아직 못 잡았습니다. GPS 신호를 확인하거나 출발지를 직접 지정해주세요.');
       return;
     }
+    // 도착지가 건물 안이면 문으로 바꾼다. 건물 안 좌표를 그대로 보내면 TMAP이
+    // 건물 반대편 도로에 스냅해, 실제로 들어가는 문과 다른 곳에서 경로가 끝난다.
     final to =
         outdoor.entranceIfInsideBuilding(destination.point) ??
         destination.point;
+
+    // **건물 안에서 출발하면 차를 타러 나가는 실내 구간을 먼저 그린다.**
+    //
+    // 대중교통과 **같은 함수·같은 판정**을 쓴다([journeyStartsIndoors]) — 셋 중
+    // 자동차만 이 구간이 없는 동안에는, 실내에서 수단을 자동차로 바꾸는 것만으로
+    // 안내의 앞부분이 통째로 사라졌다. 게다가 출발지가 "현재 위치"면 아래
+    // `routeOriginPoint`가 건물 안 GPS라, 그 좌표에서 가장 가까운 도로로 스냅해
+    // 실제로 나가는 문과 반대편에서 경로가 시작하는 일이 실제로 있었다.
+    //
+    // 자동차 경로를 그리기 **전에** 부른다 — 그 함수가 `_userDestination`을
+    // 비우므로, 뒤에 부르면 방금 세운 도착 핀이 지워진다.
+    final exit =
+        journeyStartsIndoors(
+          origin: _selectedOrigin,
+          indoorStartReady:
+              indoorNavigationDriver.currentCalibration.canRenderPosition,
+        )
+        ? await outdoor.showIndoorLegToOutdoorStart(
+            to,
+            origin: _indoorOriginPoi(),
+          )
+        : null;
+    if (!mounted) return;
+
+    // 실내 지점이 출발지면 건물 문으로 바꾼다 — 위와 같은 스냅 문제다. 실내
+    // 구간을 그렸으면 그 문이 이미 출발점이라 다시 고르지 않는다.
+    final from =
+        exit?.point ??
+        (origin == null
+            ? outdoor.routeOriginPoint
+            : (outdoor.entranceIfInsideBuilding(origin.point) ?? origin.point));
+    if (from == null) {
+      _showSnack('현재 위치를 아직 못 잡았습니다. GPS 신호를 확인하거나 출발지를 직접 지정해주세요.');
+      return;
+    }
     final options = await directionsRepository.getDrivingRouteOptions(
       origin: from,
       destination: to,
@@ -97,7 +128,12 @@ extension _MapShellRouteStart on _MapShellScreenState {
       options.options,
       origin: from,
       destination: to,
-      label: destination.title,
+      // 문을 경유하면 카드에도 적는다. 안 적으면 "계양도서관"이라고만 쓰인
+      // 카드가 건물 모서리에서 시작하는 선을 가리킨다(도보 쪽
+      // `showIndoorToOutdoorRouteTo`와 같은 판단).
+      label: exit == null
+          ? destination.title
+          : '${destination.title}까지 · ${exit.label} 경유',
     );
   }
 
@@ -135,6 +171,7 @@ extension _MapShellRouteStart on _MapShellScreenState {
     // 자동차로 길을 찾아 본 사용자에게는 그 값이 그대로 남아 있고, 그 상태로
     // 건물 안 매장을 고르면 아래 분기가 자동차로 흘려보내 실내 구간이 시작조차
     // 못 한다.
+    _warnIfIndoorLegSkipped(origin, destination);
     if (autoSelectMode) {
       final mode = destination.nodeId == null
           ? _defaultTravelMode(origin, destination)
@@ -151,6 +188,33 @@ extension _MapShellRouteStart on _MapShellScreenState {
       case RoutePlanMode.walk:
         await _startWalkRoute(origin: origin, destination: destination);
     }
+  }
+
+  /// 건물 안에 서 있는데 **실내 위치가 없어 실내 구간이 통째로 빠지는** 경우를
+  /// 말한다.
+  ///
+  /// 세 수단이 다 같은 문턱을 쓴다([journeyStartsIndoors]·[classifyWalkRoute]) —
+  /// 도면이 떠 있어도 실내 위치가 없으면 "밖에 있는 사람"으로 보고 바깥 경로만
+  /// 그린다. 그 판정 자체는 맞다(도면은 확대만으로도 켜진다). 문제는 **조용히**
+  /// 그랬다는 것이다: 3층에 선 사용자가 "도보 12분"을 보는데 그 12분은 문에서
+  /// 출발하는 값이고, 화면에는 왜 실내 구간이 없는지도, 무엇을 하면 되는지도
+  /// 적혀 있지 않았다(실기기 지적).
+  ///
+  /// 경로를 막지는 않는다. 바깥 경로는 그대로 쓸모가 있고, 여기서 되돌리면
+  /// 정말 밖에 있는 사용자가 길찾기를 못 한다.
+  void _warnIfIndoorLegSkipped(
+    DirectionsCandidate? origin,
+    DirectionsCandidate destination,
+  ) {
+    // 출발지를 직접 골랐으면 그 노드가 시작점이라 실내 위치가 필요 없다.
+    // 도착지가 건물 안이면 이 여정은 실내로 **들어가는** 쪽이라 해당 없다.
+    if (origin != null || destination.nodeId != null) return;
+    if (!_indoorContextActive) return;
+    if (indoorNavigationDriver.currentCalibration.canRenderPosition) return;
+    // 눌러야 할 버튼을 깜빡여 가리킨다 — 문장으로 버튼을 지목하면 그 문장이
+    // 버튼을 가린다([_onNeedLocationPlacement]).
+    _onNeedLocationPlacement();
+    _showSnack('실내 위치를 잡으면 지금 층에서 출구까지도 함께 안내합니다.');
   }
 
   /// 도보 길찾기. **어느 갈래인지는 [classifyWalkRoute]가 정하고, 여기서는 그
@@ -170,6 +234,10 @@ extension _MapShellRouteStart on _MapShellScreenState {
       indoorContextActive: _indoorContextActive,
       indoorStartReady:
           indoorNavigationDriver.currentCalibration.canRenderPosition,
+    );
+    debugPrint(
+      '[walk] 갈래 $kind · 도면 $_indoorContextActive · '
+      '실내위치 ${indoorNavigationDriver.currentCalibration.canRenderPosition}',
     );
     switch (kind) {
       // 화면(탭)을 바꾸지 않고 야외 화면 그대로에 실내 경로를 그린다 — 방금

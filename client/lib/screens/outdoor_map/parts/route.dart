@@ -791,6 +791,28 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
     return '${destination.name}까지 · $label 경유';
   }
 
+  /// 지금 쥐고 있는 문에서 예약된 목적지까지 실내 구간을 **그 자리에서** 푼다.
+  /// 재료(여정 그래프·문·목적지 노드) 중 하나라도 없으면 null.
+  ///
+  /// [_retargetJourneyEntrance]와 **같은 계산**이다 — 그쪽이 문이 바뀔 때마다
+  /// 하는 일을, 여기서는 들어온 순간 한 번 더 한다.
+  MultiFloorRoute? _solveIndoorLegFromJourneyEntrance() {
+    final graph = _journeyBuildingGraph;
+    final endNodeId = _pendingIndoorDestination?.nodeId;
+    final entrance = _journeyEntrance ?? _selectedEntrance;
+    if (graph == null || endNodeId == null || entrance == null) return null;
+    final leg = computeMultiFloorRoute(
+      graph,
+      entranceRouteNodeId(graph.nodes, entrance),
+      endNodeId,
+    );
+    debugPrint(
+      '[indoor leg] 진입 시 재계산 — 문 ${entrance.id} · '
+      '구간 ${leg?.segments.length ?? -1}개',
+    );
+    return (leg == null || leg.isEmpty) ? null : leg;
+  }
+
   /// 안내 중인 문이 바뀌었으면 야외 도착점과 실내 구간을 새 문 기준으로 다시 맞춘다.
   ///
   /// 실내 구간은 서버에 다시 묻지 않고 들고 있던 그래프로 그 자리에서 푼다 —
@@ -812,14 +834,30 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
             entranceRouteNodeId(graph.nodes, entrance),
             endNodeId,
           );
+    final wasTargeting = _journeyEntrance;
     setState(() {
       _journeyEntrance = entrance;
       _userDestination = entrance.point;
       _userDestinationLabel = _journeyEtaLabel(destination, entrance);
       // 새 문에서 경로가 안 풀리면 옛 구간을 남기지 않는다. 남기면 사용자는
       // 남쪽 문으로 걸어가는데 실내 안내만 서쪽 문에서 시작하는 상태가 된다.
+      // 비어도 진입은 막히지 않는다 — 들어온 문에서 그 자리에서 다시 푼다
+      // ([_solveIndoorLegFromJourneyEntrance]).
       _pendingIndoorRoute = (leg == null || leg.isEmpty) ? null : leg;
     });
+    // **바뀌었으면 말한다.** 카드 라벨과 야외 도착점이 함께 바뀌는데 조용히
+    // 바꾸면 "남서쪽 출구로 가고 있었는데 갑자기 남쪽 출구"가 되어, 앱이 엉뚱한
+    // 데로 데려가는 것으로 읽힌다. 문 선택에는 15 m 히스테리시스가 있어
+    // ([kEntranceSwitchMarginMeters]) 서 있는 동안 왔다갔다 하지는 않는다.
+    //
+    // **처음 고르는 것은 바뀐 것이 아니다**([wasTargeting]이 null) — 그건 안내를
+    // 걸 때 이미 카드에 적힌 문이라, 여기서 또 말하면 시작하자마자 한 줄이 뜬다.
+    // 걷는 중일 때만 말한다: 계획 화면에서는 아직 그 문으로 향한 적이 없다.
+    if (wasTargeting != null && _guidanceStarted) {
+      _showSnack(
+        '${entranceDirectionLabel(entrance, _buildingCenter(_buildingFootprint ?? const []))}로 안내를 바꿨습니다',
+      );
+    }
   }
 
   /// 건물에 들어간 순간, 미리 풀어 둔 실내 구간을 실제 안내로 승격한다.
@@ -828,9 +866,22 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
   /// 들어갔다가 다시 밖으로 나온 사용자에게 아무 경로도 안 남는다 — 안내가
   /// 통째로 사라진 것처럼 보이고, 처음부터 다시 검색해야 한다.
   Future<void> _activatePendingIndoorRoute() async {
-    final route = _pendingIndoorRoute;
     final destination = _pendingIndoorDestination;
-    if (route == null || destination == null) return;
+    if (destination == null) return;
+    // **예약된 구간이 비어 있으면 그 자리에서 다시 푼다.**
+    //
+    // 문은 걷는 동안 GPS를 따라 바뀌고([_retargetJourneyEntrance]), 새 문에서
+    // 경로가 안 풀리면 그 값이 null로 남는다. 그런데 진입 버튼은 목적지 예약만
+    // 본다([_guidanceEntersBuilding]) — 그래서 버튼은 그대로 뜨고, 눌러 들어오면
+    // 여기서 조용히 돌아서 **건물 안에 들어왔는데 경로가 없는** 화면이 됐다.
+    //
+    // 다시 푸는 데는 네트워크가 필요 없다. 들고 있던 여정 그래프로 방금 들어온
+    // 문에서 목적지까지 풀면 된다 — 문이 바뀔 때 하는 일과 같다.
+    final route = _pendingIndoorRoute ?? _solveIndoorLegFromJourneyEntrance();
+    if (route == null) {
+      _showSnack('건물 안 경로를 계산하지 못했습니다. 층 선택기로 목적지 층을 열어보세요.');
+      return;
+    }
 
     // 야외 안내가 살아 있을 때만 같은 여정의 다음 구간이다. 완료·취소된 이전
     // 안내가 남긴 예약을 새 실내 안내로 올리면, 그 회색선을 이어 붙여서는 안 된다.
@@ -850,6 +901,11 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
       _pendingIndoorDestination = null;
       _journeyEntrance = null;
       _indoorRouteDestination = destination;
+      // **이 실내 구간은 여정의 뒷 구간이다.** 여기는 [showIndoorRouteTo]를 거치지
+      // 않으므로 그 함수가 해 주던 초기화가 없다 — 직전 여정이 실내→야외였다면
+      // 참이 남아, 방금 건물에 들어온 사람에게 바깥 카드가 계속 자리를 쥐고
+      // 이미 걸어온 야외 선까지 다시 그린다([_indoorLegIsPrelude]).
+      _indoorLegIsPrelude = false;
       // 새 안내가 시작되면 지난 도착 카드는 자리를 비운다.
       _arrivedDestination = null;
       _indoorMultiFloorRoute = route;
@@ -1354,6 +1410,7 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
       _indoorMultiFloorRoute = null;
       _indoorRouteDestination = null;
       _indoorRoutePreviewOrigin = null;
+      _indoorLegIsPrelude = false;
       if (endGuidance) _guidanceStarted = false;
       _guidanceTrailSession.clear();
     });
@@ -1423,6 +1480,15 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
   void _dismissUserDestinationFromEtaCard() {
     _retainEtaClosePointer();
     _clearUserDestination();
+    // **앞 구간도 함께 끝낸다.** 이 카드가 실내→야외 여정을 대표할 때
+    // ([_indoorLegIsPrelude]) 야외 구간만 지우면 실내 구간이 남고, 다음 프레임에
+    // 실내 카드가 그 자리를 도로 받아 `안내 시작`이 다시 뜬다 — 사용자에게는
+    // **`안내 종료`가 안 먹는 화면**이다(실기기).
+    //
+    // 조건을 다는 이유는 거울상 때문이다. 야외→실내 여정의 실내 구간은 아직
+    // 예약(`_pendingIndoorRoute`)이라 [_clearUserDestination]이 이미 걷어내고,
+    // 그때 여기서 한 번 더 지우면 끝난 적 없는 안내 세션까지 닫는다.
+    if (_indoorLegIsPrelude) _clearIndoorRoute();
     widget.onGuidanceDismissed?.call();
   }
 

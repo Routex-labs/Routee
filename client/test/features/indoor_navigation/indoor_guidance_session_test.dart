@@ -824,6 +824,84 @@ void main() {
       expect(markerPosition.northM, greaterThan(1));
     });
 
+    test('짧은 마지막 직각 간선도 탑승 노드까지 마커를 계속 보낸다', () {
+      const graph = FloorGraph(
+        nodes: [
+          GraphNode(id: 'a', type: 'corridor', xM: 0, yM: 0),
+          GraphNode(id: 'vestibule', type: 'junction', xM: 7, yM: 0),
+          GraphNode(
+            id: 'es-up',
+            type: 'escalator',
+            name: 'ES1-UP(TO2F)',
+            xM: 7,
+            yM: 5,
+          ),
+        ],
+        edges: [
+          GraphEdge(
+            id: 'ab',
+            fromNodeId: 'a',
+            toNodeId: 'vestibule',
+            lengthM: 7,
+            bidirectional: true,
+            geometryLocalM: [LocalPoint(0, 0), LocalPoint(7, 0)],
+          ),
+          GraphEdge(
+            id: 'boarding-leg',
+            fromNodeId: 'vestibule',
+            toNodeId: 'es-up',
+            lengthM: 5,
+            bidirectional: true,
+            geometryLocalM: [LocalPoint(7, 0), LocalPoint(7, 5)],
+          ),
+        ],
+      );
+      const route = IndoorRoute(
+        points: [],
+        pointsLocalM: [LocalPoint(0, 0), LocalPoint(7, 0), LocalPoint(7, 5)],
+        nodeIds: ['a', 'vestibule', 'es-up'],
+        edgeIds: ['ab', 'boarding-leg'],
+        distanceMeters: 12,
+      );
+      const multiFloorRoute = MultiFloorRoute(
+        segments: [
+          IndoorRouteSegment(
+            floorId: '1F',
+            floorName: '1F',
+            route: route,
+            transferModeToNext: 'escalator',
+            transferFromNodeId: 'es-up',
+          ),
+        ],
+        totalDistanceMeters: 12,
+        totalCostMeters: 12,
+      );
+      final session = newSession()
+        ..attach(buildingId: 'b1')
+        ..setContext(floorId: '1F', graph: graph, floorLabels: ['1F', '2F'])
+        ..setAnchor(_anchor(eastM: 0))
+        ..setRouteSegment(route)
+        ..setRoute(multiFloorRoute);
+
+      for (var steps = 0; steps <= 13; steps += 1) {
+        session.onSnapshot(_walkedNorthTurn(steps), timestampMs: steps * 500);
+      }
+
+      final marker = session.position!.localM;
+      expect(
+        session.isPositionHeld,
+        isFalse,
+        reason: '전실 노드 통과만으로 마지막 5m 간선에서 멈추면 안 된다',
+      );
+      expect(session.trackingResult!.currentEdgeId, 'boarding-leg');
+      expect(marker.northM, greaterThan(1));
+      expect(
+        marker.northM,
+        lessThan(5),
+        reason: '탑승 노드에 닿기 전에는 그 간선을 따라 계속 진행한다',
+      );
+    });
+
     test('교차점 통과 중에도 회색선 기준과 마커 위치를 분리한다', () {
       final session = newSession()
         ..attach(buildingId: 'b1')
@@ -852,40 +930,9 @@ void main() {
       final markerPosition = session.position!.localM;
       expect(sawPendingDeviation, isTrue);
       expect(session.displayProgress!.traveledM, closeTo(7, 0.8));
+      expect(session.routeLineProgress, same(session.displayProgress));
       expect(trackerPosition.northM, greaterThan(0));
       expect(markerPosition.northM, greaterThan(0));
-    });
-
-    test('확정 이탈이면 shadow를 풀고 새 경로의 출발점으로 쓴다', () {
-      final session = newSession()
-        ..attach(buildingId: 'b1')
-        ..setContext(floorId: '1F', graph: _branchGraph)
-        ..setAnchor(_anchor(eastM: 0))
-        ..setRouteSegment(_branchRoute);
-
-      var rerouteRequested = false;
-      for (var steps = 0; steps <= 30; steps += 1) {
-        final result = session.onSnapshot(
-          _walkedNorthTurn(steps),
-          timestampMs: steps * 500,
-        );
-        final update = session.updateProgress(
-          result,
-          previewSteps: steps,
-          nowMs: steps * 500,
-        );
-        if (!update.shouldReroute) continue;
-
-        rerouteRequested = true;
-        expect(session.trackingResult!.previewUsesContinuityShadow, isFalse);
-        expect(
-          session.position!.localM,
-          session.trackingResult!.matchedPreviewPosition,
-        );
-        break;
-      }
-
-      expect(rerouteRequested, isTrue);
     });
 
     test('같은 경로 밖 복도에 머물면 재탐색을 반복 요청하지 않는다', () {
@@ -911,7 +958,6 @@ void main() {
 
       expect(rerouteRequests, 1);
     });
-
     test('경로 표시선이 달라도 실제 마커는 tracker 위치를 유지한다', () {
       const shiftedRoute = IndoorRoute(
         points: [],
@@ -939,6 +985,7 @@ void main() {
         session.onSnapshot(_walkedEast(5), timestampMs: 1000),
         previewSteps: 5,
       );
+      expect(session.routeLineProgress, same(session.measuredProgress));
       final after5 = session.displayProgress!.remainingM;
 
       session.updateProgress(

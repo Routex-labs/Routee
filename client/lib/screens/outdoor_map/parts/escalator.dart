@@ -135,14 +135,18 @@ extension OutdoorMapEscalator on OutdoorMapBodyState {
     for (final change in changes) {
       switch (change.phase) {
         case EscalatorPhase.boardingDetected:
+          _startBoardingApproachGlide(change);
+          if (!mounted) return;
+          setState(() => _escalatorStage = change);
+          break;
         case EscalatorPhase.verticalMotionDetected:
           if (!mounted) return;
           setState(() => _escalatorStage = change);
-          if (change.phase == EscalatorPhase.verticalMotionDetected) {
-            _enqueueFloorTransition(_pauseStepsForRide);
-          }
+          _enqueueFloorTransition(_pauseStepsForRide);
+          break;
         case EscalatorPhase.cancelled:
         case EscalatorPhase.failed:
+          _stopBoardingApproachGlide();
           if (!mounted) return;
           setState(() => _escalatorStage = null);
           // 후보가 열린 뒤의 취소는 층·경로 복원까지 해야 하므로 cancelled
@@ -151,14 +155,17 @@ extension OutdoorMapEscalator on OutdoorMapBodyState {
           if (change.transition == null) {
             _enqueueFloorTransition(_endEscalatorRide);
           }
+          break;
         case EscalatorPhase.midpointReached:
         case EscalatorPhase.landed:
           // 여기서 단계를 비우지 않는다. 층 전환은 큐를 거쳐 다음 프레임 이후에
           // 적용되므로, 지금 비우면 그 사이 배너가 한 번 깜빡였다가 다시 뜬다.
           break;
         case EscalatorPhase.idle:
+          _stopBoardingApproachGlide();
           if (!mounted) return;
           setState(() => _escalatorStage = null);
+          break;
       }
     }
     // 기압 단계가 고정을 걸거나 풀면 다음 걸음 snapshot을 기다리지 않고 마커
@@ -186,11 +193,13 @@ extension OutdoorMapEscalator on OutdoorMapBodyState {
     if (_escalatorRide == null &&
         _escalatorStage == null &&
         !_stepsPausedForRide &&
+        _boardingApproachGlide == null &&
         _escalatorGlide == null &&
         _floorSwapVeil == 0) {
       return;
     }
     if (mounted) {
+      _stopBoardingApproachGlide();
       _stopEscalatorGlide();
       _floorSwapVeilTimer?.cancel();
       _floorSwapVeilTimer = null;
@@ -296,6 +305,7 @@ extension OutdoorMapEscalator on OutdoorMapBodyState {
     required List<ll.LatLng>? points,
     required EscalatorTransition transition,
   }) {
+    _finishBoardingApproachGlide();
     _escalatorGlideTimer?.cancel();
     _escalatorGlideTimer = null;
     if (points == null) {
@@ -363,6 +373,107 @@ extension OutdoorMapEscalator on OutdoorMapBodyState {
     if (_escalatorGlide == null) return;
     _escalatorGlide = null;
     _escalatorGlideProgress.value = 0;
+    unawaited(_syncPdrCurrentLayer());
+  }
+
+  /// 탑승 감지 직후 마지막 복도 간선을 따라 탑승 노드로 붙는다.
+  ///
+  /// 감지 반경은 3m라 PDR이 직각 코너를 자르면 실제 좌표가 노드를 스치지 않을
+  /// 수 있다. 다만 같은 경로를 정상 전진해 온 marker라면 현재 보이는 자리부터
+  /// 남은 경로 polyline을 따라 실제 탑승 노드에 도착시킨다.
+  void _startBoardingApproachGlide(EscalatorPhaseChange change) {
+    if (_boardingApproachGlide != null ||
+        !_guidance.wasFollowingRouteIntoBoarding) {
+      return;
+    }
+    final route = _indoorRouteSegment;
+    final nodeId = change.boardingNodeId;
+    final position = _guidance.position;
+    // session은 boardingDetected를 꺼내는 순간 내부 탑승 hold를 걸 수 있다.
+    // 그 hold 좌표를 시작점으로 쓰면 이미 노드에 붙은 것처럼 되어 마지막
+    // 직각 간선이 사라진다. 실제로 직전 프레임에 보이던 marker를 우선한다.
+    final shownWgs84 = _markerGlide.point;
+    final graph = _floorGraph;
+    final shownLocalM =
+        shownWgs84 == null || graph == null || graph.nodes.isEmpty
+        ? null
+        : fitFloorGeoTransform(
+            graph.nodes,
+          ).invert(shownWgs84.latitude, shownWgs84.longitude);
+    final currentWgs84 = shownWgs84 ?? _pdrCurrentWgs84();
+    final currentLocalM = shownLocalM == null
+        ? position?.localM
+        : PdrLocalPoint(shownLocalM.$1, shownLocalM.$2);
+    if (route == null ||
+        nodeId == null ||
+        route.nodeIds.isEmpty ||
+        route.nodeIds.last != nodeId ||
+        currentLocalM == null ||
+        currentWgs84 == null) {
+      return;
+    }
+    final plan = planBoardingApproachGlide(
+      routeLocalM: route.pointsLocalM,
+      routeWgs84: route.points,
+      currentLocalM: currentLocalM,
+      currentWgs84: currentWgs84,
+      headingDeg: position?.headingDeg,
+    );
+    if (plan == null) return;
+
+    _boardingApproachGlide = EscalatorGlide(points: plan.points);
+    _boardingApproachGlideNodeId = nodeId;
+    _boardingApproachGlideStartedAt = DateTime.now();
+    _boardingApproachGlideDuration = plan.duration;
+    _boardingApproachGlideProgress = 0;
+    _boardingApproachGlideTimer = Timer.periodic(_escalatorGlideFrame, (timer) {
+      final startedAt = _boardingApproachGlideStartedAt;
+      if (!mounted || startedAt == null || _boardingApproachGlide == null) {
+        timer.cancel();
+        return;
+      }
+      final elapsed = DateTime.now().difference(startedAt);
+      _boardingApproachGlideProgress =
+          (elapsed.inMicroseconds /
+                  _boardingApproachGlideDuration.inMicroseconds)
+              .clamp(0.0, 1.0);
+      unawaited(_syncPdrCurrentLayer());
+      if (_boardingApproachGlideProgress >= 1) {
+        timer.cancel();
+        _finishBoardingApproachGlide();
+      }
+    });
+    unawaited(_syncPdrCurrentLayer());
+  }
+
+  /// marker가 탑승 노드에 도착했을 때만 실제 탑승 lock으로 넘긴다.
+  void _finishBoardingApproachGlide() {
+    final nodeId = _boardingApproachGlideNodeId;
+    _boardingApproachGlideTimer?.cancel();
+    _boardingApproachGlideTimer = null;
+    _boardingApproachGlide = null;
+    _boardingApproachGlideNodeId = null;
+    _boardingApproachGlideStartedAt = null;
+    _boardingApproachGlideDuration = Duration.zero;
+    _boardingApproachGlideProgress = 0;
+    if (nodeId != null) {
+      _guidance.lockRouteBoardingTerminal(boardingNodeId: nodeId);
+    }
+    unawaited(_syncPdrCurrentLayer());
+  }
+
+  /// 탑승 판정이 취소됐을 때는 노드 고정 없이 원래 위치 추적으로 되돌린다.
+  void _stopBoardingApproachGlide() {
+    if (_boardingApproachGlide == null && _boardingApproachGlideTimer == null) {
+      return;
+    }
+    _boardingApproachGlideTimer?.cancel();
+    _boardingApproachGlideTimer = null;
+    _boardingApproachGlide = null;
+    _boardingApproachGlideNodeId = null;
+    _boardingApproachGlideStartedAt = null;
+    _boardingApproachGlideDuration = Duration.zero;
+    _boardingApproachGlideProgress = 0;
     unawaited(_syncPdrCurrentLayer());
   }
 

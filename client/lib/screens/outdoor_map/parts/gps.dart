@@ -297,9 +297,9 @@ extension OutdoorMapGps on OutdoorMapBodyState {
   /// 예사로 틀린다. 지금 무엇 앞에 서 있는지는 **사람이 훨씬 정확히 안다.**
   /// 고른 매장의 입구 노드가 곧 위치가 된다.
   ///
-  /// 어림 위치조차 없으면(층 그래프가 없거나 스냅 실패) 묻지 않는다 — 거리를
-  /// 잴 기준이 없어 "가까운 순"이 성립하지 않는다. 그때는 지금까지처럼 하단
-  /// 바의 "위치 지정"이 출구다.
+  /// 층 도면·그래프가 없으면 묻지 않는다 — 목록을 세울 재료가 없다. 반대로
+  /// **기준점(앵커·어림 위치)이 없다고 물러나지는 않는다**: 그때는 화면 한가운데를
+  /// 기준으로 세운다([_nearbyStoreRows]).
   Future<void> _askNearbyStoreForAnchor({bool once = false}) async {
     if (once && _nearbyStoreAsked) return;
     final rows = _nearbyStoreRows();
@@ -310,12 +310,21 @@ extension OutdoorMapGps on OutdoorMapBodyState {
     await _anchorAtNearbyStore(picked);
   }
 
-  /// 지금 어림 위치에서 가까운 매장 줄. 기준점이 없거나 층 도면이 없으면 빈 목록.
+  /// 지금 기준점에서 가까운 매장 줄. 층 도면·그래프가 없으면 빈 목록.
   List<NearbyStoreRow> _nearbyStoreRows() {
     final plan = _floorPlan;
     final graph = _floorGraph;
     if (plan == null || graph == null || graph.nodes.isEmpty) return const [];
-    final from = _pdrTrailState.anchor?.anchorLocalM ?? _estimatedFloorPoint();
+    // **기준점은 지금 보는 층의 것이어야 한다.** 층 로컬 좌표계는 층마다 따로
+    // 맞춰지므로, 다른 층 앵커를 이 층 그래프에 대면 "가까운 순"이 통째로
+    // 엉뚱해진다 — 앵커가 1F 문에 찍힌 채 B2를 보던 실기기 상태가 그것이다.
+    // 마지막 기준은 **화면 한가운데**다: 위치가 없어도 사용자가 보고 있는
+    // 자리가 곧 "여기 어디쯤"이라, 그 덕에 이 버튼이 정작 위치를 고치려는
+    // 순간에 사라지지 않는다.
+    final from =
+        _anchorPointOnActiveFloor() ??
+        _estimatedFloorPoint() ??
+        _cameraCenterFloorPoint(graph);
     if (from == null) return const [];
 
     final transform = fitFloorGeoTransform(graph.nodes);
@@ -365,6 +374,24 @@ extension OutdoorMapGps on OutdoorMapBodyState {
   }
 
   /// GPS를 층 그래프에 투영해 둔 어림 위치. 없으면 null.
+  /// 앵커가 **지금 보는 층**에 있을 때만 그 좌표. 다른 층이면 null이다 —
+  /// [_estimatedFloorPoint]가 층을 보는 것과 같은 이유다.
+  PdrLocalPoint? _anchorPointOnActiveFloor() {
+    final anchor = _pdrTrailState.anchor;
+    if (anchor == null || anchor.floorId != _activeFloor) return null;
+    return anchor.anchorLocalM;
+  }
+
+  /// 화면 한가운데를 이 층 좌표로 옮긴다. 지도를 아직 못 읽었으면 null.
+  PdrLocalPoint? _cameraCenterFloorPoint(FloorGraph graph) {
+    final camera = _mapController?.cameraPosition;
+    if (camera == null) return null;
+    final local = fitFloorGeoTransform(
+      graph.nodes,
+    ).invert(camera.target.latitude, camera.target.longitude);
+    return local == null ? null : PdrLocalPoint(local.$1, local.$2);
+  }
+
   PdrLocalPoint? _estimatedFloorPoint() {
     final estimate = indoorLocationEstimateController.current;
     if (estimate == null || estimate.floorId != _activeFloor) return null;
@@ -407,8 +434,12 @@ extension OutdoorMapGps on OutdoorMapBodyState {
 
   /// 층을 묻는다. 물을 이유가 없으면(이미 물었다·건물을 모른다·층이 하나뿐)
   /// 묻지 않고 null.
-  Future<String?> _askEntryFloor() async {
-    if (_entryFloorAsked) return null;
+  ///
+  /// [force]면 "한 번뿐"을 건너뛴다. 사용자가 위치를 **다시 잡겠다고 누른**
+  /// 경우라, 그때 안 묻고 보고 있는 층에 찍으면 층을 훑어보던 사람이 그 층에
+  /// 못 박힌다.
+  Future<String?> _askEntryFloor({bool force = false}) async {
+    if (_entryFloorAsked && !force) return null;
     final building = _building;
     if (building == null || building.floors.length < 2) return null;
     _entryFloorAsked = true;
@@ -607,6 +638,10 @@ extension OutdoorMapGps on OutdoorMapBodyState {
       if (!mounted) return;
     }
 
+    debugPrint(
+      '[anchor] 찍음 — 층 $floor · 출처 $estimateSource · '
+      '문 ${entrance?.id} · 스냅오차 ${snapped.gapM.toStringAsFixed(1)}m',
+    );
     _syncPdrCurrentLayer(snap: true);
     unawaited(_syncDebugPdrLayers());
     // 이제 실내 마커가 있다. 진입 순간에는 위치를 몰라 건너뛴 연출
@@ -669,7 +704,17 @@ extension OutdoorMapGps on OutdoorMapBodyState {
   }) async {
     final controller = _mapController;
     if (controller == null || !_styleReady) return;
-    final here = _pdrCurrentWgs84() ?? _positionPoint;
+    final indoorHere = _pdrCurrentWgs84();
+    final here = indoorHere ?? _positionPoint;
+    // 실내 위치로 못 갔으면 그 이유가 대개 **층 어긋남**이다 — 앵커가 다른 층에
+    // 있으면 이 값이 null이라 조용히 GPS 좌표로 떨어진다(화면은 건물 바깥 어림
+    // 자리로 간다). 실기기에서 "실내로 포커싱이 안 됨"이 이것이었다.
+    if (indoorHere == null) {
+      debugPrint(
+        '[recenter] 실내 위치 없음 — 보는 층 $_activeFloor · '
+        '앵커 층 ${_pdrTrailState.anchor?.floorId} · GPS로 대체 ${here != null}',
+      );
+    }
     // 위치를 아직 못 그리는 상태면 되돌릴 자리도 없다. 버튼 노출 조건이 같은
     // 값을 보므로([_canRecenterOnCurrentPosition]) 보통은 여기 안 걸린다.
     if (here == null) return;

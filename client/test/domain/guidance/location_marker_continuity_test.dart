@@ -251,7 +251,7 @@ void main() {
     expect(continuity.isActive, isFalse);
   });
 
-  test('경로 탑승 종점 잠금은 shadow보다 우선해 graph 위치로 복귀한다', () {
+  test('탑승 종점 후보가 와도 shadow는 남은 간선을 따라 계속 간다', () {
     final continuity = LocationMarkerContinuity()
       ..reset(
         matchedPosition: PdrLocalPoint.zero,
@@ -271,11 +271,14 @@ void main() {
       headingBiasDeg: 0,
       leaderRelocated: false,
       ambiguous: true,
-      forceMatchedPosition: true,
+      // 탑승 노드 lock은 tracker 내부 후보에만 적용한다. 화면 마커는 별도
+      // polyline 활강이 노드에 닿을 때까지 이 raw 연속성을 유지해야 한다.
+      forceMatchedPosition: false,
+      projectToNavigableGraph: (position) => PdrLocalPoint(position.eastM, 0),
     );
 
-    expect(shown.eastM, 6);
-    expect(continuity.isActive, isFalse);
+    expect(shown.eastM, closeTo(1.4, 1e-9));
+    expect(continuity.isActive, isTrue);
   });
 
   test('후보가 계속 불안정해도 raw shadow는 보행 가능 간선 밖으로 누적되지 않는다', () {
