@@ -466,7 +466,11 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
     final floor = _pdrTrailState.anchor?.floorId;
     final graph = _floorGraph;
     final buildingId = _building?.id;
-    final current = _guidance.trackingResult?.previewPosition;
+    // 재탐색의 출발점은 화면에 부드럽게 이어 보이는 preview가 아니라, 현재
+    // edge를 실제로 가리키는 map-matched 좌표여야 한다. 둘을 섞으면 B 복도에
+    // 확정됐는데 A 쪽 preview에서 새 파란 선이 시작하는 불일치가 생긴다.
+    final current = _guidance.trackingResult?.matchedPreviewPosition;
+    final currentEdgeId = _guidance.trackingResult?.currentEdgeId;
     if (destination == null ||
         destinationNodeId == null ||
         floor == null ||
@@ -497,6 +501,8 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
           // 이탈 재탐색 — 같은 길안내의 연속이다.
           beginNewRecordingSession: false,
           startNodeId: startNodeId,
+          rerouteOrigin: current,
+          rerouteIngressEdgeId: currentEdgeId,
         );
       } else {
         await _computeAndShowMultiFloorIndoorRoute(
@@ -507,6 +513,8 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
           playOverview: false,
           beginNewRecordingSession: false,
           startNodeId: startNodeId,
+          rerouteOrigin: current,
+          rerouteIngressEdgeId: currentEdgeId,
         );
       }
       _lastIndoorRerouteAtMs = DateTime.now().millisecondsSinceEpoch;
