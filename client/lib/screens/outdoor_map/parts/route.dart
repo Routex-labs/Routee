@@ -414,6 +414,26 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
     _routeGeneration++;
   }
 
+  /// 현재 경로 시작점에서 충분히 멀리 떨어진 곳으로 재탐색됐을 때만 새 파란
+  /// 분기를 자라게 한다. 작은 위치 보정까지 연출하면 매 걸음마다 선이 다시
+  /// 그려지는 것처럼 보인다. 반대로 역방향으로 꽤 걸은 뒤의 재탐색은 변경을
+  /// 알아볼 시간이 필요하다.
+  bool _shouldRevealReroutedIndoorRoute(
+    List<ll.LatLng> previousRemaining,
+    List<ll.LatLng> nextPoints,
+  ) {
+    if (previousRemaining.length < 2 || nextPoints.length < 2) return false;
+    final from = previousRemaining.first;
+    final to = nextPoints.first;
+    const metersPerDegree = 111320.0;
+    final eastM =
+        (to.longitude - from.longitude) *
+        metersPerDegree *
+        math.cos((to.latitude + from.latitude) * math.pi / 360);
+    final northM = (to.latitude - from.latitude) * metersPerDegree;
+    return math.sqrt(eastM * eastM + northM * northM) >= 12;
+  }
+
   /// 야외 GPS 진행률을 갱신한다.
   ///
   /// 정확도가 나쁘거나 경로에서 멀리 떨어진 GPS, 이전 진행점 주변에서
@@ -849,8 +869,12 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
     String? startNodeId,
   }) async {
     final completionAtRequest = _currentIndoorCompletionSnapshot();
+    final previousRoute = _indoorRouteSegment;
+    final previousRemaining = previousRoute == null
+        ? const <ll.LatLng>[]
+        : _indoorRouteVisuals(previousRoute).remaining;
     final hadExistingIndoorRoute =
-        _indoorRouteSegment != null || _indoorMultiFloorRoute != null;
+        previousRoute != null || _indoorMultiFloorRoute != null;
     if (floor != _activeFloor) {
       // 목적지 층으로 화면을 옮기는 사람 조작 흐름이다. 새 도면 페이드인은
       // 이어지는 경로 개요 연출(playOverview)과 겹쳐 하나의 전환으로 읽힌다.
@@ -904,9 +928,11 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
         ..setRoute(null);
       _indoorMultiFloorRoute = null;
     });
-    if (hadExistingIndoorRoute && !playOverview) {
-      _revealReroutedIndoorRoute();
+    if (!playOverview &&
+        _shouldRevealReroutedIndoorRoute(previousRemaining, route.points)) {
+      _revealReroutedIndoorRoute(previousRemaining);
     } else {
+      _stopReroutedIndoorRouteReveal();
       _syncRouteLayer();
     }
     _syncIndoorDestinationLayer();
@@ -973,8 +999,12 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
     String? startNodeId,
   }) async {
     final completionAtRequest = _currentIndoorCompletionSnapshot();
+    final previousRoute = _indoorRouteSegment;
+    final previousRemaining = previousRoute == null
+        ? const <ll.LatLng>[]
+        : _indoorRouteVisuals(previousRoute).remaining;
     final hadExistingIndoorRoute =
-        _indoorRouteSegment != null || _indoorMultiFloorRoute != null;
+        previousRoute != null || _indoorMultiFloorRoute != null;
     final preference = verticalPreferenceController.value;
     var buildingGraph = await buildingRepository.getBuildingGraph(
       buildingId,
@@ -1045,9 +1075,12 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
         ..seedProgress(null)
         ..setRoute(route);
     });
-    if (hadExistingIndoorRoute && !playOverview) {
-      _revealReroutedIndoorRoute();
+    final nextPoints = segment?.route.points ?? const <ll.LatLng>[];
+    if (!playOverview &&
+        _shouldRevealReroutedIndoorRoute(previousRemaining, nextPoints)) {
+      _revealReroutedIndoorRoute(previousRemaining);
     } else {
+      _stopReroutedIndoorRouteReveal();
       _syncRouteLayer();
     }
     _syncIndoorDestinationLayer();
