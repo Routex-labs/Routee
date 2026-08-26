@@ -111,8 +111,15 @@ class CorridorPositionTracker {
 
   /// 경로 위 preview가 안정됐다는 독립 peak 수. 전역 continuity shadow가 한 번
   /// 잘못된 평행 복도에 붙었다면, 이 근거가 찬 순간만 즉시 현재 경로 후보로
-  /// 돌려 보낸다. 단순 heartbeat는 여기에 세지 않는다.
+  /// 돌려 보낸다. preview peak가 생략된 native batch에서는 확정 걸음도 같은
+  /// 근거가 되며, 단순 heartbeat는 여기에 세지 않는다.
   int _routePreviewRejoinEvidencePeaks = 0;
+
+  /// 이번 갱신에서 preview와 중복 없이 받아들인 확정 걸음 수.
+  ///
+  /// 네이티브가 preview tail을 매 snapshot 내보내지 않는 기기에서는 이 값이
+  /// 없으면 shadow 복귀 근거가 영원히 0에 남는다.
+  int _confirmedRejoinEvidencePeaks = 0;
 
   bool get isInitialized => _beam.isNotEmpty;
 
@@ -246,6 +253,7 @@ class CorridorPositionTracker {
     _confirmedAdvanceM = 0;
     _leaderRelocated = false;
     _routeStraightEpochNodeId = null;
+    _confirmedRejoinEvidencePeaks = 0;
     _routePreviewRejoinEvidencePeaks = 0;
     _lastRouteStraightEpochIndex = -1;
     _optimisticStepAdvances.clear();
@@ -286,6 +294,7 @@ class CorridorPositionTracker {
       );
     }
     _optimisticStepAdvances.clear();
+    _confirmedRejoinEvidencePeaks = 0;
     final previousRawConfirmedPosition = _rawConfirmedPosition;
     _rawConfirmedPosition = observation.rawConfirmedPosition;
     _rawPreviewPosition = observation.rawPreviewPosition;
@@ -316,6 +325,7 @@ class CorridorPositionTracker {
         previousRawConfirmedPosition: previousRawConfirmedPosition,
         rawConfirmedStepPositions: observation.rawConfirmedStepPositions,
       );
+      _confirmedRejoinEvidencePeaks = confirmedSegments.length;
       final transitionsBefore = _best?.transitions ?? 0;
       for (final segment in confirmedSegments) {
         _advanceBeam(segment);
@@ -1358,9 +1368,13 @@ class CorridorPositionTracker {
     final stableGuidedPreview =
         previewOnGuidedRoute && !previewLeaderRelocated && !_previewIsAmbiguous;
     if (stableGuidedPreview && _markerContinuity.isActive) {
-      // 하나의 네이티브 batch가 여러 peak를 묶어 줄 수 있으므로, frame 수가
-      // 아니라 이미 중복을 걷어 낸 optimistic peak 수를 센다.
-      _routePreviewRejoinEvidencePeaks += _optimisticStepAdvances.length;
+      // preview와 확정 batch가 같은 peak를 각자 싣기도 하므로 둘을 더하지
+      // 않는다. 반대로 preview가 생략된 batch도 있으므로 한쪽만 믿으면
+      // 복귀가 영원히 일어나지 않을 수 있다.
+      _routePreviewRejoinEvidencePeaks += math.max(
+        _optimisticStepAdvances.length,
+        _confirmedRejoinEvidencePeaks,
+      );
     } else if (!stableGuidedPreview) {
       _routePreviewRejoinEvidencePeaks = 0;
     }
