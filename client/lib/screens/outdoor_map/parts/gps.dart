@@ -111,12 +111,23 @@ extension OutdoorMapGps on OutdoorMapBodyState {
     }
     // 방향은 **받아들인 좌표에서만** 뽑는다. 거른 좌표(위에서 이미 return한 것)
     // 로 방향을 갱신하면, 그리지도 않는 자리로 튄 각이 삼각형에 남는다.
-    _outdoorHeading.track(
-      headingDeg: position.heading,
-      headingAccuracyDeg: position.headingAccuracy,
-      speedMps: position.speed,
-      at: position.timestamp,
-    );
+    //
+    // **건물 안에서는 아예 넣지 않는다.** 실내 좌표는 벽에 반사된 신호로 계산된
+    // 것이라, 거기서 나온 course는 걷는 방향과 아무 관계가 없다. 그래도 계속
+    // 넣고 있었더니 문을 나선 첫 몇 초 동안 그 값이 삼각형에 남아 있었다 —
+    // "밖으로 나오면 한동안 엉뚱한 데를 가리키다 제자리를 찾는다"가 이것이다.
+    // 좌표 자체는 이탈 판정에 계속 쓰이므로 여기서만 가른다.
+    if (!_indoorEntered) {
+      _outdoorHeading.track(
+        headingDeg: position.heading,
+        headingAccuracyDeg: position.headingAccuracy,
+        speedMps: position.speed,
+        at: position.timestamp,
+        // 수신기가 말하는 진행 방향을 **우리가 잰** 이동 방향과 대조하는 근거다.
+        // 재획득 중의 수신기는 "모른다"가 아니라 틀린 값을 자신 있게 준다.
+        point: ll.LatLng(position.latitude, position.longitude),
+      );
+    }
     // 실내에서도 좌표는 **들고 있는다.** 진입/이탈 판정의 유일한 입력이고,
     // 화면에 그릴지는 [_outdoorGpsVisible]이 따로 가른다([_syncCurrentLayer]).
     setState(() => _position = position);

@@ -1197,6 +1197,13 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     // 실내 상태가 뒤집히는 순간 개요 붙들기는 뜻을 잃는다. 남겨 두면 다음 진입이
     // "이미 개요를 보는 중"으로 시작해, 사용자가 직접 축소해도 안 접힌다.
     _routeOverviewHoldsIndoor = false;
+    // **방향의 주인이 바뀌는 순간이다.** 야외는 GPS 진행 방향, 실내는 나침반이라
+    // 뜻이 다르고, 경계를 넘을 때 이어 쓸 수 있는 값이 아니다. 양쪽 다 여기서
+    // 버린다 — 나갈 때 안 버리면 건물을 가로질러 나온 사람의 첫 야외 좌표가
+    // "들어간 문 → 나온 문" 직선을 진행 방향으로 삼고, 들어갈 때 안 버리면
+    // 실내 마커가 뜨기 전 한 프레임에 문 밖 방향이 남는다.
+    _outdoorHeading.reset();
+    _liveHeading = null;
     // 상태를 내리기 **전에** 버린다. 아래 [_syncPdrCurrentLayer]가 이 값을 보고
     // 그릴지 말지를 정하므로, 뒤에 버리면 그 한 프레임 동안 옛 위치가 남는다.
     if (!value && leftBuilding) _dropIndoorPosition();
