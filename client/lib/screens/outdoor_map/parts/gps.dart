@@ -52,6 +52,8 @@ extension OutdoorMapGps on OutdoorMapBodyState {
     // 그려지거나("GPS 기반 위치가 보이면 안 된다"), 다시 야외로 나왔을 때 옛
     // 좌표가 잠깐 현재 위치인 것처럼 보인다.
     _pendingCenterOnPosition = false;
+    _positionDropTimer?.cancel();
+    _positionDropTimer = null;
     if (!mounted) return;
     setState(() => _position = null);
     // 구독이 끊긴 동안 사용자는 어디로든 갈 수 있다. 옛 기준점을 들고 있으면
@@ -59,17 +61,38 @@ extension OutdoorMapGps on OutdoorMapBodyState {
     // 남겨 두면 돌아온 첫 마커가 끊기기 전 방향을 가리킨다.
     _gpsJumpFilter = const GpsJumpFilterState();
     _outdoorHeading.reset();
+    _lastOutdoorCourseDeg = null;
+    _lastOutdoorCourseAt = null;
     _syncCurrentLayer();
   }
 
+  /// 위치 스트림이 **에러로** 닫혔다.
+  ///
+  /// **마커를 그 자리에서 지우지 않는다.** 에러는 "스트림이 끊겼다"이지 "이
+  /// 사람이 사라졌다"가 아니다. 재구독은 [streamRetryMinDelay](2초) 뒤에 돌고
+  /// 일회성 조회는 그동안에도 1초마다 나가므로 대개 몇 초 안에 좌표가 다시
+  /// 온다 — 그 사이 지웠다 그리면 사용자에게는 **깜빡임**으로만 보인다.
+  ///
+  /// 그래도 영영 안 오는 경우(권한 회수·위치 서비스 종료)에는 옛 자리를 계속
+  /// 그리면 안 된다. 그건 시간으로 끊는다([_positionDropTimer]).
+  ///
+  /// **방향은 지금 버린다.** 자리는 "몇 초 전에는 여기였다"로 여전히 쓸모가
+  /// 있지만, 진행 방향은 끊긴 순간부터 아무 근거가 없다.
   void _handlePositionError() {
     if (!mounted) return;
-    setState(() => _position = null);
-    // 구독이 끊긴 동안 사용자는 어디로든 갈 수 있다. 옛 기준점을 들고 있으면
-    // 돌아왔을 때 옳은 좌표를 거른다.
     _gpsJumpFilter = const GpsJumpFilterState();
     _outdoorHeading.reset();
-    _syncCurrentLayer();
+    _lastOutdoorCourseDeg = null;
+    _lastOutdoorCourseAt = null;
+    if (_position == null) return;
+    _positionDropTimer?.cancel();
+    _positionDropTimer = Timer(streamSilenceTimeout, () {
+      _positionDropTimer = null;
+      if (!mounted || _position == null) return;
+      setState(() => _position = null);
+      unawaited(_syncCurrentLayer());
+    });
+    unawaited(_syncCurrentLayer());
   }
 
   void _handlePosition(Position position, {bool fromStream = false}) {
@@ -111,12 +134,31 @@ extension OutdoorMapGps on OutdoorMapBodyState {
     }
     // 방향은 **받아들인 좌표에서만** 뽑는다. 거른 좌표(위에서 이미 return한 것)
     // 로 방향을 갱신하면, 그리지도 않는 자리로 튄 각이 삼각형에 남는다.
-    _outdoorHeading.track(
-      headingDeg: position.heading,
-      headingAccuracyDeg: position.headingAccuracy,
-      speedMps: position.speed,
-      at: position.timestamp,
-    );
+    //
+    // **건물 안에서는 아예 넣지 않는다.** 실내 좌표는 벽에 반사된 신호로 계산된
+    // 것이라, 거기서 나온 course는 걷는 방향과 아무 관계가 없다. 그래도 계속
+    // 넣고 있었더니 문을 나선 첫 몇 초 동안 그 값이 삼각형에 남아 있었다 —
+    // "밖으로 나오면 한동안 엉뚱한 데를 가리키다 제자리를 찾는다"가 이것이다.
+    // 좌표 자체는 이탈 판정에 계속 쓰이므로 여기서만 가른다.
+    if (!_indoorEntered) {
+      final course = _outdoorHeading.track(
+        headingDeg: position.heading,
+        headingAccuracyDeg: position.headingAccuracy,
+        speedMps: position.speed,
+        at: position.timestamp,
+        // 수신기가 말하는 진행 방향을 **우리가 잰** 이동 방향과 대조하는 근거다.
+        // 재획득 중의 수신기는 "모른다"가 아니라 틀린 값을 자신 있게 준다.
+        point: ll.LatLng(position.latitude, position.longitude),
+      );
+      // 문 앞에서 나침반을 대조할 근거로 따로 들고 있는다([_entryReferenceCourseDeg]).
+      if (course != null) {
+        _lastOutdoorCourseDeg = course;
+        _lastOutdoorCourseAt = DateTime.now();
+      }
+    }
+    // 좌표가 왔으니 스트림 에러로 예약해 둔 "마지막 자리 버리기"는 접는다.
+    _positionDropTimer?.cancel();
+    _positionDropTimer = null;
     // 실내에서도 좌표는 **들고 있는다.** 진입/이탈 판정의 유일한 입력이고,
     // 화면에 그릴지는 [_outdoorGpsVisible]이 따로 가른다([_syncCurrentLayer]).
     setState(() => _position = position);
@@ -566,6 +608,12 @@ extension OutdoorMapGps on OutdoorMapBodyState {
     await indoorNavigationDriver.confirmAnchorByPin(
       floorPointM: estimatedPoint,
       axes: axes,
+      // **문 하나를 사이에 두고 방향의 근거가 바뀌는 자리다.** 밖에서 보던
+      // 삼각형은 GPS 진행 방향이었고 안에서는 나침반인데, 그 나침반 값이 이
+      // 앵커의 회전각으로 구워져 이후 실내 궤적 전체를 돌린다. 문 앞은 하필
+      // 자력계에 가장 나쁜 자리(철제 문틀·회전문·보안 게이트)이므로, 넘어가기
+      // 전에 방금 밖에서 걷던 방향과 한 번 맞춰 본다.
+      trueCourseDeg: _entryReferenceCourseDeg,
     );
     if (!mounted) return;
 
@@ -575,7 +623,6 @@ extension OutdoorMapGps on OutdoorMapBodyState {
     if (indoorNavigationDriver.currentCalibration.phase ==
         CalibrationPhase.awaitingHeading) {
       final estimate = _entryFloorDirection(
-        position: position,
         anchorFloorPoint: estimatedPoint,
         graph: graph,
         axes: axes,

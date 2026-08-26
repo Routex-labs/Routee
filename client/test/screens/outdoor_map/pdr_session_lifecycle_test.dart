@@ -230,6 +230,7 @@ class _FakeDriver implements IndoorNavigationController {
     required PdrLocalPoint floorPointM,
     PdrToFloorAxes axes = const PdrToFloorAxes.identity(),
     String? floorId,
+    double? trueCourseDeg,
   }) async {}
 
   @override

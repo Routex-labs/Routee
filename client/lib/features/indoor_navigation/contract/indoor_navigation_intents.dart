@@ -18,10 +18,17 @@ abstract interface class IndoorNavigationIntents {
   /// 걸음·경로·preview는 버리고 새 pin을 센서 세션의 원점으로 삼는다.
   /// [floorPointM]은 사용자가 지목한 floor local_m 좌표이고, [axes]는 PDR의
   /// east/north를 이 floor의 축 규약으로 바꾸는 변환이다.
+  ///
+  /// [trueCourseDeg]는 **방금 밖에서 걷던 진행 방향**(진북 기준)이다. 나침반이
+  /// 이 값과 [entryCourseDisagreementDeg]를 넘게 어긋나면 그 나침반을 믿지 않고
+  /// 방향 보정 단계로 넘긴다 — 문 앞은 자력계에 가장 나쁜 자리이고, 그 왜곡은
+  /// 세기·신고 오차 판정으로는 잡히지 않는다. 값이 없으면(지하에서 앱을 켰다·
+  /// 오래 서 있었다) 대조하지 않는다.
   Future<void> confirmAnchorByPin({
     required PdrLocalPoint floorPointM,
     PdrToFloorAxes axes = const PdrToFloorAxes.identity(),
     String? floorId,
+    double? trueCourseDeg,
   });
 
   /// 사용자가 현재 진행 방향을 floor local_m 방향으로 맞춰 rotation을 확정한다.

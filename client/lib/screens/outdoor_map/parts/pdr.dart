@@ -29,7 +29,8 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     );
   }
 
-  /// 센서 세션이 첫 이벤트를 보고할 때까지(최대 [sensorWarmupTimeout]) 기다린다.
+  /// 센서 세션이 첫 이벤트를 보고하고 **방위가 자리를 잡을 때까지**(최대
+  /// [sensorWarmupTimeout]) 기다린다.
   ///
   /// [IndoorNavigationDriver.confirmAnchorByPin]은 **호출 시점의** heading
   /// reference로 분기한다. 자북 heading을 이미 받았으면 회전 0으로 즉시 확정하고,
@@ -38,14 +39,28 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
   /// 자동 배치는 startGuidance 직후 곧바로 찍으므로 그 유예가 없다. 기다리지
   /// 않으면 나침반이 멀쩡한 기기까지 전부 방향 보정 분기로 빠져, 추정한 진입
   /// 방향이 회전각으로 박히고 이후 궤적 전체가 그만큼 돌아간다.
+  ///
+  /// **"값이 왔다"로는 모자란다.** 문 앞에서 나침반을 밖에서 걷던 방향과
+  /// 대조하는데([entryCourseDisagreementDeg]), 흔들리는 중의 각을 넣으면 멀쩡한
+  /// 나침반이 우연히 걸리거나 틀어진 나침반이 우연히 통과한다. 재진입에서는 위
+  /// 기다림이 한 프레임도 안 걸린다 — 세션이 이미 돌고 있어서다.
+  ///
+  /// 수렴을 못 보고 시간이 다 가도 그냥 나아간다. 판정은
+  /// [IndoorNavigationView.isHeadingConverged]가 소유한다.
   Future<void> _awaitSensorWarmup() async {
     bool reported(PdrRuntimeState state) =>
         state == PdrRuntimeState.running || state == PdrRuntimeState.degraded;
-    if (reported(indoorNavigationDriver.currentRuntimeStatus.state)) return;
     try {
-      await indoorNavigationDriver.runtimeStatuses
-          .firstWhere((status) => reported(status.state))
-          .timeout(sensorWarmupTimeout);
+      if (!reported(indoorNavigationDriver.currentRuntimeStatus.state)) {
+        await indoorNavigationDriver.runtimeStatuses
+            .firstWhere((status) => reported(status.state))
+            .timeout(sensorWarmupTimeout);
+      }
+      if (!indoorNavigationDriver.isHeadingConverged) {
+        await indoorNavigationDriver.headings
+            .firstWhere((_) => indoorNavigationDriver.isHeadingConverged)
+            .timeout(sensorWarmupTimeout);
+      }
     } on Object {
       // 센서가 끝내 조용해도(권한 거부·미지원 기기·타임아웃) 앵커는 찍는다 —
       // 걸음이 쌓이지 않더라도 "어느 입구로 들어왔는지"는 지도에 보여야 한다.
@@ -353,15 +368,21 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
   /// 이유가 없다. 다음 목표가 오면 [_syncPdrCurrentLayer]나
   /// [_moveFollowCamera]가 다시 켠다.
   void _syncMarkerGlideTicker() {
-    if (_markerGlide.isSettled && !_followCameraNeedsFrame) {
+    if (_markerGlideIdle) {
       _stopMarkerGlideTicker();
       return;
     }
     if (_markerGlideTicker != null) return;
     _markerGlideTickAt = Duration.zero;
     _markerSourceWriteAt = Duration.zero;
+    _gpsSourceWriteAt = Duration.zero;
     _markerGlideTicker = createTicker(_onMarkerGlideFrame)..start();
   }
+
+  /// 틱을 돌릴 이유가 하나도 없는가. **야외 마커도 같은 틱을 탄다** — 둘이 따로
+  /// 돌면 실내↔야외 전환 구간에 두 타이머가 동시에 서서 프레임을 나눠 먹는다.
+  bool get _markerGlideIdle =>
+      _markerGlide.isSettled && _gpsGlide.isSettled && !_followCameraNeedsFrame;
 
   /// 프레임 하나. [total]은 틱이 시작된 뒤의 **누적** 경과라 직전 값과 뺀다.
   void _onMarkerGlideFrame(Duration total) {
@@ -386,12 +407,19 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
       _markerSourceWriteAt = total;
       unawaited(_writePdrMarkerSource(controller));
     }
+    // 야외 마커도 같은 틱·같은 간격으로 흐른다. 둘 중 하나만 그려지는 구간이
+    // 대부분이라 서로의 쓰기를 밀어내지 않는다([_outdoorGpsVisible]).
+    final gpsMoved = _gpsGlide.advance(elapsed);
+    if (gpsMoved &&
+        (_gpsGlide.isSettled ||
+            total - _gpsSourceWriteAt >= markerSourceWriteInterval)) {
+      _gpsSourceWriteAt = total;
+      unawaited(_writeGpsMarkerSource(controller));
+    }
     // 마커를 옮긴 **뒤에** 카메라를 잡는다. 카메라 목표점이 방금 옮긴 자리라,
     // 순서를 뒤집으면 화면이 한 프레임 지난 자리를 가운데 둔다.
     _driveFollowCamera(controller, elapsed);
-    if (_markerGlide.isSettled && !_followCameraNeedsFrame) {
-      _stopMarkerGlideTicker();
-    }
+    if (_markerGlideIdle) _stopMarkerGlideTicker();
   }
 
   void _stopMarkerGlideTicker() {
@@ -1221,6 +1249,9 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     await indoorNavigationDriver.confirmAnchorByPin(
       floorPointM: floorPoint,
       axes: axes,
+      // 자동 진입과 **같은 대조**를 지난다. 걸어 들어와 바로 위치를 찍는
+      // 사용자에게는 문 앞 나침반이 틀어져 있을 이유가 똑같이 있다.
+      trueCourseDeg: _entryReferenceCourseDeg,
     );
     if (!mounted) return;
     // **방향은 사용자에게 묻지 않는다.**
@@ -1238,7 +1269,6 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
       final estimate = graph == null
           ? null
           : _entryFloorDirection(
-              position: _position,
               anchorFloorPoint: floorPoint,
               graph: graph,
               axes: axes,
