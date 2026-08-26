@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
+import 'package:routex_design_system/routex_design_system.dart';
 
 import '../../../../domain/guidance/escalator_ride.dart';
 import '../../../../features/indoor_navigation/contract/floor_transition_ui_state.dart';
@@ -227,6 +228,7 @@ class _FloorTransitionCardState extends State<_FloorTransitionCard>
 
   Widget _build(BuildContext context, double progress) {
     final scheme = Theme.of(context).colorScheme;
+    final colors = context.routexColors;
     final state = widget.state;
     // 출발 층이 늘 **점이 떠나는 쪽**이다. 내려갈 때는 위, 올라갈 때는 아래.
     final topLabel = state.goingUp
@@ -266,7 +268,12 @@ class _FloorTransitionCardState extends State<_FloorTransitionCard>
           const SizedBox(height: _photoGap),
         ],
         if (state.goingUp) ...[caption, const SizedBox(height: 14)],
-        _FloorLabel(label: topLabel, emphasis: topWeight, scheme: scheme),
+        _FloorLabel(
+          label: topLabel,
+          emphasis: topWeight,
+          scheme: scheme,
+          pointColor: colors.actionPrimary,
+        ),
         SizedBox(
           height: _lineHeight,
           width: 2 * _markerRimRadius,
@@ -295,6 +302,7 @@ class _FloorTransitionCardState extends State<_FloorTransitionCard>
           label: bottomLabel,
           emphasis: 1 - topWeight,
           scheme: scheme,
+          pointColor: colors.actionPrimary,
         ),
         if (!state.goingUp) ...[const SizedBox(height: 14), caption],
         if (photo != null && !state.goingUp) ...[
@@ -350,18 +358,20 @@ class _MarkerDot extends StatelessWidget {
 
 const _markerRimRadius = kLocationMarkerRimRadiusPx;
 
-/// 층 라벨 한 개. [emphasis] 1이면 도착 층(포인트 파랑·큼), 0이면 지나온 층
+/// 층 라벨 한 개. [emphasis] 1이면 도착 층(포인트 초록·큼), 0이면 지나온 층
 /// (옅은 회색·작음)이다. 그 사이를 연속으로 오간다.
 class _FloorLabel extends StatelessWidget {
   const _FloorLabel({
     required this.label,
     required this.emphasis,
     required this.scheme,
+    required this.pointColor,
   });
 
   final String label;
   final double emphasis;
   final ColorScheme scheme;
+  final Color pointColor;
 
   @override
   Widget build(BuildContext context) {
@@ -373,7 +383,7 @@ class _FloorLabel extends StatelessWidget {
         fontWeight: FontWeight.w800,
         color: Color.lerp(
           scheme.onSurface.withValues(alpha: 0.35),
-          AppColors.primary,
+          pointColor,
           t,
         ),
       ),

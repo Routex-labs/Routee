@@ -140,21 +140,24 @@ void main() {
     await tester.pump(const Duration(milliseconds: 200));
 
     expect(find.byKey(const Key('startup-loading-overlay')), findsOneWidget);
-    expect(find.text('몇 층에 계신가요?'), findsNothing);
+    expect(find.text('어느 층에 계신가요?'), findsNothing);
 
     await tester.pump(const Duration(milliseconds: 200));
     await tester.pump();
-    expect(find.text('몇 층에 계신가요?'), findsOneWidget);
+    expect(find.text('어느 층에 계신가요?'), findsOneWidget);
     expect(
       find.byKey(const Key('entry-floor-transition-background')),
       findsOneWidget,
     );
   });
 
-  testWidgets('앱을 건물 안에서 켜면 몇 층인지 묻는다', (tester) async {
+  testWidgets('앱을 건물 안에서 켜면 어느 층인지 묻고 건물명을 보여 준다', (tester) async {
     await launchInside(tester);
 
-    expect(find.text('몇 층에 계신가요?'), findsOneWidget);
+    expect(find.text('어느 층에 계신가요?'), findsOneWidget);
+    expect(find.text('데모 건물'), findsOneWidget);
+    expect(find.text('서울 영등포구 여의대로 108'), findsOneWidget);
+    expect(find.text('선택한 층을 기준으로 실내 길찾기를 안내할게요.'), findsNothing);
     // 기본 지도는 아직 준비 과정이므로 질문 화면 뒤에서 시작 덮개가 계속 가린다.
     expect(find.byKey(const Key('startup-loading-overlay')), findsOneWidget);
     expect(find.text('건물 감지 중...'), findsNothing);
@@ -182,6 +185,34 @@ void main() {
     expect(find.byKey(const Key('startup-loading-overlay')), findsNothing);
   });
 
+  testWidgets('층을 누른 뒤 확인해야 해당 층에서 시작한다', (tester) async {
+    await launchInside(tester);
+
+    await tester.tap(find.byKey(const ValueKey('entry-floor-2F')));
+    await tester.pump();
+
+    expect(
+      find.text('2F에서 시작하기'),
+      findsOneWidget,
+      reason: '층 타일은 선택만 해야 잘못 눌렀을 때 즉시 잘못된 층으로 들어가지 않는다',
+    );
+    expect(find.text('어느 층에 계신가요?'), findsOneWidget);
+    expect(
+      tester.widget<FloorSelector>(find.byType(FloorSelector)).selectedFloor,
+      '1F',
+      reason: '확정 전에는 현재 지도와 앵커 층을 바꾸지 않는다',
+    );
+
+    await tester.tap(find.byKey(const Key('entry-floor-confirm')));
+    await tester.pumpAndSettle();
+    await drain(tester);
+
+    expect(
+      tester.widget<FloorSelector>(find.byType(FloorSelector)).selectedFloor,
+      '2F',
+    );
+  });
+
   testWidgets('위치를 끝내 받지 못해도 시작 덮개에 갇히지 않는다', (tester) async {
     watchPosition = () => const Stream<Position>.empty();
     await tester.pumpWidget(
@@ -194,13 +225,14 @@ void main() {
     expect(find.byKey(const Key('startup-loading-overlay')), findsNothing);
   });
 
-  testWidgets('건너뛰면 기본 층 그대로 두고 지도로 돌아간다', (tester) async {
+  testWidgets('층을 모르면 1F로 계속해 지도로 돌아간다', (tester) async {
     await launchInside(tester);
 
+    expect(find.text('층을 모르겠어요 · 1F로 계속'), findsOneWidget);
     await dismissEntryFloorPrompt(tester);
     await drain(tester);
 
-    expect(find.text('몇 층에 계신가요?'), findsNothing);
+    expect(find.text('어느 층에 계신가요?'), findsNothing);
     expect(
       tester.widget<FloorSelector>(find.byType(FloorSelector)).selectedFloor,
       '1F',
@@ -213,13 +245,13 @@ void main() {
     final positions = await launchInside(tester);
     await dismissEntryFloorPrompt(tester);
     await drain(tester);
-    expect(find.text('몇 층에 계신가요?'), findsNothing);
+    expect(find.text('어느 층에 계신가요?'), findsNothing);
 
     // 같은 자리에서 좌표가 한 번 더 온다.
     positions.add(atEntrance());
     await drain(tester);
 
-    expect(find.text('몇 층에 계신가요?'), findsNothing);
+    expect(find.text('어느 층에 계신가요?'), findsNothing);
   });
 
   // 걸어 들어온 사람에게는 묻지 않는다. 문을 통과한 층이 곧 답이고, 그 순간에는

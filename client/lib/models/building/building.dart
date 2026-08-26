@@ -5,6 +5,7 @@ class Building {
     required this.id,
     required this.name,
     required this.floors,
+    this.address,
     this.defaultFloor,
     this.entrance,
     this.footprintWgs84,
@@ -13,6 +14,26 @@ class Building {
 
   final String id;
   final String name;
+
+  /// 건물의 도로명 주소. 목록 API가 아직 이 값을 주지 않는 배포본도 있어 nullable로
+  /// 둔다.
+  final String? address;
+
+  /// 진입 화면에 보일 주소. 서버가 주소를 주면 그것이 우선이고, 현재 앱에 내장된
+  /// 유일한 실내 데모 건물은 구버전 응답에서도 주소를 감추지 않도록 둔다.
+  ///
+  /// 다른 건물은 추측으로 주소를 만들지 않는다. 주소가 없으면 null을 돌려 UI가
+  /// 그 줄 자체를 빼야 한다.
+  String? get displayAddress {
+    final responseAddress = address?.trim();
+    if (responseAddress != null && responseAddress.isNotEmpty) {
+      return responseAddress;
+    }
+    return switch (id) {
+      'thehyundai-seoul' => '서울 영등포구 여의대로 108',
+      _ => null,
+    };
+  }
 
   /// 엘리베이터 버튼판 순서(위층 → 아래층). 표시 순서일 뿐 기본 층이 아니다 —
   /// 지하층이 있는 건물은 첫 항목이 최상층이다.
@@ -85,6 +106,7 @@ class Building {
       id: json['id'] as String,
       name: json['name'] as String,
       floors: (json['floors'] as List<dynamic>).cast<String>(),
+      address: json['address'] as String?,
       defaultFloor: json['default_floor'] as String?,
       entrance: entrance == null
           ? null
@@ -97,7 +119,10 @@ class Building {
           ? null
           : [
               for (final p in footprint.cast<Map<String, dynamic>>())
-                LatLng((p['lat'] as num).toDouble(), (p['lng'] as num).toDouble()),
+                LatLng(
+                  (p['lat'] as num).toDouble(),
+                  (p['lng'] as num).toDouble(),
+                ),
             ],
     );
   }

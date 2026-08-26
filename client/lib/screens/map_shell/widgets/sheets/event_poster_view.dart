@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:routex_design_system/routex_design_system.dart';
 
 import '../../../../domain/event/building_events.dart';
+import '../../../../theme/app_theme.dart';
 
 /// 행사 하나를 화면 가득한 포스터로 본다. 좌우로 밀면 **오늘 열리는 다른 행사**로
 /// 넘어간다(공식 모바일 웹과 같은 조작).
@@ -57,8 +58,9 @@ class EventPosterView extends StatefulWidget {
 class _EventPosterViewState extends State<EventPosterView> {
   late final PageController _controller = PageController(
     initialPage: widget.initialIndex,
-    // 양옆 이웃이 살짝 보여야 "옆에 더 있다"가 읽힌다. 1.0이면 화면이 한 장씩
-    // 딱 끊겨 스와이프할 생각을 안 한다.
+    // 양옆 **포스터**가 살짝 보여야 "옆에 더 있다"가 읽힌다. 본문까지 이웃
+    // 페이지에서 비치면 아직 넘기지 않은 내용이 섞여 읽히므로 [_page]는 현재
+    // 페이지에서만 텍스트를 그린다.
     viewportFraction: 0.86,
   );
   late int _index = widget.initialIndex;
@@ -72,11 +74,10 @@ class _EventPosterViewState extends State<EventPosterView> {
   @override
   Widget build(BuildContext context) {
     final event = widget.events[_index];
-    // 포스터가 주인공이라 배경을 어둡게 깐다. 밝은 배경 위에 정사각 포스터를
-    // 놓으면 남는 위아래가 여백이 아니라 빈 곳으로 읽힌다.
-    const background = Color(0xFF101114);
     return Scaffold(
-      backgroundColor: background,
+      // 지도·시트와 같은 밝은 canvas를 쓴다. 포스터가 어두워도 화면 전체를
+      // 반전하면 이벤트만 별도 앱처럼 읽혔다.
+      backgroundColor: AppColors.background,
       body: SafeArea(
         child: Column(
           children: [
@@ -106,7 +107,7 @@ class _EventPosterViewState extends State<EventPosterView> {
         children: [
           IconButton(
             key: const Key('poster-close'),
-            icon: const Icon(Icons.close, color: Colors.white),
+            icon: const Icon(Icons.close, color: AppColors.text),
             onPressed: () => Navigator.of(context).pop(),
           ),
           const Spacer(),
@@ -114,7 +115,7 @@ class _EventPosterViewState extends State<EventPosterView> {
             Text(
               '${_index + 1} / ${widget.events.length}',
               style: const TextStyle(
-                color: Colors.white70,
+                color: AppColors.muted,
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
               ),
@@ -139,10 +140,10 @@ class _EventPosterViewState extends State<EventPosterView> {
             aspectRatio: 1,
             child: event.image == null
                 ? const ColoredBox(
-                    color: Color(0xFF1E2026),
+                    color: AppColors.blue100,
                     child: Icon(
                       Icons.local_activity_outlined,
-                      color: Colors.white24,
+                      color: AppColors.muted,
                       size: 48,
                     ),
                   )
@@ -150,10 +151,10 @@ class _EventPosterViewState extends State<EventPosterView> {
                     event.image!,
                     fit: BoxFit.cover,
                     errorBuilder: (_, _, _) => const ColoredBox(
-                      color: Color(0xFF1E2026),
+                      color: AppColors.blue100,
                       child: Icon(
                         Icons.local_activity_outlined,
-                        color: Colors.white24,
+                        color: AppColors.muted,
                         size: 48,
                       ),
                     ),
@@ -166,12 +167,18 @@ class _EventPosterViewState extends State<EventPosterView> {
 
   /// 한 장. 포스터 → 제목·기간·장소 → 원본 본문 순이다.
   Widget _page(BuildingEvent event, int i) {
+    final focused = i == _index;
     return ListView(
       padding: EdgeInsets.zero,
       children: [
         _poster(event, i),
-        _caption(event),
-        for (final block in event.details) _block(block),
+        // 옆 페이지에서는 이미지 카드만 남긴다. PageView의 viewportFraction은
+        // 유지해 다음 포스터가 보이되, 제목·본문이 아직 선택하지 않은 페이지
+        // 에서 새어 나오지 않는다.
+        if (focused) ...[
+          _caption(event),
+          for (final block in event.details) _block(block),
+        ],
         // 아래 고정된 안내 버튼에 본문 끝줄이 가리지 않게 둔다.
         const SizedBox(height: 24),
       ],
@@ -189,7 +196,7 @@ class _EventPosterViewState extends State<EventPosterView> {
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
-              color: Colors.white,
+              color: AppColors.text,
               fontSize: 20,
               fontWeight: FontWeight.w800,
               height: 1.25,
@@ -215,13 +222,13 @@ class _EventPosterViewState extends State<EventPosterView> {
             width: 44,
             child: Text(
               label,
-              style: const TextStyle(color: Colors.white38, fontSize: 13),
+              style: const TextStyle(color: AppColors.muted, fontSize: 13),
             ),
           ),
           Expanded(
             child: Text(
               value,
-              style: const TextStyle(color: Colors.white70, fontSize: 13),
+              style: const TextStyle(color: AppColors.text, fontSize: 13),
             ),
           ),
         ],
@@ -240,7 +247,7 @@ class _EventPosterViewState extends State<EventPosterView> {
           child: Text(
             block.text ?? '',
             style: const TextStyle(
-              color: Colors.white,
+              color: AppColors.text,
               fontSize: 15,
               fontWeight: FontWeight.w800,
             ),
@@ -252,7 +259,7 @@ class _EventPosterViewState extends State<EventPosterView> {
           child: Text(
             block.text ?? '',
             style: const TextStyle(
-              color: Colors.white70,
+              color: AppColors.text,
               fontSize: 13,
               height: 1.6,
             ),
@@ -261,7 +268,7 @@ class _EventPosterViewState extends State<EventPosterView> {
       case 'div':
         return const Padding(
           padding: EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-          child: Divider(height: 1, color: Colors.white12),
+          child: Divider(height: 1, color: AppColors.hairline),
         );
       case 'img':
         return _detailImage(block.image);
@@ -279,7 +286,7 @@ class _EventPosterViewState extends State<EventPosterView> {
                     line,
                     style: TextStyle(
                       // 첫 줄이 조건("1만원 이상 구매 특전")이라 강조한다.
-                      color: index == 0 ? Colors.white : Colors.white70,
+                      color: index == 0 ? AppColors.text : AppColors.text,
                       fontSize: index == 0 ? 14 : 13,
                       fontWeight: index == 0
                           ? FontWeight.w700
@@ -303,7 +310,7 @@ class _EventPosterViewState extends State<EventPosterView> {
                   child: Text(
                     '· $item',
                     style: const TextStyle(
-                      color: Colors.white38,
+                      color: AppColors.muted,
                       fontSize: 12,
                       height: 1.5,
                     ),
@@ -328,7 +335,7 @@ class _EventPosterViewState extends State<EventPosterView> {
           padding: gutter.copyWith(top: 8, bottom: 8),
           child: Text(
             block.text ?? block.url ?? '',
-            style: const TextStyle(color: Colors.white54, fontSize: 12),
+            style: const TextStyle(color: AppColors.muted, fontSize: 12),
           ),
         );
       default:

@@ -363,7 +363,9 @@ extension OutdoorMapGps on OutdoorMapBodyState {
     return showEntryFloorPrompt(
       context,
       buildingName: building.name,
+      buildingAddress: building.displayAddress,
       floors: building.floors,
+      fallbackFloor: _entryEvidenceFloor ?? building.initialFloor!,
     );
   }
 
