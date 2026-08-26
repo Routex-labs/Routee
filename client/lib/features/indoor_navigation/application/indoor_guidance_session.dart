@@ -1192,7 +1192,9 @@ class IndoorGuidanceSession {
     _routeSegment = route;
     // 사용자가 새 목적지를 고르는 흐름은 먼저 세그먼트를 비운다. 이전 여정의
     // 이탈 잠금이 새 길찾기에 남으면 같은 복도에서 재탐색을 못 하게 된다.
-    if (route == null) _rerouteRequestedForEdgeId = null;
+    if (route == null) {
+      _rerouteRequestedForEdgeId = null;
+    }
   }
 
   /// 진행률 기준점을 통째로 다시 잡는다.

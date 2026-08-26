@@ -467,6 +467,7 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
     final graph = _floorGraph;
     final buildingId = _building?.id;
     final current = _guidance.trackingResult?.previewPosition;
+    final currentEdgeId = _guidance.trackingResult?.currentEdgeId;
     if (destination == null ||
         destinationNodeId == null ||
         floor == null ||
@@ -497,6 +498,8 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
           // 이탈 재탐색 — 같은 길안내의 연속이다.
           beginNewRecordingSession: false,
           startNodeId: startNodeId,
+          rerouteOrigin: current,
+          rerouteIngressEdgeId: currentEdgeId,
         );
       } else {
         await _computeAndShowMultiFloorIndoorRoute(
@@ -507,6 +510,8 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
           playOverview: false,
           beginNewRecordingSession: false,
           startNodeId: startNodeId,
+          rerouteOrigin: current,
+          rerouteIngressEdgeId: currentEdgeId,
         );
       }
       _lastIndoorRerouteAtMs = DateTime.now().millisecondsSinceEpoch;

@@ -414,6 +414,63 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
     _routeGeneration++;
   }
 
+  /// 노드 단위 라우터가 만든 경로 앞에, 재탐색 당시 복도 위 위치에서 그 노드로
+  /// 들어가는 짧은 연결 구간을 붙인다. 이 연결이 없으면 새 경로는 가까운 노드에서
+  /// 갑자기 시작하고, 그 노드까지 걸어가는 사용자는 여전히 경로 밖으로 보인다.
+  IndoorRoute _prependRerouteOrigin({
+    required IndoorRoute route,
+    required FloorGraph? graph,
+    required PdrLocalPoint? rerouteOrigin,
+    required String? startNodeId,
+    required String? rerouteIngressEdgeId,
+  }) {
+    if (graph == null ||
+        rerouteOrigin == null ||
+        startNodeId == null ||
+        rerouteIngressEdgeId == null ||
+        route.points.isEmpty ||
+        route.pointsLocalM.isEmpty) {
+      return route;
+    }
+    final startNode = graph.nodes
+        .where((node) => node.id == startNodeId)
+        .firstOrNull;
+    if (startNode == null) return route;
+    final ingress = graph.edges
+        .where((edge) => edge.id == rerouteIngressEdgeId)
+        .firstOrNull;
+    if (ingress == null) return route;
+    final ingressOtherNodeId = ingress.fromNodeId == startNodeId
+        ? ingress.toNodeId
+        : ingress.toNodeId == startNodeId
+        ? ingress.fromNodeId
+        : null;
+    // 최근접 노드가 현재 매칭 edge의 끝이 아니라면, 직선 connector를 덧그려도
+    // 그 edge를 새 경로라고 부를 수 없다. 이 경우에는 기존 재탐색 경로를 쓴다.
+    if (ingressOtherNodeId == null) return route;
+    final first = route.pointsLocalM.first;
+    final dx = first.x - rerouteOrigin.eastM;
+    final dy = first.y - rerouteOrigin.northM;
+    final connectorDistanceM = math.sqrt(dx * dx + dy * dy);
+    if (connectorDistanceM <= 0.05) return route;
+    final wgs84 = fitFloorGeoTransform(
+      graph.nodes,
+    ).apply(rerouteOrigin.eastM, rerouteOrigin.northM);
+    return IndoorRoute(
+      points: [ll.LatLng(wgs84.$1, wgs84.$2), ...route.points],
+      pointsLocalM: [
+        LocalPoint(rerouteOrigin.eastM, rerouteOrigin.northM),
+        ...route.pointsLocalM,
+      ],
+      // 가상 출발점은 graph node가 아니므로 node 목록에는 edge 반대 끝을 넣는다.
+      // 그러면 `edgeIds.length + 1 == nodeIds.length`와 진행 방향 계약을 지키며,
+      // 현재 서 있는 ingress edge도 새 경로의 일부로 인식된다.
+      edgeIds: [ingress.id, ...route.edgeIds],
+      nodeIds: [ingressOtherNodeId, ...route.nodeIds],
+      distanceMeters: route.distanceMeters + connectorDistanceM,
+    );
+  }
+
   /// 현재 경로 시작점에서 충분히 멀리 떨어진 곳으로 재탐색됐을 때만 새 파란
   /// 분기를 자라게 한다. 작은 위치 보정까지 연출하면 매 걸음마다 선이 다시
   /// 그려지는 것처럼 보인다. 반대로 역방향으로 꽤 걸은 뒤의 재탐색은 변경을
@@ -867,6 +924,8 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
     required bool playOverview,
     required bool beginNewRecordingSession,
     String? startNodeId,
+    PdrLocalPoint? rerouteOrigin,
+    String? rerouteIngressEdgeId,
   }) async {
     final completionAtRequest = _currentIndoorCompletionSnapshot();
     final previousRoute = _indoorRouteSegment;
@@ -903,7 +962,7 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
       _showSnack('시작 위치 주변에서 통로 노드를 찾지 못했습니다.');
       return;
     }
-    final route = await buildingRepository.getShortestRoute(
+    var route = await buildingRepository.getShortestRoute(
       buildingId,
       floor,
       startNodeId,
@@ -917,6 +976,13 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
       if (!hadExistingIndoorRoute) _clearIndoorRoute();
       return;
     }
+    route = _prependRerouteOrigin(
+      route: route,
+      graph: graph,
+      rerouteOrigin: rerouteOrigin,
+      startNodeId: startNodeId,
+      rerouteIngressEdgeId: rerouteIngressEdgeId,
+    );
     _acceptIndoorRouteGeneration(
       previousCompletion:
           _currentIndoorCompletionSnapshot() ?? completionAtRequest,
@@ -997,6 +1063,8 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
     required bool playOverview,
     required bool beginNewRecordingSession,
     String? startNodeId,
+    PdrLocalPoint? rerouteOrigin,
+    String? rerouteIngressEdgeId,
   }) async {
     final completionAtRequest = _currentIndoorCompletionSnapshot();
     final previousRoute = _indoorRouteSegment;
@@ -1068,14 +1136,49 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
       if (!mounted) return;
     }
     final segment = route.segmentForFloor(startFloor);
+    if (segment != null) {
+      final connected = _prependRerouteOrigin(
+        route: segment.route,
+        graph: _floorGraph,
+        rerouteOrigin: rerouteOrigin,
+        startNodeId: startNodeId,
+        rerouteIngressEdgeId: rerouteIngressEdgeId,
+      );
+      if (!identical(connected, segment.route)) {
+        final replacement = IndoorRouteSegment(
+          floorId: segment.floorId,
+          floorName: segment.floorName,
+          route: connected,
+          transferModeToNext: segment.transferModeToNext,
+          transferPointsToNext: segment.transferPointsToNext,
+          transferDistanceMeters: segment.transferDistanceMeters,
+          transferCostMeters: segment.transferCostMeters,
+          transferEdgeId: segment.transferEdgeId,
+          transferFromNodeId: segment.transferFromNodeId,
+          transferToNodeId: segment.transferToNodeId,
+        );
+        route = MultiFloorRoute(
+          segments: [
+            for (final item in route.segments)
+              identical(item, segment) ? replacement : item,
+          ],
+          totalDistanceMeters:
+              route.totalDistanceMeters +
+              connected.distanceMeters -
+              segment.route.distanceMeters,
+          totalCostMeters: route.totalCostMeters,
+        );
+      }
+    }
+    final displayedSegment = route.segmentForFloor(startFloor);
     setState(() {
       _indoorMultiFloorRoute = route;
       _guidance
-        ..setRouteSegment(segment?.route)
+        ..setRouteSegment(displayedSegment?.route)
         ..seedProgress(null)
         ..setRoute(route);
     });
-    final nextPoints = segment?.route.points ?? const <ll.LatLng>[];
+    final nextPoints = displayedSegment?.route.points ?? const <ll.LatLng>[];
     if (!playOverview &&
         _shouldRevealReroutedIndoorRoute(previousRemaining, nextPoints)) {
       _revealReroutedIndoorRoute(previousRemaining);
@@ -1085,8 +1188,8 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
     }
     _syncIndoorDestinationLayer();
     _notifyRouteStateIfChanged();
-    if (playOverview && segment != null) {
-      unawaited(_fitCameraToRouteSegment(segment.route));
+    if (playOverview && displayedSegment != null) {
+      unawaited(_fitCameraToRouteSegment(displayedSegment.route));
     }
     // 세션 경계 규칙은 [_computeAndShowSingleFloorIndoorRoute]와 같다.
     if (beginNewRecordingSession) {
