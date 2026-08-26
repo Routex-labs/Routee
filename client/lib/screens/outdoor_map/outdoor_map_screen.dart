@@ -467,7 +467,7 @@ const _storeFocusMaxZoom = 20.4;
 LatLng _toMapLatLng(ll.LatLng point) => LatLng(point.latitude, point.longitude);
 
 class OutdoorMapBodyState extends State<OutdoorMapBody>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   final Completer<void> _startupMinimumElapsed = Completer<void>();
   Timer? _startupMinimumTimer;
 
