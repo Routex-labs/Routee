@@ -642,6 +642,15 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   /// 서 있거나 기기가 방향을 못 주는 동안이다.
   double? get _outdoorHeadingDeg => _outdoorHeading.headingDeg;
 
+  /// 이번에 그려지는 경로의 개요 카메라를 **한 번 건너뛴다.**
+  ///
+  /// 카메라의 주인이 경로가 아니라 다른 것일 때 세운다 — 지금은 문 경유 여정의
+  /// 목적지 매장 하나다([showOutdoorToIndoorRouteTo]). 두 이동을 겹치면 화면이
+  /// 경로 전체로 갔다가 매장으로 돌아온다(`camera-choreography-plan.md` 4.14).
+  ///
+  /// **한 번 쓰고 내린다.** 남겨 두면 다음 안내의 개요가 조용히 사라진다.
+  bool _skipRouteCameraFitOnce = false;
+
   /// 이번에 도면을 편 것이 **화면 조작**이었는지(확대·건물 시트 탭).
   ///
   /// 참이면 사용자는 아직 건물 밖에 서 있는 것으로 본다 — 위치의 주인은 GPS다
@@ -1669,6 +1678,12 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   ///
   /// **폴백을 먼저 정한다** — 노드·출입구·그래프 중 하나라도 없으면 목적지 좌표로
   /// 곧장 그린다. [origin]을 주면 문도 그 지점 기준으로 고른다.
+  ///
+  /// **실내 구간이 풀렸으면 카메라는 목적지 매장이 가져간다**
+  /// ([_focusIndoorJourneyDestination]). 이 여정의 야외 구간은 문까지라, 경로
+  /// 전체에 맞추면 화면이 건물 앞에 서고 정작 사용자가 고른 매장은 도면 밖에
+  /// 남는다 — 길찾기를 열기 직전 검색에서 보던 그림과도 어긋난다. 못 풀었으면
+  /// 안내가 정말로 문 앞에서 끝나므로 예전처럼 경로 전체를 보여 준다.
   Future<void> showOutdoorToIndoorRouteTo(
     PoiSearchResult destination, {
     ll.LatLng? origin,
@@ -1681,40 +1696,9 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
     // 트리거가 "실내로 들어가는 순간"인데 이미 들어와 있으면 그 순간이 오지 않는다.
     await returnToOutdoorView();
     if (!mounted) return;
-    // **배율이 층 도면을 켜므로, 활성 층은 실외에서도 사실이어야 한다.**
-    // 도면은 `_indoorEntered`가 아니라 zoom 16.5~17.5로 페이드인하는데
-    // ([indoorOverlayFadeInStartZoom]), 아래 [showRouteTo]가 문 경유 경로에
-    // 카메라를 맞추면 그 배율이 페이드 끝이다. 밖에서 지하 매장을 검색·탭한
-    // 사용자는 활성 층이 그 매장 층이라, 지상 출구에서 끝나는 야외선 밑에 지하
-    // 도면이 깔린다(실기기 화면과 근거: docs/client/indoor-entry-rules.md 6절).
-    //
-    // 층을 고르는 규칙은 GPS 자동 진입과 **같은 질문**이라 같은 함수를 쓴다 —
-    // 갈리면 문을 지난 순간 도면이 한 번 더 튄다. 근거가 없으면 보던 층이 그대로
-    // 돌아와 아래 전환이 no-op이 된다.
-    final journeyStartFloor = gpsEntryAnchorFloor(
-      groundEntranceFloor: _groundEntranceFloor,
-      defaultFloor: _building?.initialFloor,
-      viewedFloor: _activeFloor,
-    );
-    if (journeyStartFloor != null && journeyStartFloor != _activeFloor) {
-      // 카메라는 만지지 않는다 — 곧 [showRouteTo]가 경로 전체에 맞춘다.
-      await _switchOverlayFloorCrossfaded(
-        journeyStartFloor,
-        recenterIfNeeded: false,
-      );
-      if (!mounted) return;
-    }
 
     final building = _building;
     final endNodeId = destination.nodeId;
-    if (building == null || endNodeId == null || destination.floor.isEmpty) {
-      await showRouteTo(
-        destination.point,
-        label: destination.name,
-        origin: origin,
-      );
-      return;
-    }
     // 문은 출발 지점에서 가까운 것을 고른다. 지도에서 찍은 출발지가 있으면 그
     // 좌표가, 없으면 GPS가 기준이다. 둘 다 없으면 경로 자체를 못 만드는데,
     // showRouteTo가 그 안내를 이미 갖고 있으므로 거기로 흘려보낸다.
@@ -1724,19 +1708,23 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
         (position == null
             ? null
             : ll.LatLng(position.latitude, position.longitude));
-    if (reference == null) {
-      await showRouteTo(destination.point, label: destination.name);
-      return;
-    }
     // [_selectedEntrance]가 아니라 [_journeyEntrance]를 이력으로 넘긴다. 앞의
     // 값은 **GPS 기준**으로 진입 판정이 쓰는 문이라, 멀리 찍은 출발지로 안내할
     // 때 그 값을 섞으면 두 판단이 서로를 끌어당긴다.
-    final entrance = nearestEntrance(
-      _groundEntrances,
-      reference,
-      current: _journeyEntrance,
-    );
+    final entrance =
+        (building == null ||
+            endNodeId == null ||
+            destination.floor.isEmpty ||
+            reference == null)
+        ? null
+        : nearestEntrance(
+            _groundEntrances,
+            reference,
+            current: _journeyEntrance,
+          );
     if (entrance == null) {
+      await _alignFloorToJourneyStart();
+      if (!mounted) return;
       await showRouteTo(
         destination.point,
         label: destination.name,
@@ -1750,7 +1738,7 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
     final graph =
         _journeyBuildingGraph ??
         await buildingRepository.getBuildingGraph(
-          building.id,
+          building!.id,
           vertical: _verticalQuery,
         );
     if (!mounted) return;
@@ -1762,14 +1750,15 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
         : computeMultiFloorRoute(
             graph,
             entranceRouteNodeId(graph.nodes, entrance),
-            endNodeId,
+            endNodeId!,
           );
+    final indoorLegResolved = leg != null && leg.isNotEmpty;
 
     setState(() {
       _journeyBuildingGraph = graph;
       _journeyEntrance = entrance;
       _pendingIndoorDestination = destination;
-      _pendingIndoorRoute = (leg == null || leg.isEmpty) ? null : leg;
+      _pendingIndoorRoute = indoorLegResolved ? leg : null;
       // 실내 경로가 남아 있으면 [_syncRouteLayer]가 야외 구간 대신 그것을 그린다.
       _guidance
         ..setRouteSegment(null)
@@ -1781,16 +1770,135 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
     _syncDestinationLayer();
     _syncIndoorDestinationLayer();
 
-    if (leg == null || leg.isEmpty) {
+    if (!indoorLegResolved) {
       // 문까지는 안내하되 침묵하지 않는다 — 안내가 문 앞에서 끝나는 이유를
       // 사용자가 알아야 그 자리에서 다른 방법을 찾을 수 있다.
       _showSnack('건물 안 경로를 계산하지 못했습니다. 출입구까지만 안내합니다.');
+      await _alignFloorToJourneyStart();
+      if (!mounted) return;
+      await showRouteTo(
+        entrance.point,
+        label: _journeyEtaLabel(destination, entrance),
+        origin: origin,
+        keepPendingIndoorRoute: true,
+      );
+      return;
     }
-    await showRouteTo(
-      entrance.point,
-      label: _journeyEtaLabel(destination, entrance),
-      origin: origin,
-      keepPendingIndoorRoute: true,
+
+    // 여기서부터 카메라의 주인은 목적지 매장이다. 경로가 그려지는 순간 [_applyRoute]
+    // 가 경로 전체로 물러서므로, 그 한 번을 건너뛰게 하고 매장 포커스를 이어 붙인다
+    // — 두 이동을 겹치면 화면이 갔다가 돌아온다
+    // (`docs/client/camera-choreography-plan.md` 4.14).
+    _skipRouteCameraFitOnce = true;
+    try {
+      await showRouteTo(
+        entrance.point,
+        label: _journeyEtaLabel(destination, entrance),
+        origin: origin,
+        keepPendingIndoorRoute: true,
+      );
+    } finally {
+      // 경로 계산이 실패해 [_applyRoute]가 아예 안 불렸을 수도 있다. 래치를
+      // 들고 있으면 다음 안내의 개요가 조용히 사라진다.
+      _skipRouteCameraFitOnce = false;
+    }
+    if (!mounted) return;
+    // **기다리지 않는다.** 이 포커스는 지도가 준비될 때까지 잠들 수 있고
+    // ([focusStore]의 `_styleReadySignal`), 부르는 쪽이 기다려야 할 일은 경로가
+    // 그려지는 것까지다 — 여기서 붙들면 길찾기 흐름 전체가 지도에 매인다.
+    unawaited(_focusIndoorJourneyDestination(destination));
+  }
+
+  /// 활성 층을 **이 여정이 실제로 시작하는 층**(지상 출입구 층)으로 돌려 둔다.
+  ///
+  /// **배율이 층 도면을 켜므로, 활성 층은 실외에서도 사실이어야 한다.** 도면은
+  /// `_indoorEntered`가 아니라 zoom 16.5~17.5로 페이드인하는데
+  /// ([indoorOverlayFadeInStartZoom]), 문 경유 경로에 카메라를 맞추면 그 배율이
+  /// 페이드 끝이다. 밖에서 지하 매장을 검색·탭한 사용자는 활성 층이 그 매장 층이라,
+  /// 지상 출구에서 끝나는 야외선 밑에 지하 도면이 깔린다(실기기 화면과 근거:
+  /// docs/client/indoor-entry-rules.md 6절).
+  ///
+  /// 층을 고르는 규칙은 GPS 자동 진입과 **같은 질문**이라 같은 함수를 쓴다 —
+  /// 갈리면 문을 지난 순간 도면이 한 번 더 튄다. 근거가 없으면 보던 층이 그대로
+  /// 돌아와 전환이 no-op이 된다.
+  ///
+  /// 부르는 자리 둘이다 — 목적지 매장을 보여 주지 **않는** 여정
+  /// ([showOutdoorToIndoorRouteTo]의 폴백 갈래)과, 그 매장을 보여 준 뒤 사용자가
+  /// 안내를 시작한 순간([_startCurrentGuidance]). 뒤엣것이 없으면 계획 화면에서
+  /// 켜 둔 목적지 층 도면이 걸어가는 야외선 밑에 그대로 깔린다.
+  Future<void> _alignFloorToJourneyStart() async {
+    final journeyStartFloor = gpsEntryAnchorFloor(
+      groundEntranceFloor: _groundEntranceFloor,
+      defaultFloor: _building?.initialFloor,
+      viewedFloor: _activeFloor,
+    );
+    if (journeyStartFloor == null || journeyStartFloor == _activeFloor) return;
+    // 카메라는 만지지 않는다 — 부르는 쪽이 곧바로 자기 목표에 맞춘다.
+    await _switchOverlayFloorCrossfaded(
+      journeyStartFloor,
+      recenterIfNeeded: false,
+    );
+  }
+
+  /// 문 경유 여정의 **목적지 매장**을 화면에 세운다. 검색에서 그 매장을 눌렀을
+  /// 때와 같은 그림이다([focusStore]) — 사용자가 길찾기 전에 보던 화면이 그것이라,
+  /// 목적지를 확정한 순간 건물 앞으로 물러서면 무엇을 고른 것인지 다시 확인할
+  /// 방법이 없다.
+  ///
+  /// 도면 층을 목적지 층으로 옮기고, 그 층 도면이 도착한 **뒤에** 포커스한다 —
+  /// [focusStore]가 매장 폴리곤에서 배율을 재므로([_focusZoomForStore]) 도면 없이
+  /// 부르면 상수 배율로 떨어진다.
+  ///
+  /// **길찾기 후보에는 매장 id가 없다.** [DirectionsCandidate]가 들고 오는 것은
+  /// 도착 노드까지라, 같은 노드를 쓰는 매장을 이 층 도면에서 찾아 채운다 — 그
+  /// id가 있어야 강조도 배율도 매장에 맞는다.
+  Future<void> _focusIndoorJourneyDestination(
+    PoiSearchResult destination,
+  ) async {
+    if (destination.floor.isNotEmpty && destination.floor != _activeFloor) {
+      await _switchOverlayFloorCrossfaded(
+        destination.floor,
+        recenterIfNeeded: false,
+      );
+      if (!mounted || _activeFloor != destination.floor) return;
+    }
+    await _floorGraphLoad;
+    if (!mounted) return;
+    final viewport = MediaQuery.sizeOf(context);
+    await focusStore(
+      _withStoreIdFromFloorPlan(destination),
+      enterBuildingIfNeeded: true,
+      // 가려지지 않는 띠의 한가운데에 놓는다 — 안 주면 하단 카드가 매장을 덮는다.
+      // [focusStore]의 리프트 식이 (높이 × 비율 − 위 여백) / 2라, 아래 chrome을
+      // 비율로 환산해 넘기면 야외 재정렬과 같은 보정이 된다.
+      topInsetPx: _topChromeBottomPx(),
+      bottomSheetFraction: viewport.height <= 0
+          ? 0
+          : (_bottomChromePx() / viewport.height).clamp(0.0, 0.6),
+    );
+  }
+
+  /// 길찾기 후보가 들고 온 값만으로 그 매장의 **도면 상 id**를 채운다. 못 찾으면
+  /// 받은 값 그대로다 — 포커스는 그때 상수 배율로 떨어질 뿐 실패하지 않는다.
+  ///
+  /// 찾는 열쇠는 도착 노드다. 이름은 유일 키가 아니고(동명 매장이 실제로 있다),
+  /// 좌표는 centroid와 입구가 몇 미터 어긋난다.
+  PoiSearchResult _withStoreIdFromFloorPlan(PoiSearchResult store) {
+    if (store.placeId != null) return store;
+    final nodeId = store.nodeId;
+    if (nodeId == null) return store;
+    final match = _floorPlan?.stores
+        .where((candidate) => candidate.entranceNodeId == nodeId)
+        .firstOrNull;
+    if (match == null) return store;
+    return PoiSearchResult(
+      name: store.name,
+      floor: store.floor,
+      point: store.point,
+      placeId: match.id,
+      nodeId: nodeId,
+      category: store.category,
+      subcategory: store.subcategory,
     );
   }
 

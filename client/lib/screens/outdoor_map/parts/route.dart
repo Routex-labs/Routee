@@ -515,7 +515,16 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
       //
       // **도면을 편 상태에서도 맞춘다.** 그 축소가 도면을 접지 않게 하는 몫은
       // [_fitCameraToPoints]와 [zoomOutKeepsIndoor]가 진다.
-      if (_userDestination != null) _fitCameraToRoute(route);
+      //
+      // **이번 경로의 카메라를 다른 쪽이 가져간다고 예고했으면 비켜 준다**
+      // ([_skipRouteCameraFitOnce]). 문 경유 여정이 그렇다 — 그 야외 구간은
+      // 문까지라, 여기서 물러서면 곧 이어질 목적지 매장 포커스와 겹쳐 화면이
+      // 갔다가 돌아온다.
+      if (_skipRouteCameraFitOnce) {
+        _skipRouteCameraFitOnce = false;
+      } else if (_userDestination != null) {
+        _fitCameraToRoute(route);
+      }
     }
   }
 

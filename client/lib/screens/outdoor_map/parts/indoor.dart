@@ -1081,6 +1081,18 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
 
   void _triggerIndoorEntry({bool ignoreZoomArming = false}) {
     if (!ignoreZoomArming && !_autoIndoorEntryArmed) return;
+    // **문 경유 안내가 걸려 있으면 확대만으로 들어가지 않는다.**
+    //
+    // 그 여정의 실내 구간은 "건물에 들어간 순간" 승격되는데
+    // ([_activatePendingIndoorRoute]), 계획 화면이 목적지 매장을 보여 주려고
+    // 확대해 둔 것을 그 순간으로 읽으면 아직 밖에 선 사용자의 실내 구간이 먼저
+    // 소비된다 — 야외 구간은 그려져 있는데 안내는 이미 건물 안에서 시작한 화면이
+    // 된다. 실제로 들어가는 문은 안내 카드의 "OO(으)로 진입"뿐이다
+    // ([enterIndoorFromGuidance]).
+    //
+    // **무장은 내리지 않는다.** 예약이 소비되거나 안내가 끝나면 확대 진입이 다시
+    // 살아나야 한다.
+    if (!ignoreZoomArming && _pendingIndoorRoute != null) return;
     _autoIndoorEntryArmed = false;
     if (_indoorEntered) return;
     // 이 함수의 두 호출자가 곧 출처다 — 카메라 정지(확대)와 건물 정보 시트 탭.

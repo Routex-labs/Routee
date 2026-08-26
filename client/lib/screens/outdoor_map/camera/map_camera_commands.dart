@@ -129,6 +129,7 @@ const routeFitBottomInsetPx = 180.0;
 /// 0이면 경로선이 카드 밑변에 딱 붙어, 잘린 것인지 거기서 끝나는 것인지
 /// 구분되지 않는다.
 const routeFitChromeGapPx = 12.0;
+
 /// 끝점 핀이 잘리지 않게 위아래로 더 비우는 높이(논리 px).
 ///
 /// 카메라는 **좌표**를 담지, 그 좌표 위에 세우는 핀의 크기는 모른다. 출발·도착
@@ -217,6 +218,15 @@ Future<void> animateCameraToPoints(
 /// 함수라, 직전에 실내 나침반 추종([_moveFollowCamera])이 남겨 둔 회전이
 /// 그대로 야외 화면까지 새어 나오는 것을 막는다 — 야외는 방향 없이 보여주던
 /// 화면으로 돌아가는 것이 맞다.
+///
+/// **[duration]을 주면 물러섰다 다가가는 호를 그린다.** maplibre_gl의
+/// `animateCamera`는 시간이 붙으면 양쪽 플랫폼 모두 flyTo로 내려간다(Android는
+/// `MapLibreMap.animateCamera`, iOS는 `MLNMapView.fly(to:withDuration:)`).
+/// 먼 자리로 갈수록 중간에 더 크게 축소되는 그 호가, 목적지 매장을 확대해 보던
+/// 화면에서 안내 시작을 눌렀을 때 "축소되며 출발지로 내려앉는" 그림이다 —
+/// 축소와 이동을 두 애니메이션으로 쪼개면 도리어 겹쳐서 떤다
+/// (`docs/client/camera-choreography-plan.md` 4.14). 시간을 빼거나
+/// `moveCamera`로 바꾸면 그 호가 사라지고 화면이 순간이동한다.
 Future<void> animateCameraToPoint(
   MapLibreMapController controller,
   ll.LatLng point, {
