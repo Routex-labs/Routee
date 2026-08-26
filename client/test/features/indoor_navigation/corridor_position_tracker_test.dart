@@ -379,6 +379,10 @@ void main() {
       );
       expect(afterBatch.previewUsesContinuityShadow, isTrue);
       expect(afterBatch.optimisticLeadM, closeTo(1.4, 1e-9));
+
+      final snapped = tracker.snapMarkerToMatchedPreview();
+      expect(snapped.previewPosition, snapped.matchedPreviewPosition);
+      expect(snapped.previewUsesContinuityShadow, isFalse);
     });
 
     test('preview tail이 비어도 안정된 경로 확정 걸음으로 shadow를 복귀시킨다', () {
