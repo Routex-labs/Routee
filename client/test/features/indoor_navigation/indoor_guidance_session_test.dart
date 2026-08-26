@@ -888,6 +888,30 @@ void main() {
       expect(rerouteRequested, isTrue);
     });
 
+    test('같은 경로 밖 복도에 머물면 재탐색을 반복 요청하지 않는다', () {
+      final session = newSession()
+        ..attach(buildingId: 'b1')
+        ..setContext(floorId: '1F', graph: _branchGraph)
+        ..setAnchor(_anchor(eastM: 0))
+        ..setRouteSegment(_branchRoute);
+
+      var rerouteRequests = 0;
+      for (var steps = 0; steps <= 40; steps += 1) {
+        final result = session.onSnapshot(
+          _walkedNorthTurn(steps),
+          timestampMs: steps * 500,
+        );
+        final update = session.updateProgress(
+          result,
+          previewSteps: steps,
+          nowMs: steps * 500,
+        );
+        if (update.shouldReroute) rerouteRequests++;
+      }
+
+      expect(rerouteRequests, 1);
+    });
+
     test('경로 표시선이 달라도 실제 마커는 tracker 위치를 유지한다', () {
       const shiftedRoute = IndoorRoute(
         points: [],

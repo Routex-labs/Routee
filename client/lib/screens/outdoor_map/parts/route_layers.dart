@@ -98,11 +98,27 @@ extension OutdoorMapRouteLayers on OutdoorMapBodyState {
   }
 
   Future<void> _syncRouteLayer() {
-    final scheduled = _routeLayerWriteQueue.then<void>(
-      (_) => _syncRouteLayerNow(),
-    );
-    _routeLayerWriteQueue = scheduled.catchError((Object _, StackTrace _) {});
+    _routeLayerSyncRequested = true;
+    if (_routeLayerWriteInFlight) return _routeLayerWriteQueue;
+    _routeLayerWriteInFlight = true;
+    _routeLayerWriteQueue = _drainRouteLayerWrites();
     return _routeLayerWriteQueue;
+  }
+
+  /// 센서 틱마다 source 쓰기를 하나씩 쌓지 않고, 진행 중인 쓰기 뒤에는 가장
+  /// 최신 상태 한 번만 반영한다. GeoJSON source를 연달아 갈면 MapLibre가 중간
+  /// 빈 데이터를 한 프레임 표시해 회색·파랑 선이 잘린 것처럼 보일 수 있다.
+  Future<void> _drainRouteLayerWrites() async {
+    try {
+      do {
+        _routeLayerSyncRequested = false;
+        await _syncRouteLayerNow();
+      } while (_routeLayerSyncRequested && mounted);
+    } catch (error, stackTrace) {
+      debugPrint('route layer sync failed: $error\n$stackTrace');
+    } finally {
+      _routeLayerWriteInFlight = false;
+    }
   }
 
   /// 고르지 않은 자동차 후보를 회색으로 깐다.
@@ -152,15 +168,18 @@ extension OutdoorMapRouteLayers on OutdoorMapBodyState {
     final indoor = _indoorRouteSegment;
     if (indoor != null && indoor.points.length >= 2) {
       final visuals = _indoorRouteVisuals(indoor);
+      final features = _completedRouteFeatures(
+        scopeId: _activeFloor,
+        currentCompleted: visuals.completed,
+      );
+      final fallback = _rerouteRevealFallback;
+      if (fallback != null && fallback.length >= 2) {
+        features.add(geoJsonLineFeature(fallback, style: 'indoor'));
+      }
       final remaining = routeLinePrefix(
         visuals.remaining,
         _indoorRouteRevealProgress,
       );
-      await _syncCompletedRouteLayer(
-        scopeId: _activeFloor,
-        currentCompleted: visuals.completed,
-      );
-      final features = <Map<String, dynamic>>[];
       if (remaining.length >= 2) {
         features.add(geoJsonLineFeature(remaining, style: 'indoor'));
       }
@@ -185,11 +204,10 @@ extension OutdoorMapRouteLayers on OutdoorMapBodyState {
       return;
     }
     final outdoorVisuals = _outdoorRouteVisuals(_route);
-    await _syncCompletedRouteLayer(
+    final features = _completedRouteFeatures(
       scopeId: CompletedRouteHistory.outdoorScope,
       currentCompleted: outdoorVisuals.completed,
     );
-    final features = <Map<String, dynamic>>[];
     final route = _route;
     if (route != null && outdoorVisuals.remaining.length >= 2) {
       features.add(
@@ -217,8 +235,12 @@ extension OutdoorMapRouteLayers on OutdoorMapBodyState {
     );
   }
 
-  void _revealReroutedIndoorRoute() {
+  /// 큰 경로 변경만 이전 잔여선 위에서 새 경로를 자라게 한다. 일반적인 작은
+  /// 재탐색은 이 연출 없이 즉시 교체한다. 어느 경우든 fallback을 먼저 source에
+  /// 남기므로 0% 프레임에서 파란 선이 사라질 수 없다.
+  void _revealReroutedIndoorRoute(List<ll.LatLng> previousRemaining) {
     _indoorRouteRevealTicker?.dispose();
+    _rerouteRevealFallback = List<ll.LatLng>.unmodifiable(previousRemaining);
     _indoorRouteRevealProgress = 0;
     _indoorRouteRevealStartedAt = Duration.zero;
     _indoorRouteRevealLastWriteAt = Duration.zero;
@@ -232,21 +254,29 @@ extension OutdoorMapRouteLayers on OutdoorMapBodyState {
                   const Duration(milliseconds: 420).inMicroseconds)
               .clamp(0.0, 1.0);
       _indoorRouteRevealProgress = 1 - (1 - progress) * (1 - progress);
+      if (progress >= 1) {
+        _rerouteRevealFallback = null;
+        _indoorRouteRevealTicker?.dispose();
+        _indoorRouteRevealTicker = null;
+      }
       if (elapsed - _indoorRouteRevealLastWriteAt >=
               const Duration(milliseconds: 33) ||
           progress >= 1) {
         _indoorRouteRevealLastWriteAt = elapsed;
         _syncRouteLayer();
       }
-      if (progress >= 1) {
-        _indoorRouteRevealTicker?.dispose();
-        _indoorRouteRevealTicker = null;
-      }
     })..start();
     _syncRouteLayer();
   }
 
-  /// 사용자에게 보여 줄 회색선 source를 갱신한다.
+  void _stopReroutedIndoorRouteReveal() {
+    _indoorRouteRevealTicker?.dispose();
+    _indoorRouteRevealTicker = null;
+    _rerouteRevealFallback = null;
+    _indoorRouteRevealProgress = 1;
+  }
+
+  /// 사용자에게 보여 줄 회색선 feature를 만든다.
   ///
   /// [currentCompleted]는 아직 재탐색 이력으로 승격되지 않은 현재 경로의
   /// 완료 구간이다. 재탐색이 확정되면 같은 점들이
@@ -255,12 +285,36 @@ extension OutdoorMapRouteLayers on OutdoorMapBodyState {
   ///
   /// 넘어온 값을 그대로 쓰지 않고 [CompletedRouteHistory.advance]를 거친다 —
   /// 이번 틱의 완료 구간이 직전보다 짧아도 회색선은 줄이지 않는다.
-  Future<void> _syncCompletedRouteLayer({
+  List<Map<String, dynamic>> _completedRouteFeatures({
     required String? scopeId,
     List<ll.LatLng> currentCompleted = const [],
-  }) async {
-    final controller = _mapController;
-    if (controller == null || !_styleReady) return;
+  }) {
+    // 실내 회색선은 현재 계획 경로의 완료 부분이 아니라, 안내 시작 뒤 실제로
+    // 복도에 매칭된 보행 궤적이다. 이탈과 재탐색이 앞으로 갈 파란 선만 바꾸고
+    // 이미 지나온 선에는 영향을 주지 않아야 한다.
+    if (scopeId != null &&
+        scopeId != CompletedRouteHistory.outdoorScope &&
+        scopeId == _activeFloor) {
+      final features = <Map<String, dynamic>>[];
+      // 확정 궤적은 영구 이력으로 쓰고, 아직 확정되지 않은 마지막 몇 걸음은
+      // 화면 반환값에만 붙인다. 그래야 회색선이 마커보다 한두 배치 늦게 따라오지
+      // 않으면서도 후보가 뒤집혔을 때 과거 궤적을 오염시키지 않는다.
+      for (final segment in _guidanceTrailSession.segmentsForFloor(
+        scopeId,
+        previewPath: _pdrCorrectedPreviewFloorPath,
+      )) {
+        final points = _floorPathToWgs84(segment);
+        if (points.length < 2) continue;
+        features.add(
+          geoJsonLineFeature(
+            points,
+            style: 'completed',
+            generation: _routeGeneration,
+          ),
+        );
+      }
+      return features;
+    }
     final segments = <List<ll.LatLng>>[];
     final drawn = scopeId == null
         ? currentCompleted
@@ -275,14 +329,13 @@ extension OutdoorMapRouteLayers on OutdoorMapBodyState {
     if (drawn.length >= 2) {
       segments.add(drawn);
     }
-    await controller.setGeoJsonSource(
-      kOutdoorWalkedRouteSourceId,
-      segments.isEmpty
-          ? emptyGeoJsonCollection()
-          : geoJsonCollection([
-              for (final segment in segments)
-                geoJsonLineFeature(segment, generation: _routeGeneration),
-            ]),
-    );
+    return [
+      for (final segment in segments)
+        geoJsonLineFeature(
+          segment,
+          style: 'completed',
+          generation: _routeGeneration,
+        ),
+    ];
   }
 }

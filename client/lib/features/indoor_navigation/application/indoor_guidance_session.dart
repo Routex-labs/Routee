@@ -1170,6 +1170,11 @@ class IndoorGuidanceSession {
   int? _offRouteFirstEvidenceAtMs;
   int? _junctionZoneEnteredAtMs;
 
+  /// 이미 재탐색을 요청한 경로 밖 간선. 같은 간선 위에 계속 있는 동안에는
+  /// 경로가 새로 계산돼도 또 이탈한 것으로 취급하지 않는다. 새 간선으로 실제
+  /// 이동하거나 경로 위로 돌아오면 비워 다음 이탈은 다시 잡는다.
+  String? _rerouteRequestedForEdgeId;
+
   /// 지금 이 층에 그려진 경로 세그먼트. 화면도 이 값을 읽어 폴리라인을 그린다.
   IndoorRoute? get routeSegment => _routeSegment;
 
@@ -1185,6 +1190,11 @@ class IndoorGuidanceSession {
   /// 이 층에 그릴 세그먼트를 바꾼다. 진행률 기준점은 [seedProgress]가 정한다.
   void setRouteSegment(IndoorRoute? route) {
     _routeSegment = route;
+    // 사용자가 새 목적지를 고르는 흐름은 먼저 세그먼트를 비운다. 이전 여정의
+    // 이탈 잠금이 새 길찾기에 남으면 같은 복도에서 재탐색을 못 하게 된다.
+    if (route == null) {
+      _rerouteRequestedForEdgeId = null;
+    }
   }
 
   /// 진행률 기준점을 통째로 다시 잡는다.
@@ -1206,6 +1216,7 @@ class IndoorGuidanceSession {
   void clearProgress() {
     _progressRoute = null;
     _travelDirection.reset();
+    _rerouteRequestedForEdgeId = null;
     seedProgress(null);
   }
 
@@ -1452,6 +1463,7 @@ class IndoorGuidanceSession {
         (!confirmedOffRoute && routeLikeMovement) ||
         result.optimisticEdgeId == null ||
         result.state == CorridorTrackingState.uncertain) {
+      if (!deviated) _rerouteRequestedForEdgeId = null;
       _offRouteEvidenceUpdates = 0;
       _offRouteFirstEvidenceAtMs = null;
       _lastEvaluatedSteps = steps;
@@ -1471,9 +1483,14 @@ class IndoorGuidanceSession {
     final evidenceDurationMs = nowMs - _offRouteFirstEvidenceAtMs!;
     final requiredUpdates = strongDeviation ? 2 : 3;
     final requiredDurationMs = strongDeviation ? 700 : 1200;
-    return _offRouteEvidenceUpdates >= requiredUpdates &&
+    final offRouteEdgeId = result.currentEdgeId ?? result.optimisticEdgeId;
+    final ready =
+        _offRouteEvidenceUpdates >= requiredUpdates &&
         evidenceDurationMs >= requiredDurationMs &&
         !rerouteInFlight;
+    if (!ready || offRouteEdgeId == _rerouteRequestedForEdgeId) return false;
+    _rerouteRequestedForEdgeId = offRouteEdgeId;
+    return true;
   }
 
   /// 표시 마커는 continuity shadow 때문에 잠시 옛 경로에 남을 수 있다. 이탈

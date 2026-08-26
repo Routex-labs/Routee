@@ -14,11 +14,10 @@ import '../../../map/style/route_style.dart';
 
 /// 화면 sync 코드가 데이터를 밀어 넣는 소스 id들.
 ///
-/// 계획 경로([kOutdoorRouteSourceId])와 지나온 구간([kOutdoorWalkedRouteSourceId])
-/// 을 나누는 이유: 계획 경로가 재탐색으로 바뀌어도 이전 경로의 완료 이력이
-/// 남아 있어야 한다.
+/// 계획 경로와 지나온 구간을 한 source에 함께 넣는다. 재탐색 때 둘을 별도
+/// source로 차례로 바꾸면 한 프레임 동안 회색·파랑의 분할점이 비어 보인다.
+/// feature의 `style`이 완료 이력과 남은 경로를 가른다.
 const kOutdoorRouteSourceId = 'outdoor-route';
-const kOutdoorWalkedRouteSourceId = 'outdoor-walked-route';
 const kOutdoorTransferRouteSourceId = 'outdoor-transfer-route';
 
 /// 고르지 않은 자동차 후보 경로. 계획 경로와 **소스를 나눈다** — 같은 소스에
@@ -45,14 +44,6 @@ const _transferRouteLayerId = 'outdoor-transfer-route-line';
 /// [registerTransferRouteLayer]는 그 다음에 불러야 한다 — 등록 순서가 곧
 /// 쌓임 순서다.
 Future<void> registerRouteLayers(MapLibreMapController controller) async {
-  // 지나온 계획 구간은 계획 경로와 분리한다. 계획 경로가 재탐색으로 바뀌어도
-  // 이전 경로의 완료 이력이 남아 있어야 하므로 전용 source를 둔다. 레이어는
-  // 아래 source만 먼저 등록하고, 파란 경로 레이어가 등록된 뒤 위에 올린다.
-  await controller.addSource(
-    kOutdoorWalkedRouteSourceId,
-    GeojsonSourceProperties(data: emptyGeoJsonCollection()),
-  );
-
   // 경로선: 진한 파랑 casing + 파란 본선 + 흰 화살표. 값과 근거는
   // [map_route_style.dart]에 있다(실내 화면과 공유).
   await controller.addSource(
@@ -157,13 +148,18 @@ Future<void> registerRouteLayers(MapLibreMapController controller) async {
     kOutdoorRouteSourceId,
     _routeArrowLayerId,
     routeArrowProps(),
+    // 완료선은 실제로 지나온 궤적이라 진행 방향 화살표를 다시 얹지 않는다.
+    filter: [
+      '!=',
+      ['get', 'style'],
+      'completed',
+    ],
     enableInteraction: false,
   );
-  // 회색선은 이전 경로의 완료 이력을 보존해야 하므로 파란 잔여선보다 위에
-  // 둔다. 현재 경로는 이미 완료/잔여로 분할되어 있어 두 선이 겹치지 않고,
-  // 재탐색 전 이력이 새 파란 경로에 가려지지도 않는다.
+  // 회색선은 파란 잔여선보다 위에 둔다. 같은 source의 `completed` feature만
+  // 걸러서 그리므로 완료/잔여를 한 번에 교체하면서도 이전 경로 이력은 남는다.
   await controller.addLineLayer(
-    kOutdoorWalkedRouteSourceId,
+    kOutdoorRouteSourceId,
     _walkedRouteLayerId,
     const LineLayerProperties(
       lineColor: kRouteCompletedColor,
@@ -172,6 +168,11 @@ Future<void> registerRouteLayers(MapLibreMapController controller) async {
       lineCap: 'round',
       lineJoin: 'round',
     ),
+    filter: [
+      '==',
+      ['get', 'style'],
+      'completed',
+    ],
     enableInteraction: false,
   );
 }

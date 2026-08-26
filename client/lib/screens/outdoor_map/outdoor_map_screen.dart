@@ -834,8 +834,13 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   /// queue에서 순서대로 반영한다. 이 큐가 없으면 최신 진행률로 만든 회색선이
   /// 오래된 전체 경로 쓰기에 다시 덮일 수 있다.
   Future<void> _routeLayerWriteQueue = Future<void>.value();
+  bool _routeLayerWriteInFlight = false;
+  bool _routeLayerSyncRequested = false;
 
-  /// 재탐색 경로를 시작점부터 그릴 때의 폴리라인 길이 비율.
+  /// 큰 이탈 재탐색에서 새 파란 분기가 자라는 동안 남겨 둘 이전 잔여선.
+  /// 새 선의 첫 프레임이 비어도 이 선을 같이 source에 넣으므로 경로가 끊겨
+  /// 보이지 않는다.
+  List<ll.LatLng>? _rerouteRevealFallback;
   double _indoorRouteRevealProgress = 1;
   Ticker? _indoorRouteRevealTicker;
   Duration _indoorRouteRevealStartedAt = Duration.zero;
@@ -1250,9 +1255,8 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
       // 돌리는 것은 프레임 루프이고, 흔들림을 거르는 몫은 [_moveFollowCamera]
       // 안의 데드밴드에 있다.
       _moveFollowCamera(snapshot);
-      // 사용자 회색선은 실제 PDR 궤적이 아니라 현재 계획 경로의 완료 구간이다.
-      // 진행률이 바뀐 같은 틱에 경로 source도 갱신해야 파란 잔여선과 회색 완료선이
-      // 같은 투영점을 공유한다. GuidanceTrailSession은 별도 진단 궤적으로만 남긴다.
+      // 회색선은 안내 시작 뒤 확정된 복도 보행 궤적이다. 이탈로 파란 경로가
+      // 재탐색돼도 이미 지나온 길은 그대로 남아야 하므로 같은 틱에 source를 갱신한다.
       unawaited(_syncRouteLayer());
       unawaited(_syncDebugPdrLayers());
     });
