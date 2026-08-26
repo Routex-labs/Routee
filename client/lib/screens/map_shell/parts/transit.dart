@@ -389,13 +389,19 @@ extension _MapShellTransit on _MapShellScreenState {
       if (!mounted) return;
 
       // 떼어 둔 실내 구간을 되붙인다. 총계도 함께 돌아온다.
-      final withIndoorLead = indoorLead == null
+      //
+      // **실내 선을 실제로 그렸을 때만 붙인다.** 목록은 그래프만 보고 붙이는데
+      // ([_withIndoorLeadLegs]), 고른 뒤 실내 경로가 안 풀리면
+      // ([showIndoorLegToOutdoorStart]가 null) 지도에는 그 구간이 없다. 그대로
+      // 붙이면 카드가 **그려지지도 안내되지도 않는 시간**을 총계에 넣고 상세
+      // 경로 첫 줄에 적는다 — 숫자와 선이 어긋나는 자리다.
+      final withIndoorLead = (indoorLead == null || boardingWalkOrigin == null)
           ? completed
           : prependIndoorWalkLeg(
               completed,
               seconds: indoorLead.seconds,
               meters: indoorLead.meters,
-              exitName: boardingWalkOrigin?.label ?? indoorLead.exitName,
+              exitName: boardingWalkOrigin.label,
             );
 
       await outdoor.showTransitRoute(
