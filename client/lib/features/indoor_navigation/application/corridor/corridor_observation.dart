@@ -120,12 +120,21 @@ class CorridorObservation {
   }
 }
 
+enum HeadingCorrectionState { learning, locked }
+
 class CorridorTrackingResult {
   const CorridorTrackingResult({
     required this.state,
     required this.correctedPosition,
     required this.correctedHeadingDeg,
     required this.headingBiasDeg,
+    this.headingCorrectionState = HeadingCorrectionState.learning,
+    this.learningHeadingBiasDeg = 0,
+    this.lockedHeadingCorrectionDeg,
+    this.headingCorrectionEvidenceDistanceM = 0,
+    this.headingCorrectionEvidenceSpreadDeg = double.infinity,
+    this.headingCorrectionEvidenceMeanDeg,
+    this.headingCorrectionEvidenceSamples = 0,
     required this.currentEdgeId,
     required this.currentEdgeProgressM,
     required this.travelDirectionSign,
@@ -133,6 +142,8 @@ class CorridorTrackingResult {
     required this.lastConfirmedNodeId,
     required this.correctedPath,
     required this.previewPosition,
+    required this.matchedPreviewPosition,
+    required this.previewUsesContinuityShadow,
     required this.previewHeadingDeg,
     required this.previewPath,
     required this.previewCandidateEdgeIds,
@@ -159,13 +170,38 @@ class CorridorTrackingResult {
   final double correctedHeadingDeg;
 
   final double headingBiasDeg;
+
+  /// 같은 층의 직선 근거를 모으는 중인지, 충분한 근거로 보정각을 잠갔는지.
+  final HeadingCorrectionState headingCorrectionState;
+
+  /// 학습 상태에서 적용 중인 floor-frame 보정각.
+  final double learningHeadingBiasDeg;
+
+  /// 잠금 뒤 코너·유턴에서도 바뀌지 않는 floor-frame 보정각.
+  final double? lockedHeadingCorrectionDeg;
+
+  final double headingCorrectionEvidenceDistanceM;
+  final double headingCorrectionEvidenceSpreadDeg;
+  final double? headingCorrectionEvidenceMeanDeg;
+  final int headingCorrectionEvidenceSamples;
   final String? currentEdgeId;
   final double currentEdgeProgressM;
   final int travelDirectionSign;
   final String? pendingEdgeId;
   final String? lastConfirmedNodeId;
   final List<PdrLocalPoint> correctedPath;
+
+  /// 화면과 경로 진행률이 쓰는 연속성 보호 후 위치.
   final PdrLocalPoint previewPosition;
+
+  /// optimistic beam 1등의 graph 위 절대 좌표.
+  ///
+  /// 후보 재배치 중에는 [previewPosition]과 달라질 수 있다. 내부 간선 진행률은
+  /// 이 좌표를 계속 쓰고 화면만 raw PDR 이동량을 이어 간다.
+  final PdrLocalPoint matchedPreviewPosition;
+
+  /// 후보 재배치가 화면 마커에 노출되지 않도록 raw 이동을 잇고 있는지.
+  final bool previewUsesContinuityShadow;
   final double previewHeadingDeg;
   final List<PdrLocalPoint> previewPath;
   final List<String> previewCandidateEdgeIds;

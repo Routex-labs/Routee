@@ -3,10 +3,12 @@ import 'dart:math' as math;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:indoor_pdr_core/indoor_pdr_core.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:navigation_client/domain/geo/geo_transform.dart';
 import 'package:navigation_client/features/indoor_navigation/application/indoor_guidance_position.dart';
 import 'package:navigation_client/features/indoor_navigation/application/indoor_guidance_session.dart';
 import 'package:navigation_client/features/indoor_navigation/application/indoor_location_estimate.dart';
 import 'package:navigation_client/features/indoor_navigation/application/escalator_transition_detector.dart';
+import 'package:navigation_client/features/indoor_navigation/application/corridor/corridor_observation.dart';
 import 'package:navigation_client/features/indoor_navigation/contract/altitude_sample.dart';
 import 'package:navigation_client/models/building/building_graph.dart';
 import 'package:navigation_client/domain/guidance/route_movement.dart';
@@ -105,6 +107,7 @@ PdrAnchor _anchor({
   String floorId = '1F',
   double eastM = 1,
   double northM = 0,
+  PdrToFloorAxes axes = const PdrToFloorAxes.identity(),
 }) => PdrAnchor(
   floorId: floorId,
   anchorLocalM: PdrLocalPoint(eastM, northM),
@@ -113,6 +116,7 @@ PdrAnchor _anchor({
   requiresManualRotationCalibration: false,
   source: AnchorSource.userPin,
   confidence: 1,
+  axes: axes,
 );
 
 /// 품질은 이 세션의 판단에 쓰이지 않는다. 스냅샷을 만들려면 필요할 뿐이라
@@ -157,6 +161,32 @@ PdrSnapshot _walkedEast(int steps) {
     distanceM: steps * 0.7,
     orientationHeadingDeg: 90,
     walkingHeadingDeg: 90,
+    hasHeading: true,
+    preview: PdrPreview(
+      position: path.last,
+      path: path,
+      steps: steps,
+      distanceM: steps * 0.7,
+      acceptedPeakTimesMs: List<int?>.filled(path.length, null),
+    ),
+    quality: _quality,
+  );
+}
+
+/// 센서 heading과 실제 PDR 이동이 함께 [bearingDeg]만큼 틀어진 직선 보행.
+PdrSnapshot _walkedAtBearing(int steps, double bearingDeg) {
+  final direction = pdrDirectionForBearing(bearingDeg);
+  final path = [
+    for (var i = 0; i <= steps; i += 1)
+      PdrLocalPoint(direction.eastM * i * 0.7, direction.northM * i * 0.7),
+  ];
+  return PdrSnapshot(
+    position: path.last,
+    path: path,
+    steps: steps,
+    distanceM: steps * 0.7,
+    orientationHeadingDeg: bearingDeg,
+    walkingHeadingDeg: bearingDeg,
     hasHeading: true,
     preview: PdrPreview(
       position: path.last,
@@ -1017,6 +1047,81 @@ void main() {
       session.setContext(floorId: '1F', graph: _corridorGraph);
 
       expect(session.position?.localM.eastM, before);
+    });
+  });
+
+  group('직선 헤딩 보정', () {
+    test('floor frame에서 +20도를 잠그고 마커 방향에 한 번만 적용한다', () {
+      final session = attachedSession();
+      for (var steps = 0; steps <= 18; steps += 1) {
+        session.onSnapshot(
+          _walkedAtBearing(steps, 70),
+          timestampMs: 1000 + steps * 500,
+        );
+      }
+
+      expect(
+        session.trackingResult?.headingCorrectionState,
+        HeadingCorrectionState.locked,
+      );
+      expect(session.trackingResult?.headingBiasDeg, closeTo(20, 0.5));
+      expect(session.position?.headingDeg, closeTo(90, 0.5));
+    });
+
+    test('층 전환은 잠금을 폐기하고 새 층을 learning부터 시작한다', () {
+      final session = attachedSession();
+      for (var steps = 0; steps <= 18; steps += 1) {
+        session.onSnapshot(
+          _walkedAtBearing(steps, 70),
+          timestampMs: 1000 + steps * 500,
+        );
+      }
+      expect(
+        session.trackingResult?.headingCorrectionState,
+        HeadingCorrectionState.locked,
+      );
+
+      session
+        ..setContext(floorId: '2F', graph: _corridorGraph)
+        ..setAnchor(_anchor(floorId: '2F'))
+        ..onSnapshot(_walkedAtBearing(0, 70), timestampMs: 12000);
+
+      expect(
+        session.trackingResult?.headingCorrectionState,
+        HeadingCorrectionState.learning,
+      );
+      expect(session.trackingResult?.lockedHeadingCorrectionDeg, isNull);
+      expect(
+        session.trackingResult?.headingCorrectionEvidenceDistanceM,
+        closeTo(0, 1e-9),
+      );
+    });
+
+    test('y축이 반전된 층에서도 변환 뒤 보정해 동쪽을 가리킨다', () {
+      const reflectedAxes = PdrToFloorAxes(
+        eastToX: 1,
+        northToX: 0,
+        eastToY: 0,
+        northToY: -1,
+      );
+      final session = newSession()
+        ..attach(buildingId: 'b1')
+        ..setContext(floorId: '1F', graph: _corridorGraph)
+        ..setAnchor(_anchor(axes: reflectedAxes));
+
+      for (var steps = 0; steps <= 18; steps += 1) {
+        session.onSnapshot(
+          _walkedAtBearing(steps, 70),
+          timestampMs: 1000 + steps * 500,
+        );
+      }
+
+      expect(
+        session.trackingResult?.headingCorrectionState,
+        HeadingCorrectionState.locked,
+      );
+      expect(session.trackingResult?.headingBiasDeg, closeTo(-20, 0.5));
+      expect(session.position?.headingDeg, closeTo(90, 0.5));
     });
   });
 }

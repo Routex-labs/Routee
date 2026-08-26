@@ -503,7 +503,7 @@ class IndoorGuidanceSession {
     required PdrLocalPoint routeEndM,
     required CorridorTrackingResult result,
   }) {
-    final matchedM = result.previewPosition;
+    final matchedM = result.matchedPreviewPosition;
     final matchedDistanceM = (routeEndM - matchedM).distance;
     final config = _escalator.config;
     final sameTarget = _boardingApproachShadowNodeId == boardingNodeId;
@@ -1429,9 +1429,18 @@ class IndoorGuidanceSession {
       _junctionZoneEnteredAtMs = null;
     }
 
-    final strongDeviation = progress.offsetM >= 4 || progress.reacquired;
+    final headingStillFollowsRoute =
+        progress.headingErrorDeg == null || progress.headingErrorDeg! <= 65;
+    // 그래프에는 모든 실제 보행선을 넣을 수 없다. 가까운 평행 통로를 따라
+    // 가면서 방향도 경로와 같으면, 간선 id가 달라도 안내 경로의 오차로 본다.
+    final routeLikeMovement =
+        progress.offsetM <= 2.5 && headingStillFollowsRoute;
+    final strongDeviation =
+        (progress.offsetM >= 5.5 && !headingStillFollowsRoute) ||
+        (progress.reacquired && !headingStillFollowsRoute);
     final deviated = !progress.onRouteEdge || strongDeviation;
     if (!deviated ||
+        routeLikeMovement ||
         result.optimisticEdgeId == null ||
         result.state == CorridorTrackingState.uncertain) {
       _offRouteEvidenceUpdates = 0;
@@ -1497,8 +1506,13 @@ class IndoorGuidanceSession {
   double? _floorHeadingDeg(PdrAnchor anchor) {
     final snapshot = _snapshot;
     if (snapshot == null) return null;
-    return FloorCoordinateTransform(
+    final floorHeading = FloorCoordinateTransform(
       anchor,
     ).toFloorBearing(snapshot.orientationHeadingDeg);
+    // tracker의 correction은 floor frame에서 배웠다. PDR 헤딩에 먼저 더하면
+    // y축이 반전된 도면에서 부호가 뒤집히므로 변환이 끝난 뒤 정확히 한 번만 더한다.
+    return normalizePdrBearing(
+      floorHeading + (_corridor.result?.headingBiasDeg ?? 0),
+    );
   }
 }

@@ -31,7 +31,8 @@ class PdrDebugSessionRecorder {
   // v20이 늘린 것: 진입 시각 ~ 첫 실내 위치 사이의 공백 `indoor_position_gaps`.
   // v21이 바로잡은 것: `actual_marker_position`이 tracker preview 별칭이 아니라
   // 진행률·고정까지 적용된 제품 마커 좌표를 기록한다.
-  static const schemaVersion = 21;
+  // v22가 늘린 것: 표시 좌표와 내부 graph preview, 연속성 shadow 상태를 분리한다.
+  static const schemaVersion = 23;
 
   // **표본 배열에 상한이 없다** — 품질·복도·tracker 입력·경로 진행·기압·층 전이·
   // GPS 차이는 세션이 끝날 때까지 무한히 쌓인다.
@@ -365,10 +366,27 @@ class PdrDebugSessionRecorder {
       'position_floor_local_m': _pointJson(result.correctedPosition),
       'corrected_heading_deg': result.correctedHeadingDeg,
       'preview_position_floor_local_m': _pointJson(result.previewPosition),
+      'matched_preview_position_floor_local_m': _pointJson(
+        result.matchedPreviewPosition,
+      ),
+      'preview_uses_continuity_shadow': result.previewUsesContinuityShadow,
       'preview_heading_deg': result.previewHeadingDeg,
       'preview_candidate_edge_ids': result.previewCandidateEdgeIds,
       'preview_is_ambiguous': result.previewIsAmbiguous,
       'heading_bias_deg': result.headingBiasDeg,
+      'heading_correction_state': result.headingCorrectionState.name,
+      'learning_heading_bias_deg': result.learningHeadingBiasDeg,
+      'locked_heading_correction_deg': result.lockedHeadingCorrectionDeg,
+      'heading_correction_evidence_distance_m':
+          result.headingCorrectionEvidenceDistanceM,
+      'heading_correction_evidence_spread_deg':
+          result.headingCorrectionEvidenceSpreadDeg.isFinite
+          ? result.headingCorrectionEvidenceSpreadDeg
+          : null,
+      'heading_correction_evidence_mean_deg':
+          result.headingCorrectionEvidenceMeanDeg,
+      'heading_correction_evidence_samples':
+          result.headingCorrectionEvidenceSamples,
     };
     final stateChanged =
         previous == null ||
@@ -472,6 +490,8 @@ class PdrDebugSessionRecorder {
         'position': _pairJson(result.correctedPosition),
         'corrected_heading_deg': result.correctedHeadingDeg,
         'preview_position': _pairJson(result.previewPosition),
+        'matched_preview_position': _pairJson(result.matchedPreviewPosition),
+        'preview_uses_continuity_shadow': result.previewUsesContinuityShadow,
         'actual_marker_position': _pairJson(
           actualMarkerPosition ?? result.previewPosition,
         ),
@@ -480,6 +500,19 @@ class PdrDebugSessionRecorder {
         'preview_candidate_edge_ids': result.previewCandidateEdgeIds,
         'preview_is_ambiguous': result.previewIsAmbiguous,
         'heading_bias_deg': result.headingBiasDeg,
+        'heading_correction_state': result.headingCorrectionState.name,
+        'learning_heading_bias_deg': result.learningHeadingBiasDeg,
+        'locked_heading_correction_deg': result.lockedHeadingCorrectionDeg,
+        'heading_correction_evidence_distance_m':
+            result.headingCorrectionEvidenceDistanceM,
+        'heading_correction_evidence_spread_deg':
+            result.headingCorrectionEvidenceSpreadDeg.isFinite
+            ? result.headingCorrectionEvidenceSpreadDeg
+            : null,
+        'heading_correction_evidence_mean_deg':
+            result.headingCorrectionEvidenceMeanDeg,
+        'heading_correction_evidence_samples':
+            result.headingCorrectionEvidenceSamples,
         'confirmed_displacement_m': result.confirmedDisplacementM,
         // optimistic cursor(화면 위치)의 독립 상태. 확정 cursor와 나란히
         // 남겨야 "배치가 마커를 뒤로 보냈는가"를 파일만으로 판정할 수 있다.
@@ -1020,6 +1053,11 @@ class PdrDebugSessionRecorder {
               'preview_position_floor_local_m': _pointJson(
                 corridorCorrection.previewPosition,
               ),
+              'matched_preview_position_floor_local_m': _pointJson(
+                corridorCorrection.matchedPreviewPosition,
+              ),
+              'preview_uses_continuity_shadow':
+                  corridorCorrection.previewUsesContinuityShadow,
               'actual_marker_position': _pointJson(
                 actualMarkerPosition ?? corridorCorrection.previewPosition,
               ),
@@ -1032,6 +1070,22 @@ class PdrDebugSessionRecorder {
                   corridorCorrection.previewCandidateEdgeIds,
               'preview_is_ambiguous': corridorCorrection.previewIsAmbiguous,
               'heading_bias_deg': corridorCorrection.headingBiasDeg,
+              'heading_correction_state':
+                  corridorCorrection.headingCorrectionState.name,
+              'learning_heading_bias_deg':
+                  corridorCorrection.learningHeadingBiasDeg,
+              'locked_heading_correction_deg':
+                  corridorCorrection.lockedHeadingCorrectionDeg,
+              'heading_correction_evidence_distance_m':
+                  corridorCorrection.headingCorrectionEvidenceDistanceM,
+              'heading_correction_evidence_spread_deg':
+                  corridorCorrection.headingCorrectionEvidenceSpreadDeg.isFinite
+                  ? corridorCorrection.headingCorrectionEvidenceSpreadDeg
+                  : null,
+              'heading_correction_evidence_mean_deg':
+                  corridorCorrection.headingCorrectionEvidenceMeanDeg,
+              'heading_correction_evidence_samples':
+                  corridorCorrection.headingCorrectionEvidenceSamples,
             },
     };
   }
