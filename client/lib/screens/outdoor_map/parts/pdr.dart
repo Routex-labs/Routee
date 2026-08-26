@@ -785,6 +785,13 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     // **애니메이션 없이 놓는다.** 보간은 이미 우리가 하고 있어서, 여기에
     // animateCamera를 걸면 프레임마다 새 애니메이션이 앞엣것을 잘라 되레 떤다
     // (iOS에서 animateCamera는 곡선으로 나는 flyTo다).
+    //
+    // **[resumed]일 때만 애니메이션을 거는 것도 안 된다.** 한 번 시도했다가
+    // 자기를 되먹이는 루프를 만들었다 — 애니메이션이 도는 동안
+    // [_followCameraInFlight]가 다음 프레임을 막고, 그 대기가 프레임 간격을
+    // [followCameraResumeGapMs] 너머로 밀어 다음 프레임도 다시 `resumed`가
+    // 된다. 그렇게 초당 네 번씩 새 애니메이션이 앞엣것을 자르며 영영 떨었다
+    // (실기기 로그: `resumed=true`가 250~300ms 간격으로 끝없이 반복).
     unawaited(
       controller
           .moveCamera(

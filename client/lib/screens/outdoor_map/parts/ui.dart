@@ -497,9 +497,15 @@ extension OutdoorMapUi on OutdoorMapBodyState {
             duration: const Duration(milliseconds: 200),
             curve: Curves.easeOut,
             right: RoutexSpacing.componentPadding,
+            // **상수 대신 잰 높이를 쓴다.** 안내 중 카드(도착·전환 버튼까지
+            // 붙은 EtaCard)는 92px보다 훨씬 커질 수 있어([_bottomCardHeightPx]),
+            // 고정값만 믿으면 버튼이 카드 뒤로 들어간다(실기기 확인). 아직
+            // 못 잰 프레임에서는 상수로 물러선다.
             bottom:
                 floorSelectorBottomOffset +
-                (indoorRouteVisible ? bottomBarLiftPx : 0),
+                (indoorRouteVisible
+                    ? math.max(_bottomCardHeightPx(), bottomBarLiftPx)
+                    : 0),
             child: SafeArea(
               top: false,
               child: RoutexMapControl(

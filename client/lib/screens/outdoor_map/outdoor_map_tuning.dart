@@ -153,6 +153,15 @@ const guidanceStartZoom = 19.0;
 /// "내 위치로" 이동 시간. 직접 누른 조작이라 과정을 보여 줄 이유가 없다.
 const recenterDuration = Duration(milliseconds: 300);
 
+/// `안내 시작` 직후 전체 경로 개요에서 내 위치로 좁혀 올 때의 이동 시간.
+///
+/// [recenterDuration]보다 길다 — 그쪽은 사용자가 누른 순간 바로 튀어야 할
+/// 손끝 조작이지만, 이건 방금까지 보던 경로 전체(도시 축척일 수 있다)에서
+/// 몇 단계나 확대해 들어오는 큰 전환이다. [recenterDuration]과 같은 300ms를
+/// 그대로 쓰면 중간 단계 없이 화면이 튀어 보인다(실기기 확인). 물러서는
+/// 연출([routeOverviewDuration], 700ms)과 같은 길이로 되짚어 온다.
+const guidanceStartRecenterDuration = Duration(milliseconds: 700);
+
 /// 실내 안내 중 카메라가 사용자를 따라갈 때의 배율.
 ///
 /// **실내 타일 maxzoom(18, [indoorTilesMaxZoom])을 넘는 값이다.** MapLibre가 18
