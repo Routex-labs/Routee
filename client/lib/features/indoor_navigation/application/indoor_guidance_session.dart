@@ -1497,8 +1497,13 @@ class IndoorGuidanceSession {
   double? _floorHeadingDeg(PdrAnchor anchor) {
     final snapshot = _snapshot;
     if (snapshot == null) return null;
-    return FloorCoordinateTransform(
+    final floorHeading = FloorCoordinateTransform(
       anchor,
     ).toFloorBearing(snapshot.orientationHeadingDeg);
+    // tracker의 correction은 floor frame에서 배웠다. PDR 헤딩에 먼저 더하면
+    // y축이 반전된 도면에서 부호가 뒤집히므로 변환이 끝난 뒤 정확히 한 번만 더한다.
+    return normalizePdrBearing(
+      floorHeading + (_corridor.result?.headingBiasDeg ?? 0),
+    );
   }
 }

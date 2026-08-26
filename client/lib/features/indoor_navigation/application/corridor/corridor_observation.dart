@@ -120,12 +120,21 @@ class CorridorObservation {
   }
 }
 
+enum HeadingCorrectionState { learning, locked }
+
 class CorridorTrackingResult {
   const CorridorTrackingResult({
     required this.state,
     required this.correctedPosition,
     required this.correctedHeadingDeg,
     required this.headingBiasDeg,
+    this.headingCorrectionState = HeadingCorrectionState.learning,
+    this.learningHeadingBiasDeg = 0,
+    this.lockedHeadingCorrectionDeg,
+    this.headingCorrectionEvidenceDistanceM = 0,
+    this.headingCorrectionEvidenceSpreadDeg = double.infinity,
+    this.headingCorrectionEvidenceMeanDeg,
+    this.headingCorrectionEvidenceSamples = 0,
     required this.currentEdgeId,
     required this.currentEdgeProgressM,
     required this.travelDirectionSign,
@@ -161,6 +170,20 @@ class CorridorTrackingResult {
   final double correctedHeadingDeg;
 
   final double headingBiasDeg;
+
+  /// 같은 층의 직선 근거를 모으는 중인지, 충분한 근거로 보정각을 잠갔는지.
+  final HeadingCorrectionState headingCorrectionState;
+
+  /// 학습 상태에서 적용 중인 floor-frame 보정각.
+  final double learningHeadingBiasDeg;
+
+  /// 잠금 뒤 코너·유턴에서도 바뀌지 않는 floor-frame 보정각.
+  final double? lockedHeadingCorrectionDeg;
+
+  final double headingCorrectionEvidenceDistanceM;
+  final double headingCorrectionEvidenceSpreadDeg;
+  final double? headingCorrectionEvidenceMeanDeg;
+  final int headingCorrectionEvidenceSamples;
   final String? currentEdgeId;
   final double currentEdgeProgressM;
   final int travelDirectionSign;

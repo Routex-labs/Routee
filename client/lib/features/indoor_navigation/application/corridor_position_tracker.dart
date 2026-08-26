@@ -43,6 +43,7 @@ class CorridorPositionTracker {
   final List<PdrLocalPoint> _correctedPath = [];
   final List<PdrLocalPoint> _previewPath = [];
   final LocationMarkerContinuity _markerContinuity = LocationMarkerContinuity();
+  CorridorEdge? _continuityGraphEdge;
 
   List<Hypothesis> _beam = const [];
 
@@ -81,7 +82,17 @@ class CorridorPositionTracker {
   PdrLocalPoint _rawPreviewPosition = PdrLocalPoint.zero;
   PdrLocalPoint _continuityRawPosition = PdrLocalPoint.zero;
   double _sensorHeadingDeg = 0;
-  double _headingBiasDeg = 0;
+  HeadingCorrectionState _headingCorrectionState =
+      HeadingCorrectionState.learning;
+  double _learningHeadingBiasDeg = 0;
+  double? _lockedHeadingCorrectionDeg;
+  String? _headingEvidenceEdgeId;
+  int? _headingEvidenceTravelSign;
+  double _headingEvidenceStartBiasDeg = 0;
+  double _headingEvidenceDistanceM = 0;
+  double _headingEvidenceSin = 0;
+  double _headingEvidenceCos = 0;
+  int _headingEvidenceSamples = 0;
   int _lastConfirmedSteps = 0;
   double _lastConfirmedDistanceM = 0;
   int _lastPreviewSteps = 0;
@@ -100,6 +111,29 @@ class CorridorPositionTracker {
 
   bool get isInitialized => _beam.isNotEmpty;
 
+  double get _headingBiasDeg =>
+      _lockedHeadingCorrectionDeg ?? _learningHeadingBiasDeg;
+
+  double? get _headingEvidenceMeanDeg {
+    if (_headingEvidenceDistanceM <= 1e-9) return null;
+    final degrees =
+        math.atan2(_headingEvidenceSin, _headingEvidenceCos) * 180 / math.pi;
+    return shortestDelta(degrees);
+  }
+
+  double get _headingEvidenceSpreadDeg {
+    if (_headingEvidenceDistanceM <= 1e-9) return double.infinity;
+    final resultant =
+        math.sqrt(
+          _headingEvidenceSin * _headingEvidenceSin +
+              _headingEvidenceCos * _headingEvidenceCos,
+        ) /
+        _headingEvidenceDistanceM;
+    if (resultant <= 1e-9) return double.infinity;
+    final bounded = resultant.clamp(1e-9, 1.0);
+    return math.sqrt(math.max(0, -2 * math.log(bounded))) * 180 / math.pi;
+  }
+
   void setPreferredRoute({
     required List<String> edgeIds,
     required List<String> nodeIds,
@@ -115,13 +149,17 @@ class CorridorPositionTracker {
       _preferRouteContinuity = false;
       _lockPreferredRouteTerminal = false;
       _lastRouteStraightEpochIndex = -1;
+      _continuityGraphEdge = null;
       return;
     }
     _preferredRouteEdgeIds = List.unmodifiable(edgeIds);
     _preferredRouteNodeIds = List.unmodifiable(nodeIds);
     _preferRouteContinuity = preferContinuity;
     _lockPreferredRouteTerminal = lockTerminal;
-    if (routeChanged) _lastRouteStraightEpochIndex = -1;
+    if (routeChanged) {
+      _lastRouteStraightEpochIndex = -1;
+      _continuityGraphEdge = null;
+    }
   }
 
   Hypothesis? get _best => _beam.isEmpty ? null : _beam.first;
@@ -139,6 +177,13 @@ class CorridorPositionTracker {
         _best?.edge.bearingForTravel(_best!.progressM, _best!.travelSign) ??
         normalizeBearing(_sensorHeadingDeg + _headingBiasDeg),
     headingBiasDeg: _headingBiasDeg,
+    headingCorrectionState: _headingCorrectionState,
+    learningHeadingBiasDeg: _learningHeadingBiasDeg,
+    lockedHeadingCorrectionDeg: _lockedHeadingCorrectionDeg,
+    headingCorrectionEvidenceDistanceM: _headingEvidenceDistanceM,
+    headingCorrectionEvidenceSpreadDeg: _headingEvidenceSpreadDeg,
+    headingCorrectionEvidenceMeanDeg: _headingEvidenceMeanDeg,
+    headingCorrectionEvidenceSamples: _headingEvidenceSamples,
     currentEdgeId: _best?.edge.id,
     currentEdgeProgressM: _best?.progressM ?? 0,
     travelDirectionSign: _best?.travelSign ?? 1,
@@ -176,7 +221,10 @@ class CorridorPositionTracker {
     int initialPreviewSteps = 0,
   }) {
     _sensorHeadingDeg = normalizeBearing(initialHeadingDeg);
-    _headingBiasDeg = 0;
+    _headingCorrectionState = HeadingCorrectionState.learning;
+    _learningHeadingBiasDeg = 0;
+    _lockedHeadingCorrectionDeg = null;
+    _resetHeadingEvidence();
     _lastConfirmedSteps = initialConfirmedSteps;
     _lastConfirmedDistanceM = initialConfirmedDistanceM;
     _lastPreviewSteps = initialPreviewSteps;
@@ -252,19 +300,20 @@ class CorridorPositionTracker {
     _confirmedAdvanceM = 0;
     _leaderRelocated = false;
     _routeStraightEpochNodeId = null;
+    List<({double headingDeg, double distanceM, PdrLocalPoint rawPoint})>
+    confirmedSegments = const [];
     if (hasConfirmedAdvance) {
-      final segments = _rawSegments(
+      confirmedSegments = _rawSegments(
         deltaSteps: deltaSteps,
         deltaDistanceM: deltaDistanceM,
         previousRawConfirmedPosition: previousRawConfirmedPosition,
         rawConfirmedStepPositions: observation.rawConfirmedStepPositions,
       );
       final transitionsBefore = _best?.transitions ?? 0;
-      for (final segment in segments) {
+      for (final segment in confirmedSegments) {
         _advanceBeam(segment);
         _lastConfirmedSegmentHeadingDeg = segment.headingDeg;
       }
-      _updateHeadingBias();
       _publishConfirmed(transitionsBefore: transitionsBefore);
       _beginRouteStraightEpochIfReady();
       _confirmedAdvanceM = (_correctedPosition - previousCorrected).distance;
@@ -300,6 +349,12 @@ class CorridorPositionTracker {
     );
     _publishPreview();
     _updateJunctionState();
+    if (hasConfirmedAdvance) {
+      _updateHeadingCorrection(
+        confirmedSegments,
+        hasHeading: observation.hasHeading,
+      );
+    }
     return result;
   }
 
@@ -850,19 +905,124 @@ class CorridorPositionTracker {
     _routeStraightEpochNodeId = entryNodeId;
   }
 
-  /// 1등 가설이 뚜렷할 때만 heading bias를 조금씩 복도 방향으로 당긴다.
-  void _updateHeadingBias() {
+  /// 같은 층의 신뢰 가능한 직선 구간에서만 floor-frame 보정각을 학습한다.
+  ///
+  /// 잠긴 뒤에는 이 함수가 진단 근거만 다시 모으고 적용값은 바꾸지 않는다.
+  /// 코너·유턴에서 센서 방향이 바뀐 것을 오차로 먹지 않는 것이 핵심이다.
+  void _updateHeadingCorrection(
+    List<({double headingDeg, double distanceM, PdrLocalPoint rawPoint})>
+    segments, {
+    required bool hasHeading,
+  }) {
     final best = _best;
-    if (best == null || best.unmatchedM > 0.5) return;
+    if (!hasHeading ||
+        best == null ||
+        best.unmatchedM > 0.5 ||
+        _state != CorridorTrackingState.straightTracking ||
+        _junctionNodeId != null ||
+        _previewIsAmbiguous ||
+        _pendingEdgeId != null ||
+        _leaderRelocated ||
+        segments.isEmpty ||
+        !_leaderWinsWithoutRoutePrior(best) ||
+        _hasCompetitiveOpposite(best)) {
+      _resetHeadingEvidence();
+      return;
+    }
+
+    if (_headingEvidenceEdgeId != best.edge.id ||
+        _headingEvidenceTravelSign != best.travelSign) {
+      _resetHeadingEvidence(edgeId: best.edge.id, travelSign: best.travelSign);
+    }
+
     final target = best.edge.bearingForTravel(best.progressM, best.travelSign);
-    final corrected = normalizeBearing(_sensorHeadingDeg + _headingBiasDeg);
-    final requested = shortestDelta(target - corrected);
-    if (requested.abs() > config.headingBiasMaxErrorDeg) return;
-    final maxCorrection = config.maxHeadingCorrectionPerStepDeg;
-    _headingBiasDeg = _clampSigned(
-      _headingBiasDeg + requested.clamp(-maxCorrection, maxCorrection),
-      config.headingBiasLimitDeg,
+    for (final segment in segments) {
+      if (segment.distanceM <= 1e-9) continue;
+      final correction = shortestDelta(target - segment.headingDeg);
+      if (correction.abs() > config.headingBiasMaxErrorDeg) {
+        _resetHeadingEvidence();
+        return;
+      }
+      final radians = correction * math.pi / 180;
+      _headingEvidenceSin += math.sin(radians) * segment.distanceM;
+      _headingEvidenceCos += math.cos(radians) * segment.distanceM;
+      _headingEvidenceDistanceM += segment.distanceM;
+      _headingEvidenceSamples += 1;
+    }
+
+    final mean = _headingEvidenceMeanDeg;
+    if (mean == null) return;
+    if (_headingCorrectionState == HeadingCorrectionState.learning) {
+      if (_headingEvidenceSpreadDeg > config.headingCorrectionMaxSpreadDeg) {
+        // 회전 한 표본이 직선 구간으로 잘못 들어와도 적용 중인 bias를
+        // 끌고 가지 않는다. 이 묶음은 잠금 근거로만 남기고, 새 직선/간선에서
+        // evidence가 다시 시작될 때까지 학습값은 묶음 시작값을 유지한다.
+        _learningHeadingBiasDeg = _headingEvidenceStartBiasDeg;
+        return;
+      }
+      final progress =
+          (_headingEvidenceDistanceM / config.headingCorrectionMinEvidenceM)
+              .clamp(0.0, 1.0);
+      _learningHeadingBiasDeg = _clampSigned(
+        _headingEvidenceStartBiasDeg +
+            shortestDelta(mean - _headingEvidenceStartBiasDeg) * progress,
+        config.headingBiasLimitDeg,
+      );
+      if (_headingEvidenceDistanceM >= config.headingCorrectionMinEvidenceM &&
+          _headingEvidenceSamples >=
+              config.headingCorrectionMinEvidenceSamples &&
+          _headingEvidenceSpreadDeg <= config.headingCorrectionMaxSpreadDeg) {
+        // 상태만 learning → locked로 바꾼다. 직전에 적용하던 총 보정값을
+        // 그대로 옮기므로 잠금 자체는 위치·preview·누적 거리를 건드리지 않는다.
+        _lockedHeadingCorrectionDeg = _learningHeadingBiasDeg;
+        _headingCorrectionState = HeadingCorrectionState.locked;
+      }
+    }
+  }
+
+  bool _leaderWinsWithoutRoutePrior(Hypothesis leader) {
+    Hypothesis? objectiveBest;
+    for (final candidate in _beam) {
+      if (objectiveBest == null ||
+          candidate.meanErrorDeg < objectiveBest.meanErrorDeg) {
+        objectiveBest = candidate;
+      }
+    }
+    return objectiveBest?.edge.id == leader.edge.id &&
+        objectiveBest?.travelSign == leader.travelSign;
+  }
+
+  bool _hasCompetitiveOpposite(Hypothesis leader) {
+    final leaderBearing = leader.edge.bearingForTravel(
+      leader.progressM,
+      leader.travelSign,
     );
+    for (final candidate in _beam) {
+      if (candidate.edge.id == leader.edge.id &&
+          candidate.travelSign == leader.travelSign) {
+        continue;
+      }
+      if (candidate.meanErrorDeg - leader.meanErrorDeg >
+          config.headingCorrectionCompetitionMarginDeg) {
+        continue;
+      }
+      final candidateBearing = candidate.edge.bearingForTravel(
+        candidate.progressM,
+        candidate.travelSign,
+      );
+      if (headingError(leaderBearing, candidateBearing) >= 150) return true;
+    }
+    return false;
+  }
+
+  void _resetHeadingEvidence({String? edgeId, int? travelSign}) {
+    _headingEvidenceEdgeId = edgeId;
+    _headingEvidenceTravelSign = travelSign;
+    _headingEvidenceStartBiasDeg = _headingBiasDeg;
+    _headingEvidenceDistanceM = 0;
+    _headingEvidenceSin = 0;
+    _headingEvidenceCos = 0;
+    _headingEvidenceSamples = 0;
   }
 
   List<({double headingDeg, double distanceM, PdrLocalPoint rawPoint})>
@@ -1192,7 +1352,9 @@ class CorridorPositionTracker {
       forceMatchedPosition:
           _lockPreferredRouteTerminal &&
           _isPreferredRouteTerminalHypothesis(leader),
+      projectToNavigableGraph: _nearestContinuityGraphPoint,
     );
+    if (!_markerContinuity.isActive) _continuityGraphEdge = leader.edge;
     _previewHeadingDeg = leader.edge.bearingForTravel(
       leader.progressM,
       leader.travelSign,
@@ -1209,6 +1371,91 @@ class CorridorPositionTracker {
       for (final candidate in _optimisticBeam)
         if (seen.add(candidate.edge.id)) candidate.edge.id,
     ];
+  }
+
+  /// 화면 shadow가 붙어 있던 간선과 위상적으로 이어진 투영점을 고른다.
+  ///
+  /// 전체 간선 중 최근접을 매번 다시 고르면 평행선의 중간을 넘는 순간 반대편
+  /// 간선으로 투영점이 바뀐다. 이전 간선을 기억하고 공통 node로 연결된 간선만
+  /// 열어 두면 정상 코너는 통과하지만 가까이 놓였을 뿐인 간선은 건너뛸 수 없다.
+  PdrLocalPoint? _nearestContinuityGraphPoint(PdrLocalPoint position) {
+    final preferredEdges = <CorridorEdge>[
+      for (final edgeId in _preferredRouteEdgeIds) ?_network.edgeById(edgeId),
+    ];
+    final seedEdges = <CorridorEdge>[];
+    final seedIds = <String>{};
+    void seed(CorridorEdge edge) {
+      if (seedIds.add(edge.id)) seedEdges.add(edge);
+    }
+
+    for (final edge in preferredEdges) {
+      seed(edge);
+    }
+    for (final hypothesis in _optimisticBeam) {
+      seed(hypothesis.edge);
+    }
+    var anchor = _continuityGraphEdge;
+    if (anchor == null) {
+      anchor = _nearestEdge(position, seedEdges)?.edge;
+      _continuityGraphEdge = anchor;
+    }
+    if (anchor == null) return null;
+
+    final candidates = <CorridorEdge>[anchor];
+    final seen = <String>{anchor.id};
+    for (final edge in seedEdges) {
+      if (seen.add(edge.id) && _sharedNodeId(anchor, edge) != null) {
+        candidates.add(edge);
+      }
+    }
+    final nearest = _nearestEdge(position, candidates)!;
+    if (nearest.edge.id == anchor.id) return nearest.point;
+
+    final sharedNodeId = _sharedNodeId(anchor, nearest.edge);
+    final sharedNode = sharedNodeId == null
+        ? null
+        : _network.nodes[sharedNodeId];
+    if (sharedNode == null) return anchor.project(position).point;
+
+    final anchorProjection = anchor.project(position);
+    final anchorReachedNode =
+        (anchorProjection.point - sharedNode.point).distance <= 1e-6;
+    final transitionRadiusM = math.max(
+      locationMarkerNavigableLeashM,
+      config.routeStraightEpochMinProgressM,
+    );
+    final candidateNearNode =
+        (nearest.point - sharedNode.point).distance <= transitionRadiusM;
+    if (anchorReachedNode || candidateNearNode) {
+      _continuityGraphEdge = nearest.edge;
+      return nearest.point;
+    }
+    return anchorProjection.point;
+  }
+
+  static EdgeProjection? _nearestEdge(
+    PdrLocalPoint position,
+    Iterable<CorridorEdge> edges,
+  ) {
+    EdgeProjection? nearest;
+    for (final edge in edges) {
+      final projection = edge.project(position);
+      if (nearest == null || projection.distanceM < nearest.distanceM) {
+        nearest = projection;
+      }
+    }
+    return nearest;
+  }
+
+  static String? _sharedNodeId(CorridorEdge left, CorridorEdge right) {
+    if (left.fromNodeId == right.fromNodeId ||
+        left.fromNodeId == right.toNodeId) {
+      return left.fromNodeId;
+    }
+    if (left.toNodeId == right.fromNodeId || left.toNodeId == right.toNodeId) {
+      return left.toNodeId;
+    }
+    return null;
   }
 
   /// 경로 **끝에서부터** [lengthM]만큼만 남긴다. 첫 점은 정확히 그 지점이다.
@@ -1250,6 +1497,7 @@ class CorridorPositionTracker {
       matchedPosition: _correctedPosition,
       rawPosition: _continuityRawPosition,
     );
+    _continuityGraphEdge = _best?.edge;
     _previewHeadingDeg = result.correctedHeadingDeg;
     _previewPath
       ..clear()

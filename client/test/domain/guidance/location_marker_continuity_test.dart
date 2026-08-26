@@ -223,4 +223,52 @@ void main() {
     expect(shown.eastM, 6);
     expect(continuity.isActive, isFalse);
   });
+
+  test('후보가 계속 불안정해도 raw shadow는 보행 가능 간선 밖으로 누적되지 않는다', () {
+    final continuity = LocationMarkerContinuity()
+      ..reset(
+        matchedPosition: PdrLocalPoint.zero,
+        rawPosition: PdrLocalPoint.zero,
+      );
+
+    var shown = PdrLocalPoint.zero;
+    for (var step = 1; step <= 8; step += 1) {
+      shown = continuity.update(
+        // 현재 1등 후보 좌표 자체는 멀리 재배치되는 상황을 재현한다.
+        matchedPosition: PdrLocalPoint(step.isEven ? 8 : 5, 4),
+        rawPosition: PdrLocalPoint(step * 0.6, step * 0.6),
+        headingBiasDeg: 0,
+        leaderRelocated: true,
+        ambiguous: true,
+        // 실제 보행 가능한 복도는 동서 방향 중심선이다.
+        projectToNavigableGraph: (position) => PdrLocalPoint(position.eastM, 0),
+      );
+
+      expect(shown.northM, lessThanOrEqualTo(locationMarkerNavigableLeashM));
+    }
+
+    expect(shown.eastM, closeTo(4.8, 1e-9));
+    expect(shown.northM, closeTo(locationMarkerNavigableLeashM, 1e-9));
+    expect(continuity.isActive, isTrue);
+  });
+
+  test('보행 가능 투영은 멀리 튄 현재 1등이 아니라 로컬 간선을 유지한다', () {
+    final continuity = LocationMarkerContinuity()
+      ..reset(
+        matchedPosition: PdrLocalPoint.zero,
+        rawPosition: PdrLocalPoint.zero,
+      );
+
+    final shown = continuity.update(
+      matchedPosition: const PdrLocalPoint(12, 5),
+      rawPosition: const PdrLocalPoint(0.7, 0.2),
+      headingBiasDeg: 0,
+      leaderRelocated: true,
+      ambiguous: true,
+      projectToNavigableGraph: (position) => PdrLocalPoint(position.eastM, 0),
+    );
+
+    expect(shown.eastM, closeTo(0.7, 1e-9));
+    expect(shown.northM, closeTo(0.2, 1e-9));
+  });
 }

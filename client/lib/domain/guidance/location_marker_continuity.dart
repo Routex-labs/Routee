@@ -19,6 +19,16 @@ const locationMarkerReconcilePerStepM = 0.2;
 /// 이 거리 안에서 두 번 연속 안정되면 graph cursor에 다시 붙는다.
 const locationMarkerContinuitySettleM = 0.08;
 
+/// 연속성 shadow가 보행 가능 간선 중심에서 벗어날 수 있는 최대 거리.
+///
+/// 후보 하나의 좌표로 되돌리면 평행 간선 교체 때 점프가 다시 생긴다. 호출자가
+/// 안내 경로와 살아 있는 후보 간선 중 가장 가까운 투영점을 주고, 여기서는 그
+/// 주변의 좁은 통로 안에서만 raw PDR 연속성을 허용한다.
+const locationMarkerNavigableLeashM = 0.8;
+
+typedef LocationMarkerProjection =
+    PdrLocalPoint? Function(PdrLocalPoint position);
+
 class LocationMarkerContinuity {
   PdrLocalPoint? _position;
   PdrLocalPoint? _lastRawPosition;
@@ -47,6 +57,7 @@ class LocationMarkerContinuity {
     required bool leaderRelocated,
     required bool ambiguous,
     bool forceMatchedPosition = false,
+    LocationMarkerProjection? projectToNavigableGraph,
   }) {
     final shown = _position;
     final previousRaw = _lastRawPosition;
@@ -117,6 +128,23 @@ class LocationMarkerContinuity {
       }
     } else {
       _settledMovementCount = 0;
+    }
+
+    final navigable = projectToNavigableGraph?.call(next);
+    if (navigable != null) {
+      final offset = next - navigable;
+      final offsetM = offset.distance;
+      if (offsetM > locationMarkerNavigableLeashM) {
+        // 경로가 교체되거나 한 snapshot에 여러 걸음이 배치돼 투영점이 멀리
+        // 바뀌더라도 그 차이를 한 프레임에 드러내지 않는다. 평상시에는 이전
+        // 프레임도 leash 안이므로 raw 이동량보다 큰 보정이 필요하지 않다.
+        final requiredCorrectionM = offsetM - locationMarkerNavigableLeashM;
+        final correctionM = math.min(
+          requiredCorrectionM,
+          rawDistanceM + locationMarkerReconcilePerStepM,
+        );
+        next = next - _scale(offset, correctionM / offsetM);
+      }
     }
 
     _position = next;

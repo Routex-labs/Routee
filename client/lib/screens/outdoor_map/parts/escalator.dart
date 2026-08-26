@@ -53,7 +53,7 @@ extension OutdoorMapEscalator on OutdoorMapBodyState {
     // 동안의 Δ와 무장 여부가 곧 원인이라, 아무 일도 안 일어나는 구간이야말로
     // 봐야 할 구간이다.
     _escalatorDebugText.value = _debugModeController.enabled
-        ? '${describeEscalatorJudgement(deltaM: _guidance.escalator.deltaM, armed: _guidance.escalator.isArmed, hasCandidate: _guidance.escalator.hasCandidate, phase: _guidance.escalator.phase, lastEvent: _lastEscalatorEvent)} · ${_describeBoardingApproach()}'
+        ? '${describeEscalatorJudgement(deltaM: _guidance.escalator.deltaM, armed: _guidance.escalator.isArmed, hasCandidate: _guidance.escalator.hasCandidate, phase: _guidance.escalator.phase, lastEvent: _lastEscalatorEvent)} · ${_describeBoardingApproach()}\n${_describeHeadingCorrection()}'
         : null;
 
     // 활강 진행률 목표를 기압으로 갱신한다. 단조 증가만 허용 — 평활 노이즈로
@@ -107,6 +107,21 @@ extension OutdoorMapEscalator on OutdoorMapBodyState {
     final blocked = _guidance.isNearRouteBoarding ? 'O' : 'X';
     final held = _guidance.isPositionHeld ? 'O' : 'X';
     return '탑승점$distance·차단$blocked고정$held';
+  }
+
+  String _describeHeadingCorrection() {
+    final result = _guidance.trackingResult;
+    if (result == null) return 'heading -';
+    final state = result.headingCorrectionState.name;
+    final correction = result.headingBiasDeg >= 0
+        ? '+${result.headingBiasDeg.toStringAsFixed(1)}°'
+        : '${result.headingBiasDeg.toStringAsFixed(1)}°';
+    final spread = result.headingCorrectionEvidenceSpreadDeg.isFinite
+        ? '${result.headingCorrectionEvidenceSpreadDeg.toStringAsFixed(1)}°'
+        : '-';
+    return 'heading $state $correction · evidence '
+        '${result.headingCorrectionEvidenceDistanceM.toStringAsFixed(1)}m / '
+        'spread $spread';
   }
 
   /// 판정기의 단계 전이를 화면 동작으로 옮긴다.
