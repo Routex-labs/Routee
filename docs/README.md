@@ -50,6 +50,7 @@
 | [클라이언트 구조 개편 계획](client/structure-plan.md) | `lib/` 전체 — 디렉터리 성격, 쪼갤 함수, 테스트 규칙 |
 | [야외 지도 화면 해체 계획](client/outdoor-map-decomposition.md) | 장기 브랜치의 목표·순서·rebase 규칙 |
 | [이동 대장](client/outdoor-map-moves.md) | 옛 심볼 → 새 위치 (rebase 충돌 해결용) |
+| [디버그 강제 층 전환 버튼 배치](client/debug-floor-toggle-button.md) | 버튼 위치·노출 조건의 근거 |
 
 ## 리팩터 과제
 

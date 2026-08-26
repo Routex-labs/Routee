@@ -213,7 +213,14 @@ extension OutdoorMapUi on OutdoorMapBodyState {
               compassEnabled: false,
               myLocationEnabled: false,
               logoEnabled: false,
+              // 저작권(ⓘ) 버튼은 `logoEnabled`처럼 끌 스위치가 없다 — 플러그인이
+              // 네이티브에서 `attributionEnabled(true)`로 못박아 둔다(maplibre_gl
+              // 0.26.2 · MapLibreMapBuilder.java). 남겨 두면 흰 동그라미가 지도
+              // 오른쪽 아래, 하단 탭 줄 '저장' 글자 위에 앉는다.
+              // 그래서 여백으로 화면 밖에 세운다: 아래 여백이 지도보다 크면
+              // 버튼이 위쪽 경계를 넘어가 잘린다. 위치를 옮기면 다시 보인다.
               attributionButtonPosition: AttributionButtonPosition.bottomRight,
+              attributionButtonMargins: const Point<num>(0, 100000),
               scrollGesturesEnabled: _interactive,
               zoomGesturesEnabled: _interactive,
               rotateGesturesEnabled: _interactive,
@@ -498,24 +505,13 @@ extension OutdoorMapUi on OutdoorMapBodyState {
             ),
           ),
 
-        // 디버그 전용 — 강제 층 전환. 위층·아래층 두 개가 **오른쪽 아래**에
-        // 선다. 왼쪽 열은 층 선택기·"내 위치로"·안내 중 보정 버튼이 상황에 따라
-        // 번갈아 쓰는 자리라, 디버그 버튼을 끼워 넣으면 그 셋과 겹친다.
-        //
-        // 오른쪽 맨 아래는 셸의 하단 바(위치 보정·위치 지정)가 쓴다 — 그 줄은
-        // 오른쪽 정렬이라 왼쪽 열과 달리 여기서 부딪힌다. 한 칸 높이만큼 올려
-        // 그 위에 세운다. 안 올리면 **아래 버튼이 하단 바 뒤에 깔려** 위층
-        // 버튼 하나만 보인다(2026-08-22 실기기).
+        // 디버그 전용 — 강제 층 전환. 위층·아래층 두 개가 **오른쪽 아래**,
+        // 하단 바보다 한 칸 위에 선다. 왜 그 자리인지·조건이 왜 `_activeFloor`인지는
+        // docs/client/debug-floor-toggle-button.md.
         //
         // **안내 중이 아니어도 뜬다** — 책상에서는 GPS가 실내 상태를 지워 안내를
         // 끝까지 못 태우는데, 층 전환 연출은 그와 무관하게 봐야 한다. 무엇을
         // 태우는지는 [_debugForceFloorTransition]에 있다.
-        //
-        // **노출 조건은 `_activeFloor`다**([_indoorEntered]가 아니다). 예전 조건은
-        // 실내 상태였는데, 책상에서 도면을 열어 두면 GPS가 곧 실내 상태를 내려
-        // 도면은 그대로인 채 버튼만 사라졌다 — "분명 있었는데 없어졌다"의 정체다.
-        // 이 버튼이 실제로 필요로 하는 것은 지금 보고 있는 층 하나뿐이므로
-        // ([_debugForceFloorTransition]의 첫 줄), 조건도 그것으로 맞춘다.
         //
         // 그림은 **방향 화살표**다. 실제로 가는 층은 도면의 탑승 노드 이름이
         // 정하고 두 층을 건너뛰기도 하지만, 그 층을 버튼에 적을 수는 없다 —
