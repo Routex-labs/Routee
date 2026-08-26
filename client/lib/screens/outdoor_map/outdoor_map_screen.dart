@@ -1783,6 +1783,8 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
         ..setRoute(null);
       _indoorMultiFloorRoute = null;
       _indoorRouteDestination = null;
+      // 거울상 여정이 여기서 시작한다 — 실내 구간은 **뒤에** 붙는다.
+      _indoorLegIsPrelude = false;
     });
     _syncDestinationLayer();
     _syncIndoorDestinationLayer();

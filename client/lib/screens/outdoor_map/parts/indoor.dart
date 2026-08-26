@@ -68,15 +68,16 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     // `_guidanceStarted`를 이미 false로 읽어, 이어받을 안내가 없다고 판단한다 —
     // 출구에서 `안내 시작` 버튼이 다시 뜨던 화면이 이것이다(실기기 증상).
     //
-    // **대중교통 승차 구간도 같은 값으로 본다.** 그쪽은 야외 구간을 예약하지
-    // 않고 안내를 걸 때 통째로 그려 두므로([showIndoorLegToOutdoorStart])
-    // [_pendingOutdoorDestination]이 끝까지 비어 있다. 그 값만 보면 대중교통으로
-    // 나가는 사람은 항상 세션이 끝나 정류장까지 가는 길에 `안내 시작`이 다시
-    // 뜬다 — 지금 실내 구간이 나가는 문으로 향하고 있는지([_exitEntranceOfIndoorRoute],
-    // `_clearIndoorRoute`가 지우기 **전에** 읽어야 한다)로 한 번 더 본다.
+    // **세 수단이 같은 값을 본다.** [_pendingOutdoorDestination]은 도보만 세우고,
+    // 대중교통·자동차는 야외 구간을 예약하지 않고 안내를 걸 때 통째로 그린다
+    // ([showIndoorLegToOutdoorStart]). 그 값만 보면 그 둘로 나가는 사람은 항상
+    // 세션이 끝나, 정류장·차로 가는 길에 `안내 시작`이 다시 뜬다.
+    //
+    // 지금 실내 구간이 **바깥 여정의 앞 구간인가**([_indoorLegIsPrelude])가 곧
+    // 그 질문이고, 셋이 다 세운다. `_clearIndoorRoute`가 이 값을 내리므로 **그
+    // 앞에서** 읽어야 한다.
     final continuesOutdoors =
-        _pendingOutdoorDestination != null ||
-        (_transitItinerary != null && _exitEntranceOfIndoorRoute != null);
+        _indoorLegIsPrelude || _pendingOutdoorDestination != null;
     _clearIndoorRoute(endGuidance: !continuesOutdoors);
     final recorder = _pdrDebugRecorder;
     if (_debugModeController.enabled && recorder != null) {

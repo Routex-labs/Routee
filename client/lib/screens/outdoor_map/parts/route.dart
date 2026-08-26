@@ -850,6 +850,11 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
       _pendingIndoorDestination = null;
       _journeyEntrance = null;
       _indoorRouteDestination = destination;
+      // **이 실내 구간은 여정의 뒷 구간이다.** 여기는 [showIndoorRouteTo]를 거치지
+      // 않으므로 그 함수가 해 주던 초기화가 없다 — 직전 여정이 실내→야외였다면
+      // 참이 남아, 방금 건물에 들어온 사람에게 바깥 카드가 계속 자리를 쥐고
+      // 이미 걸어온 야외 선까지 다시 그린다([_indoorLegIsPrelude]).
+      _indoorLegIsPrelude = false;
       // 새 안내가 시작되면 지난 도착 카드는 자리를 비운다.
       _arrivedDestination = null;
       _indoorMultiFloorRoute = route;

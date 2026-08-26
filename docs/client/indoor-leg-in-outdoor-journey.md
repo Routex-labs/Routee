@@ -236,6 +236,53 @@ B2(시에 매장 앞)에 선 사용자가 계양도서관을 찍었더니 **21.4
 > 받았다. 선호가 이 건물에서 불가능할 때의 폴백 규칙은 그대로다(`parts/route.dart`의
 > `_computeAndShowMultiFloorIndoorRoute`).
 
+## 라이프사이클 — `_indoorLegIsPrelude`를 정하는 자리
+
+이 값이 틀린 채로 남으면 화면이 조용히 어긋난다. 그래서 **실내 구간을 세우는 모든
+자리가 이 값을 함께 정한다**(읽는 자리에서 추론하지 않는다).
+
+| 자리 | 값 | 왜 |
+|---|---|---|
+| `showIndoorRouteTo` | false | 이 호출만 놓고 보면 실내 구간이 여정 전체다 |
+| `showIndoorToOutdoorRouteTo`·`showIndoorLegToOutdoorStart` | true | 위 호출 **뒤에** 다시 세운다 |
+| `showOutdoorToIndoorRouteTo` | false | 거울상 여정의 실내 구간은 **뒤에** 붙는다 |
+| `_activatePendingIndoorRoute` | false | 건물에 들어와 뒷 구간을 승격하는 자리 |
+| `_clearIndoorRoute` | false | 실내 구간이 사라지면 뜻도 사라진다 |
+
+아래 둘은 나중에 찾은 구멍이다. 둘 다 `showIndoorRouteTo`를 **거치지 않고** 실내
+구간 상태를 직접 쓰는 자리라, 직전 여정이 실내→야외였으면 참이 그대로 남았다:
+
+- `_activatePendingIndoorRoute` — 방금 건물에 들어온 사람에게 바깥 카드가 계속 자리를
+  쥐고, 이미 걸어온 야외 선까지 다시 그린다.
+- `showOutdoorToIndoorRouteTo` — 그 순간에는 실내 구간이 없어 무해하지만, 위 승격까지
+  값을 실어 나른다.
+
+### 나갈 때 안내를 잇는 판정도 이 값을 쓴다
+
+`_dropIndoorPosition`은 "이 여정이 문 밖에서 이어지는가"로 안내 세션을 끝낼지 정한다.
+그 판정이 `_pendingOutdoorDestination`(도보만 세운다)과 대중교통 전용 검사로 나뉘어
+있어서, **자동차로 나가는 사람은 문을 나서는 순간 세션이 끊겼다**(`안내 시작`이 다시
+뜬다). 세 수단이 다 세우는 `_indoorLegIsPrelude` 하나로 합쳤다.
+
+### 카드를 닫는 자리
+
+실내→야외 여정의 하단 카드는 **바깥 여정 카드**다. 그 카드의 닫기가 야외 구간만
+지우면 실내 구간이 남아, 다음 프레임에 실내 카드가 그 자리를 도로 받는다 — 사용자에게는
+`안내 종료`가 안 먹는 화면이다. 그래서 앞 구간일 때는 실내 구간까지 함께 끝낸다
+(`_dismissUserDestinationFromEtaCard`). 거울상(야외→실내)의 실내 구간은 아직 예약이라
+`_clearUserDestination`이 이미 걷어내므로 조건을 단다.
+
+### 마커는 하나뿐이다
+
+`_outdoorGpsVisible = !_indoorEntered`와 `_indoorLocationVisible = _indoorEntered`가
+서로의 여집합이라, 두 마커가 함께 뜨는 상태는 구조적으로 없다. 도면을 접으면
+`_syncPdrCurrentLayer`가 `_lastIndoorMarker`까지 비운다.
+
+**남은 위험 하나.** 처음 진입할 때 지상 출입구 층을 보고 있으면 조용한 앵커가 그 문에
+찍힌다 — 사용자가 실제로는 다른 층에 있어도 그렇다. GPS는 층을 모르고, "방금 저 문을
+통과했다"를 확인할 다른 근거가 없다. 되돌리는 길은 둘이고 둘 다 사람이 답한다:
+`위치 보정`의 층 질문, `가까운 매장으로 위치 지정`.
+
 ## 카드 라벨
 
 문을 경유하면 라벨에 적는다 — `계양도서관까지 · 남서쪽 출구 경유`. 안 적으면

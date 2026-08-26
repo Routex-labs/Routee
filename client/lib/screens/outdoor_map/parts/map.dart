@@ -381,8 +381,11 @@ extension OutdoorMapMap on OutdoorMapBodyState {
           overviewHold: _routeOverviewHoldsIndoor,
           hasRouteToShow: _hasAnyRouteVisible,
           // 실내 위치가 살아 있으면 이 사람은 건물 안이다 — 접지 않는다.
+          // **GPS가 확실히 밖이라고 하면 예외다**: 아무 버튼도 안 누르고 걸어
+          // 나간 사람까지 붙들면 마커가 건물에 남는다.
           indoorPositionLive:
-              indoorNavigationDriver.currentCalibration.canRenderPosition,
+              indoorNavigationDriver.currentCalibration.canRenderPosition &&
+              !_gpsSaysOutsideBuilding,
         )) {
           break;
         }
