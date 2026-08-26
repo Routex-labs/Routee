@@ -511,10 +511,16 @@ extension OutdoorMapUi on OutdoorMapBodyState {
         // 끝까지 못 태우는데, 층 전환 연출은 그와 무관하게 봐야 한다. 무엇을
         // 태우는지는 [_debugForceFloorTransition]에 있다.
         //
+        // **노출 조건은 `_activeFloor`다**([_indoorEntered]가 아니다). 예전 조건은
+        // 실내 상태였는데, 책상에서 도면을 열어 두면 GPS가 곧 실내 상태를 내려
+        // 도면은 그대로인 채 버튼만 사라졌다 — "분명 있었는데 없어졌다"의 정체다.
+        // 이 버튼이 실제로 필요로 하는 것은 지금 보고 있는 층 하나뿐이므로
+        // ([_debugForceFloorTransition]의 첫 줄), 조건도 그것으로 맞춘다.
+        //
         // 버튼에 적히는 것은 방향이 아니라 **가는 층**이다. 그 층은 도면의 탑승
         // 노드 이름이 정하며(두 층을 건너뛰기도 한다), 그 자리에 화살표만 그리면
         // 눌러 보기 전에는 어디로 가는지 알 수 없다.
-        if (debugEnabled && (_indoorEntered || pdrActive))
+        if (debugEnabled && _activeFloor != null)
           AnimatedPositioned(
             duration: const Duration(milliseconds: 200),
             curve: Curves.easeOut,
