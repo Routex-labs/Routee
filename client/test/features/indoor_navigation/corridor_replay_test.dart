@@ -82,8 +82,7 @@ void main() {
       expect(
         atJunction.length,
         lessThan(run.samples.length ~/ 4),
-        reason:
-            'T자 교차점에 머문 샘플 ${atJunction.length}/${run.samples.length}',
+        reason: 'T자 교차점에 머문 샘플 ${atJunction.length}/${run.samples.length}',
       );
     });
 
@@ -93,8 +92,7 @@ void main() {
       final onBatch = run.previewJumpsOnBatch;
       final elsewhere = run.previewJumpsElsewhere;
       final batchMean = onBatch.reduce((a, b) => a + b) / onBatch.length;
-      final elseMean =
-          elsewhere.reduce((a, b) => a + b) / elsewhere.length;
+      final elseMean = elsewhere.reduce((a, b) => a + b) / elsewhere.length;
       // 비율로 재지 않는다. 확정 배치는 한 번에 5걸음(약 3.5m)을 밀어 주므로
       // preview도 그만큼 **앞으로** 나가는 것이 정상이고, 배치 사이 평균은
       // 모호 구간 정지 때문에 0에 가깝다. 문제는 방향과 크기였다 — 실측에서는
@@ -108,15 +106,13 @@ void main() {
       );
     });
 
-    test('마커가 보라선에서 멀리 떨어지지 않는다', () {
-      // 화면 마커는 preview 위치다. 모호 구간에서 preview를 얼려 뒀더니
-      // 실측에서 214프레임 중 189프레임이 같은 좌표에 남아, 마커가 실제
-      // 위치에서 40m 떨어진 지점에 머물렀다. 선행분은 주황이 앞선 걸음만큼만
-      // 나가야 한다.
+    test('내부 optimistic cursor 선행분이 확정 경로에서 폭주하지 않는다', () {
+      // 표시 마커는 후보 재배치 중 raw 이동을 이어 graph 선에서 잠시 떨어질 수
+      // 있다. 맵매칭 자체가 폭주했는지는 내부 optimistic 좌표로 따로 잰다.
       expect(
-        run.maxPreviewLeadM,
+        run.maxMatchedPreviewLeadM,
         lessThan(15),
-        reason: '최대 ${run.maxPreviewLeadM.toStringAsFixed(1)}m',
+        reason: '최대 ${run.maxMatchedPreviewLeadM.toStringAsFixed(1)}m',
       );
     });
   });

@@ -6,6 +6,7 @@ import 'package:navigation_client/features/indoor_navigation/application/corrido
 import 'package:navigation_client/features/indoor_navigation/contract/pdr_anchor.dart';
 import 'package:navigation_client/models/building/floor_graph.dart';
 import 'package:navigation_client/domain/guidance/corridor_tracking.dart';
+import 'package:navigation_client/domain/guidance/location_marker_continuity.dart';
 import 'package:navigation_client/domain/geo/geo_transform.dart';
 
 const _crossGraph = FloorGraph(
@@ -368,8 +369,15 @@ void main() {
 
       expect(afterBatch.currentEdgeId, 'high');
       expect(afterBatch.optimisticEdgeId, 'high');
+      expect(afterBatch.matchedPreviewPosition.eastM, closeTo(3.1, 1e-9));
+      expect(afterBatch.matchedPreviewPosition.northM, closeTo(7, 1e-9));
       expect(afterBatch.previewPosition.eastM, closeTo(3.1, 1e-9));
-      expect(afterBatch.previewPosition.northM, closeTo(7, 1e-9));
+      expect(
+        afterBatch.previewPosition.northM,
+        closeTo(locationMarkerNavigableLeashM, 1e-9),
+        reason: '내부 후보는 교체하되 연결되지 않은 평행 간선으로 화면을 점프시키지 않는다',
+      );
+      expect(afterBatch.previewUsesContinuityShadow, isTrue);
       expect(afterBatch.optimisticLeadM, closeTo(1.4, 1e-9));
     });
 
@@ -856,6 +864,7 @@ void main() {
         ..setPreferredRoute(
           edgeIds: const ['ab', 'bc', 'c-es'],
           nodeIds: const ['a', 'b', 'c', 'es'],
+          preferContinuity: true,
         )
         ..reset(
           initialPosition: const PdrLocalPoint(6.5, 0),
@@ -1503,4 +1512,210 @@ void main() {
       expect(result.correctedHeadingDeg, closeTo(90, 1e-9));
     });
   });
+
+  group('직선 헤딩 보정 잠금', () {
+    const correctionConfig = CorridorTrackerConfig(
+      headingCorrectionMinEvidenceM: 4.2,
+      headingCorrectionMinEvidenceSamples: 6,
+      headingCorrectionMaxSpreadDeg: 1,
+    );
+
+    test('최소 거리 전에는 learning이고 충분한 일관성 뒤 +20도로 한 번 잠긴다', () {
+      final tracker =
+          CorridorPositionTracker(_longStraightGraph, config: correctionConfig)
+            ..reset(
+              initialPosition: const PdrLocalPoint(5, 0),
+              initialHeadingDeg: 70,
+              timestampMs: 0,
+            );
+      var raw = const PdrLocalPoint(5, 0);
+
+      CorridorTrackingResult walk(int step, double bearingDeg) {
+        raw = raw + _scaleForTest(pdrDirectionForBearing(bearingDeg), 0.7);
+        return tracker.update(
+          _observation(
+            atMs: step * 500,
+            confirmedSteps: step,
+            confirmedDistanceM: step * 0.7,
+            previewSteps: step,
+            headingDeg: bearingDeg,
+            raw: raw,
+            rawConfirmedStepPositions: [raw],
+          ),
+        );
+      }
+
+      for (var step = 1; step <= 5; step += 1) {
+        walk(step, 70);
+      }
+      expect(
+        tracker.result.headingCorrectionState,
+        HeadingCorrectionState.learning,
+      );
+      expect(tracker.result.lockedHeadingCorrectionDeg, isNull);
+      expect(tracker.result.headingCorrectionEvidenceDistanceM, lessThan(4.2));
+
+      var step = 6;
+      var beforeLock = tracker.result.previewPosition;
+      var locked = walk(step, 70);
+      while (locked.headingCorrectionState != HeadingCorrectionState.locked &&
+          step < 10) {
+        step += 1;
+        beforeLock = tracker.result.previewPosition;
+        locked = walk(step, 70);
+      }
+
+      expect(locked.headingCorrectionState, HeadingCorrectionState.locked);
+      expect(locked.lockedHeadingCorrectionDeg, closeTo(20, 0.2));
+      expect(locked.headingCorrectionEvidenceSpreadDeg, lessThan(0.1));
+      expect(
+        (locked.previewPosition - beforeLock).distance,
+        lessThanOrEqualTo(0.9),
+        reason: '잠금 상태 전환 자체가 마커를 재배치하면 안 된다',
+      );
+
+      // 실제 회전과 유턴은 잠금값을 다시 학습하지 않고 그대로 적용한다.
+      final afterCorner = walk(7, 160);
+      expect(afterCorner.headingBiasDeg, closeTo(20, 0.2));
+      expect(
+        normalizePdrBearing(160 + afterCorner.headingBiasDeg),
+        closeTo(180, 0.2),
+      );
+      final afterUturn = walk(8, 250);
+      expect(afterUturn.headingBiasDeg, closeTo(20, 0.2));
+      expect(afterUturn.headingCorrectionState, HeadingCorrectionState.locked);
+    });
+
+    test('tracker reset은 잠금과 이전 층의 근거를 모두 버린다', () {
+      final tracker =
+          CorridorPositionTracker(
+            _longStraightGraph,
+            config: const CorridorTrackerConfig(
+              headingCorrectionMinEvidenceM: 1.4,
+              headingCorrectionMinEvidenceSamples: 2,
+            ),
+          )..reset(
+            initialPosition: const PdrLocalPoint(5, 0),
+            initialHeadingDeg: 70,
+            timestampMs: 0,
+          );
+      var raw = const PdrLocalPoint(5, 0);
+      for (var step = 1; step <= 3; step += 1) {
+        raw = raw + _scaleForTest(pdrDirectionForBearing(70), 0.7);
+        tracker.update(
+          _observation(
+            atMs: step * 500,
+            confirmedSteps: step,
+            confirmedDistanceM: step * 0.7,
+            previewSteps: step,
+            headingDeg: 70,
+            raw: raw,
+            rawConfirmedStepPositions: [raw],
+          ),
+        );
+      }
+      expect(
+        tracker.result.headingCorrectionState,
+        HeadingCorrectionState.locked,
+      );
+
+      tracker.reset(
+        initialPosition: const PdrLocalPoint(2, 0),
+        initialHeadingDeg: 100,
+        timestampMs: 5000,
+        initialConfirmedSteps: 3,
+        initialConfirmedDistanceM: 2.1,
+        initialPreviewSteps: 3,
+      );
+
+      expect(
+        tracker.result.headingCorrectionState,
+        HeadingCorrectionState.learning,
+      );
+      expect(tracker.result.headingBiasDeg, 0);
+      expect(tracker.result.lockedHeadingCorrectionDeg, isNull);
+      expect(tracker.result.headingCorrectionEvidenceDistanceM, 0);
+    });
+
+    test('평행 후보가 애매하거나 경로 prior만 고른 간선에서는 잠그지 않는다', () {
+      final ambiguous =
+          CorridorPositionTracker(
+            _parallelGraph,
+            config: const CorridorTrackerConfig(
+              seedRadiusM: 8,
+              seedPenaltyDegM: 0,
+              ambiguousMarginDeg: 1000,
+              headingCorrectionMinEvidenceM: 1.4,
+              headingCorrectionMinEvidenceSamples: 2,
+            ),
+          )..reset(
+            initialPosition: const PdrLocalPoint(2, 3.5),
+            initialHeadingDeg: 90,
+            timestampMs: 0,
+          );
+      for (var step = 1; step <= 8; step += 1) {
+        ambiguous.update(
+          _observation(
+            atMs: step * 500,
+            confirmedSteps: step,
+            confirmedDistanceM: step * 0.7,
+            previewSteps: step,
+            headingDeg: 90,
+            raw: PdrLocalPoint(2 + step * 0.7, 3.5),
+            rawConfirmedStepPositions: [PdrLocalPoint(2 + step * 0.7, 3.5)],
+          ),
+        );
+      }
+      expect(
+        ambiguous.result.headingCorrectionState,
+        HeadingCorrectionState.learning,
+      );
+      expect(ambiguous.result.headingCorrectionEvidenceDistanceM, 0);
+
+      final priorOnly =
+          CorridorPositionTracker(
+              _parallelGraph,
+              config: const CorridorTrackerConfig(
+                seedRadiusM: 8,
+                seedPenaltyDegM: 0,
+                positionalToleranceM: 0,
+                positionalWeightDegPerM: 10,
+                routePreferenceMarginDeg: 1000,
+                headingCorrectionMinEvidenceM: 1.4,
+                headingCorrectionMinEvidenceSamples: 2,
+              ),
+            )
+            ..setPreferredRoute(
+              edgeIds: const ['high'],
+              nodeIds: const ['high-start', 'high-end'],
+            )
+            ..reset(
+              initialPosition: const PdrLocalPoint(2, 0),
+              initialHeadingDeg: 90,
+              timestampMs: 0,
+            );
+      for (var step = 1; step <= 5; step += 1) {
+        priorOnly.update(
+          _observation(
+            atMs: step * 500,
+            confirmedSteps: step,
+            confirmedDistanceM: step * 0.7,
+            previewSteps: step,
+            headingDeg: 90,
+            raw: PdrLocalPoint(2 + step * 0.7, 0),
+            rawConfirmedStepPositions: [PdrLocalPoint(2 + step * 0.7, 0)],
+          ),
+        );
+      }
+      expect(priorOnly.result.currentEdgeId, 'high');
+      expect(
+        priorOnly.result.headingCorrectionState,
+        HeadingCorrectionState.learning,
+      );
+      expect(priorOnly.result.headingCorrectionEvidenceDistanceM, 0);
+    });
+  });
 }
+
+PdrLocalPoint _scaleForTest(PdrLocalPoint point, double scale) =>
+    PdrLocalPoint(point.eastM * scale, point.northM * scale);

@@ -63,6 +63,8 @@ class CorridorNetwork {
   final Map<String, CorridorEdge> _edgesById = {};
   final Map<String, List<CorridorEdge>> _incident = {};
 
+  CorridorEdge? edgeById(String edgeId) => _edgesById[edgeId];
+
   /// [radiusM] 안에 있는 모든 간선의 투영점. 빔의 시작 씨앗을 만든다.
   ///
   /// 가장 가까운 하나만 고르면 시작 위치가 평행 복도 사이에 있을 때 그 선택이

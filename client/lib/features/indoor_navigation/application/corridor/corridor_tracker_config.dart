@@ -16,9 +16,12 @@ class CorridorTrackerConfig {
     this.positionalMaxOffsetM = 12,
     this.leaderSwitchMarginDeg = 2.5,
     this.ambiguousMarginDeg = 6,
-    this.maxHeadingCorrectionPerStepDeg = 0.75,
     this.headingBiasLimitDeg = 60,
     this.headingBiasMaxErrorDeg = 50,
+    this.headingCorrectionMinEvidenceM = 7,
+    this.headingCorrectionMinEvidenceSamples = 6,
+    this.headingCorrectionMaxSpreadDeg = 6,
+    this.headingCorrectionCompetitionMarginDeg = 10,
     this.maxTransitionsPerSegment = 3,
     this.maxPathPoints = 800,
     this.maxTrackedPreviewPeaks = 512,
@@ -113,7 +116,6 @@ class CorridorTrackerConfig {
   /// 1·2등 평균 오차가 이 안이면 갈렸다고 본다.
   final double ambiguousMarginDeg;
 
-  final double maxHeadingCorrectionPerStepDeg;
   final double headingBiasLimitDeg;
 
   /// 이 각도보다 크게 틀어진 상태에서는 bias를 학습하지 않는다. 엉뚱한 간선에
@@ -125,6 +127,20 @@ class CorridorTrackerConfig {
   /// 맞다는 뜻이 아니다. 이 값이 작으면 정작 보정이 필요한 세션에서 bias가
   /// 영원히 0에 머문다.
   final double headingBiasMaxErrorDeg;
+
+  /// 같은 직선 간선·같은 진행 방향에서 잠금 전에 필요한 확정 보행 거리.
+  /// 시간으로 재면 제자리에서 기다리는 것만으로도 잠기므로 거리만 센다.
+  final double headingCorrectionMinEvidenceM;
+
+  /// 긴 배치 하나가 분산 0°로 보이는 것을 막는 최소 걸음 방향 표본 수.
+  final int headingCorrectionMinEvidenceSamples;
+
+  /// 잠금에 허용하는 보정 후보의 가중 원형 표준편차.
+  /// iOS 직선 실측의 8.8m 묶음이 5.6°였으므로 6°까지 직선으로 인정한다.
+  final double headingCorrectionMaxSpreadDeg;
+
+  /// 반대 방향·다른 간선 후보가 이 평균 오차 안에서 경쟁하면 학습하지 않는다.
+  final double headingCorrectionCompetitionMarginDeg;
 
   final int maxTransitionsPerSegment;
   final int maxPathPoints;

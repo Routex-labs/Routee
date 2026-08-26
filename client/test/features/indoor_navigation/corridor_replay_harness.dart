@@ -327,6 +327,21 @@ class CorridorReplayRun {
     return longest;
   }
 
+  /// 내부 optimistic graph cursor가 확정 cursor보다 앞선 최대 직선거리(m).
+  /// 표시 연속성 shadow는 후보 재배치 중 graph 선에서 잠시 떨어질 수 있으므로,
+  /// 맵매칭 자체의 거리 보존은 이 값으로 따로 잰다.
+  double get maxMatchedPreviewLeadM {
+    var longest = 0.0;
+    for (final sample in samples) {
+      final lead =
+          (sample.result.matchedPreviewPosition -
+                  sample.result.correctedPosition)
+              .distance;
+      if (lead > longest) longest = lead;
+    }
+    return longest;
+  }
+
   int previewJumpsOver(double meters) => [
     ...previewJumpsOnBatch,
     ...previewJumpsElsewhere,

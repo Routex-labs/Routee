@@ -33,6 +33,7 @@ import '../../domain/guidance/geo_route_progress.dart';
 import '../../domain/guidance/guidance_chrome.dart';
 import '../../domain/guidance/guidance_start_reach.dart';
 import '../../domain/guidance/location_marker_glide.dart';
+import '../../domain/guidance/multi_floor_eta.dart';
 import '../../features/debug_mode/debug_mode.dart';
 import '../../domain/route/dijkstra.dart';
 import '../../domain/route/route_endpoint_fill.dart';
@@ -467,7 +468,7 @@ const _storeFocusMaxZoom = 20.4;
 LatLng _toMapLatLng(ll.LatLng point) => LatLng(point.latitude, point.longitude);
 
 class OutdoorMapBodyState extends State<OutdoorMapBody>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   final Completer<void> _startupMinimumElapsed = Completer<void>();
   Timer? _startupMinimumTimer;
 
@@ -799,6 +800,12 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   /// queue에서 순서대로 반영한다. 이 큐가 없으면 최신 진행률로 만든 회색선이
   /// 오래된 전체 경로 쓰기에 다시 덮일 수 있다.
   Future<void> _routeLayerWriteQueue = Future<void>.value();
+
+  /// 재탐색 경로를 시작점부터 그릴 때의 폴리라인 길이 비율.
+  double _indoorRouteRevealProgress = 1;
+  Ticker? _indoorRouteRevealTicker;
+  Duration _indoorRouteRevealStartedAt = Duration.zero;
+  Duration _indoorRouteRevealLastWriteAt = Duration.zero;
 
   // 야외 오버레이가 지금 보여주는 층. 건물 로드 시 initialFloor로 자동 결정되고,
   // 실내 진입 상태에서 층 chip으로 사용자가 다른 층을 훑어볼 수 있다.
@@ -1326,6 +1333,7 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
     _escalatorGlideTimer?.cancel();
     _elevatorGlideTimer?.cancel();
     _markerGlideTicker?.dispose();
+    _indoorRouteRevealTicker?.dispose();
     _arrivalRouteClearTimer?.cancel();
     _floorSwapVeilTimer?.cancel();
     _debugRideCompletionTimer?.cancel();
@@ -2175,24 +2183,10 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
     final remaining = _guidance.displayProgress?.remainingM;
     final multi = _indoorMultiFloorRoute;
     if (multi != null) {
-      if (remaining == null) {
-        return (
-          distanceM: multi.totalDistanceMeters,
-          costM: multi.totalCostMeters,
-        );
-      }
-      // 이 층 세그먼트만 진행률을 갖는다. 남은 층들의 거리·비용은 그대로 더한다.
-      final segmentM = _indoorRouteSegment?.distanceMeters ?? 0;
-      final walkedM = (segmentM - remaining).clamp(0.0, segmentM);
-      return (
-        distanceM: (multi.totalDistanceMeters - walkedM).clamp(
-          0.0,
-          multi.totalDistanceMeters,
-        ),
-        costM: (multi.totalCostMeters - walkedM).clamp(
-          0.0,
-          multi.totalCostMeters,
-        ),
+      return remainingMultiFloorEta(
+        route: multi,
+        activeFloor: _activeFloor,
+        activeSegmentRemainingM: remaining,
       );
     }
     // 단층 경로에는 수직 이동이 없어 거리와 비용이 같다.

@@ -177,7 +177,10 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
   /// 셋이 겹칠 때 누가 이기는지와 그 이유는 [mergeFloorTransitionUiState].
   FloorTransitionUiState? get _floorTransitionUiState =>
       mergeFloorTransitionUiState(
-        escalatorRide: floorTransitionUiState(ride: _escalatorRide, stage: null),
+        escalatorRide: floorTransitionUiState(
+          ride: _escalatorRide,
+          stage: null,
+        ),
         elevatorRide: _elevatorTransitionUiState,
         escalatorApproach: floorTransitionUiState(
           ride: null,
@@ -189,10 +192,7 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
   /// 액션이 던졌을 때 `onError`가 여기로 온다([_enqueueFloorTransition]).
   @visibleForTesting
   Future<void> recoverFloorTransitionFailureForTest() =>
-      _recoverFloorTransitionFailure(
-        StateError('test'),
-        StackTrace.current,
-      );
+      _recoverFloorTransitionFailure(StateError('test'), StackTrace.current);
 
   /// 지금 그려지는 배너 상태를 위젯 테스트가 읽는다. 화면 밖으로 나가는 값과
   /// **같은 값**이라, 배너가 뜨는·사라지는 시점을 여기서 그대로 본다.
@@ -665,6 +665,11 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
     final destination = _pendingIndoorDestination;
     if (route == null || destination == null) return;
 
+    // 야외 안내가 살아 있을 때만 같은 여정의 다음 구간이다. 완료·취소된 이전
+    // 안내가 남긴 예약을 새 실내 안내로 올리면, 그 회색선을 이어 붙여서는 안 된다.
+    final continuesActiveJourney = _guidanceStarted;
+    if (!continuesActiveJourney) _clearCompletedRouteHistory();
+
     final startFloor = route.segments.first.floorName;
     if (_activeFloor != startFloor) {
       await _switchOverlayFloor(startFloor);
@@ -899,7 +904,11 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
         ..setRoute(null);
       _indoorMultiFloorRoute = null;
     });
-    _syncRouteLayer();
+    if (hadExistingIndoorRoute && !playOverview) {
+      _revealReroutedIndoorRoute();
+    } else {
+      _syncRouteLayer();
+    }
     _syncIndoorDestinationLayer();
     _notifyRouteStateIfChanged();
     if (playOverview) unawaited(_fitCameraToRouteSegment(route));
@@ -1036,7 +1045,11 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
         ..seedProgress(null)
         ..setRoute(route);
     });
-    _syncRouteLayer();
+    if (hadExistingIndoorRoute && !playOverview) {
+      _revealReroutedIndoorRoute();
+    } else {
+      _syncRouteLayer();
+    }
     _syncIndoorDestinationLayer();
     _notifyRouteStateIfChanged();
     if (playOverview && segment != null) {

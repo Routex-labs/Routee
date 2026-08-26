@@ -152,10 +152,7 @@ Future<void> registerRouteLayers(MapLibreMapController controller) async {
       'indoor',
     ],
   );
-  await controller.addImage(
-    kRouteArrowImageName,
-    await renderRouteArrowIcon(),
-  );
+  await controller.addImage(kRouteArrowImageName, await renderRouteArrowIcon());
   await controller.addSymbolLayer(
     kOutdoorRouteSourceId,
     _routeArrowLayerId,
@@ -181,7 +178,9 @@ Future<void> registerRouteLayers(MapLibreMapController controller) async {
 
 /// 층을 잇는 환승선(에스컬레이터·엘리베이터 구간). 대중교통 레이어까지 등록된
 /// 뒤 불러, 겹칠 때 환승선이 맨 위에 온다.
-Future<void> registerTransferRouteLayer(MapLibreMapController controller) async {
+Future<void> registerTransferRouteLayer(
+  MapLibreMapController controller,
+) async {
   await controller.addSource(
     kOutdoorTransferRouteSourceId,
     GeojsonSourceProperties(data: emptyGeoJsonCollection()),

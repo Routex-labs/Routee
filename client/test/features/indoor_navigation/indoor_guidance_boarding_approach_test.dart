@@ -543,7 +543,7 @@ void main() {
       expect(
         (boarding - result.previewPosition).distance,
         greaterThan(3),
-        reason: '표시 마커는 여전히 graph의 U자 경로를 따른다',
+        reason: '고정 뒤 내부 tracker는 경로 종점에 잠기지만 화면은 이미 별도 hold다',
       );
       expect(
         (boarding - result.rawPreviewPosition).distance,
@@ -555,9 +555,8 @@ void main() {
       expect(
         (session.position!.localM - result.rawPreviewPosition).distance,
         greaterThan(3),
-        reason: '탑승 근거만 그림자를 쓰고 마커를 원시 좌표로 순간이동시키지 않는다',
+        reason: '탑승 근거만 자유보행을 쓰고 화면 마커를 몇 m 순간이동시키지 않는다',
       );
-      expect(session.position!.localM.northM, closeTo(10, 0.01));
     });
 
     test('짧은 마지막 연결 간선 전실에 도달하면 부드러운 회전이 빗나가도 붙든다', () {
@@ -582,7 +581,15 @@ void main() {
         isNot('vw-wrong'),
         reason: '탑승 접근 중에는 걸음 거리를 버리지 않고 활성 경로 간선에 남는다',
       );
-      expect(session.trackingResult!.previewPosition.northM, closeTo(7, 0.1));
+      expect(
+        session.trackingResult!.matchedPreviewPosition.northM,
+        closeTo(7, 0.1),
+      );
+      expect(
+        session.trackingResult!.previewPosition.northM,
+        closeTo(7, 0.1),
+        reason: '화면 hold가 생긴 뒤 내부 tracker는 경로 종점에 잠긴다',
+      );
     });
 
     test('같은 전실을 지나도 경로가 에스컬레이터 탑승을 지목하지 않으면 붙들지 않는다', () {

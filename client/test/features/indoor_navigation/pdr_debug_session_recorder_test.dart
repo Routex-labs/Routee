@@ -143,7 +143,7 @@ void main() {
     final matched = paths['map_matched_floor_local_m']! as List<Object?>;
     final finalMatched = matched.last! as Map<String, double>;
 
-    expect(json['schema_version'], 21);
+    expect(json['schema_version'], 23);
     expect(
       (json['map_context']! as Map<String, Object?>)['map_calibration_version'],
       'thehyundai-seoul-1f-svg-v1',
@@ -608,6 +608,8 @@ void main() {
         lastConfirmedNodeId: null,
         correctedPath: [PdrLocalPoint.zero, PdrLocalPoint(4, 0)],
         previewPosition: PdrLocalPoint(4.5, 0),
+        matchedPreviewPosition: PdrLocalPoint(4.7, 0),
+        previewUsesContinuityShadow: true,
         previewHeadingDeg: 90,
         previewPath: [PdrLocalPoint(4, 0), PdrLocalPoint(4.5, 0)],
         previewCandidateEdgeIds: ['bc'],
@@ -643,6 +645,11 @@ void main() {
     expect(correction['travel_direction_sign'], 1);
     expect(correction['heading_bias_deg'], 7);
     expect(correction['pending_edge_id'], 'bc');
+    expect(correction['matched_preview_position_floor_local_m'], {
+      'east_m': 4.7,
+      'north_m': 0.0,
+    });
+    expect(correction['preview_uses_continuity_shadow'], isTrue);
     expect(paths['confirmed_pdr_local_m'], hasLength(2));
     expect(paths['corridor_corrected_floor_local_m'], hasLength(2));
     expect(paths['corridor_preview_floor_local_m'], hasLength(2));
@@ -662,6 +669,8 @@ void main() {
       lastConfirmedNodeId: null,
       correctedPath: [PdrLocalPoint.zero, PdrLocalPoint(4, 0)],
       previewPosition: PdrLocalPoint(4.5, 0),
+      matchedPreviewPosition: PdrLocalPoint(4.7, 0),
+      previewUsesContinuityShadow: true,
       previewHeadingDeg: 90,
       previewPath: [PdrLocalPoint(4, 0), PdrLocalPoint(4.5, 0)],
       previewCandidateEdgeIds: ['ab'],
@@ -760,6 +769,8 @@ void main() {
       expect(recordedResult['edge_id'], 'ab');
       expect(recordedResult['actual_marker_position'], [3.8, 0.0]);
       expect(recordedResult['preview_position'], [4.5, 0.0]);
+      expect(recordedResult['matched_preview_position'], [4.7, 0.0]);
+      expect(recordedResult['preview_uses_continuity_shadow'], isTrue);
 
       final json = recorder.buildJson(
         buildingId: 'b',
