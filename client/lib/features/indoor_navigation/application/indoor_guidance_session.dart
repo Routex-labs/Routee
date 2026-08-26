@@ -1184,6 +1184,24 @@ class IndoorGuidanceSession {
   /// 보류 전 원본. 진단 로그와 도착 판정이 쓴다.
   RouteProgress? get measuredProgress => _measuredProgress;
 
+  /// 지도 위 파란 잔여선이 시작할 진행률.
+  ///
+  /// ETA·문구에는 튐을 보류한 [displayProgress]를 유지한다. 하지만 그 값을
+  /// 선까지 쓰면 마커는 이미 복도를 따라 갔는데 파란선의 시작만 몇 m 뒤에
+  /// 남는다. 현재 edge가 실제 경로 위이고 전역 재획득도 아니면, 선은 즉시
+  /// 측정 투영점까지 따라간다. 경로에서 1.5m 넘게 떨어진 이탈·재획득 중에는
+  /// 보수적인 표시값을 유지한다.
+  RouteProgress? get routeLineProgress {
+    final measured = _measuredProgress;
+    if (measured != null &&
+        measured.onRouteEdge &&
+        !measured.reacquired &&
+        measured.offsetM <= 1.5) {
+      return measured;
+    }
+    return _displayProgress;
+  }
+
   TravelDirectionState get travelDirectionState => _travelDirection.state;
   int get routeGeneration => _routeGeneration;
 

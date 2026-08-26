@@ -852,6 +852,7 @@ void main() {
       final markerPosition = session.position!.localM;
       expect(sawPendingDeviation, isTrue);
       expect(session.displayProgress!.traveledM, closeTo(7, 0.8));
+      expect(session.routeLineProgress, same(session.displayProgress));
       expect(trackerPosition.northM, greaterThan(0));
       expect(markerPosition.northM, greaterThan(0));
     });
@@ -939,6 +940,7 @@ void main() {
         session.onSnapshot(_walkedEast(5), timestampMs: 1000),
         previewSteps: 5,
       );
+      expect(session.routeLineProgress, same(session.measuredProgress));
       final after5 = session.displayProgress!.remainingM;
 
       session.updateProgress(

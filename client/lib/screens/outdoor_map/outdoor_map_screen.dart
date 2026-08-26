@@ -1518,7 +1518,7 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
     );
   }
 
-  /// 현재 실내 계획 경로를 displayProgress 기준으로 나눈다.
+  /// 현재 실내 계획 경로를 지도용 진행률 기준으로 나눈다.
   ///
   /// 진행률이 없거나 현재 층 그래프가 아직 준비되지 않은 동안은 파란 경로
   /// 전체를 유지한다. 회색선을 만들기 위해 위치를 임의로 경로 위에 붙이지
@@ -1532,7 +1532,7 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
     }
     final split = splitRouteAtProgress(
       route.pointsLocalM,
-      _guidance.displayProgress,
+      _guidance.routeLineProgress,
     );
     final graph = _floorGraph;
     if (split == null || graph == null || graph.nodes.isEmpty) {
