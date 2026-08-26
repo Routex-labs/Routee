@@ -1396,18 +1396,11 @@ class IndoorGuidanceSession {
         _updateDeviationEvidence(
           progress: progress,
           result: result,
-          confirmedOffRoute: _hasConfirmedOffRouteEdge(result, route),
           steps: responsiveSteps,
           rerouteInFlight: rerouteInFlight,
           nowMs: nowMs ?? _nowMs(),
         ) &&
         !isNearRouteBoarding;
-    if (shouldReroute) {
-      // 이탈이 확정됐는데도 옛 경로의 continuity shadow를 계속 쓰면 새 경로의
-      // 출발점이 뒤에 남고, 화면 마커도 복도 밖을 떠다닌다. 재탐색 요청과 같은
-      // 틱에 현재 map-matched preview로 붙인다.
-      _corridor.snapMarkerToMatchedPreview();
-    }
     var holdReason = _holdReason(previous, progress, responsiveSteps);
     var display = holdReason == null ? progress : previous!;
     if (holdReason == 'implausibleJump' && previous != null) {
@@ -1455,7 +1448,6 @@ class IndoorGuidanceSession {
   bool _updateDeviationEvidence({
     required RouteProgress progress,
     required CorridorTrackingResult result,
-    required bool confirmedOffRoute,
     required int? steps,
     required bool rerouteInFlight,
     required int nowMs,
@@ -1475,10 +1467,9 @@ class IndoorGuidanceSession {
     final strongDeviation =
         (progress.offsetM >= 5.5 && !headingStillFollowsRoute) ||
         (progress.reacquired && !headingStillFollowsRoute);
-    final deviated =
-        confirmedOffRoute || !progress.onRouteEdge || strongDeviation;
+    final deviated = !progress.onRouteEdge || strongDeviation;
     if (!deviated ||
-        (!confirmedOffRoute && routeLikeMovement) ||
+        routeLikeMovement ||
         result.optimisticEdgeId == null ||
         result.state == CorridorTrackingState.uncertain) {
       if (!deviated) _rerouteRequestedForEdgeId = null;
@@ -1509,19 +1500,6 @@ class IndoorGuidanceSession {
     if (!ready || offRouteEdgeId == _rerouteRequestedForEdgeId) return false;
     _rerouteRequestedForEdgeId = offRouteEdgeId;
     return true;
-  }
-
-  /// 표시 마커는 continuity shadow 때문에 잠시 옛 경로에 남을 수 있다. 이탈
-  /// 판정은 그 그림이 아니라 확정 beam의 간선으로도 확인해야 한다.
-  bool _hasConfirmedOffRouteEdge(
-    CorridorTrackingResult result,
-    IndoorRoute route,
-  ) {
-    final edgeId = result.currentEdgeId;
-    return edgeId != null &&
-        !route.edgeIds.contains(edgeId) &&
-        !result.previewIsAmbiguous &&
-        result.state != CorridorTrackingState.uncertain;
   }
 
   /// 표시값을 이전 것으로 붙들 이유가 있으면 그 이름, 없으면 null.

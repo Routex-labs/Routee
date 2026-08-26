@@ -225,34 +225,6 @@ class CorridorPositionTracker {
     optimisticStepAdvances: List.unmodifiable(_optimisticStepAdvances),
   );
 
-  /// 안내가 실제 이탈을 확정했을 때 화면 마커를 현재 map-matched preview에
-  /// 즉시 붙인다.
-  ///
-  /// 일반적인 후보 교체는 [LocationMarkerContinuity]가 raw 이동을 이어서
-  /// 순간이동을 숨긴다. 하지만 경로 이탈이 확정된 뒤에도 그 shadow를 유지하면
-  /// 마커는 이미 버린 옛 경로 위에 남아, 새 경로를 계산할 출발점마저 틀어진다.
-  CorridorTrackingResult snapMarkerToMatchedPreview() {
-    final leader = _optimisticBest;
-    if (leader == null) return result;
-    _matchedPreviewPosition = leader.edge.pointAt(leader.progressM);
-    _previewPosition = _markerContinuity.update(
-      matchedPosition: _matchedPreviewPosition,
-      rawPosition: _continuityRawPosition,
-      headingBiasDeg: _headingBiasDeg,
-      leaderRelocated: false,
-      ambiguous: false,
-      forceMatchedPosition: true,
-      projectToNavigableGraph: _nearestContinuityGraphPoint,
-    );
-    _continuityGraphEdge = leader.edge;
-    _routePreviewRejoinEvidencePeaks = 0;
-    final tail = _takeLastLength(leader.path, _optimisticLeadM);
-    _previewPath
-      ..clear()
-      ..addAll(tail.isEmpty ? [_previewPosition] : tail);
-    return result;
-  }
-
   void reset({
     required PdrLocalPoint initialPosition,
     required double initialHeadingDeg,

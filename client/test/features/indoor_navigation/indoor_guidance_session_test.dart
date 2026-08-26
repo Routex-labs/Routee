@@ -857,38 +857,6 @@ void main() {
       expect(markerPosition.northM, greaterThan(0));
     });
 
-    test('확정 이탈이면 shadow를 풀고 새 경로의 출발점으로 쓴다', () {
-      final session = newSession()
-        ..attach(buildingId: 'b1')
-        ..setContext(floorId: '1F', graph: _branchGraph)
-        ..setAnchor(_anchor(eastM: 0))
-        ..setRouteSegment(_branchRoute);
-
-      var rerouteRequested = false;
-      for (var steps = 0; steps <= 30; steps += 1) {
-        final result = session.onSnapshot(
-          _walkedNorthTurn(steps),
-          timestampMs: steps * 500,
-        );
-        final update = session.updateProgress(
-          result,
-          previewSteps: steps,
-          nowMs: steps * 500,
-        );
-        if (!update.shouldReroute) continue;
-
-        rerouteRequested = true;
-        expect(session.trackingResult!.previewUsesContinuityShadow, isFalse);
-        expect(
-          session.position!.localM,
-          session.trackingResult!.matchedPreviewPosition,
-        );
-        break;
-      }
-
-      expect(rerouteRequested, isTrue);
-    });
-
     test('같은 경로 밖 복도에 머물면 재탐색을 반복 요청하지 않는다', () {
       final session = newSession()
         ..attach(buildingId: 'b1')
@@ -912,7 +880,6 @@ void main() {
 
       expect(rerouteRequests, 1);
     });
-
     test('경로 표시선이 달라도 실제 마커는 tracker 위치를 유지한다', () {
       const shiftedRoute = IndoorRoute(
         points: [],
