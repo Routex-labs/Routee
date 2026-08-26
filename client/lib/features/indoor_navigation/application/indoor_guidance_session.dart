@@ -1429,9 +1429,18 @@ class IndoorGuidanceSession {
       _junctionZoneEnteredAtMs = null;
     }
 
-    final strongDeviation = progress.offsetM >= 4 || progress.reacquired;
+    final headingStillFollowsRoute =
+        progress.headingErrorDeg == null || progress.headingErrorDeg! <= 65;
+    // 그래프에는 모든 실제 보행선을 넣을 수 없다. 가까운 평행 통로를 따라
+    // 가면서 방향도 경로와 같으면, 간선 id가 달라도 안내 경로의 오차로 본다.
+    final routeLikeMovement =
+        progress.offsetM <= 2.5 && headingStillFollowsRoute;
+    final strongDeviation =
+        (progress.offsetM >= 5.5 && !headingStillFollowsRoute) ||
+        (progress.reacquired && !headingStillFollowsRoute);
     final deviated = !progress.onRouteEdge || strongDeviation;
     if (!deviated ||
+        routeLikeMovement ||
         result.optimisticEdgeId == null ||
         result.state == CorridorTrackingState.uncertain) {
       _offRouteEvidenceUpdates = 0;

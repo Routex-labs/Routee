@@ -23,8 +23,9 @@ const locationMarkerContinuitySettleM = 0.08;
 ///
 /// 후보 하나의 좌표로 되돌리면 평행 간선 교체 때 점프가 다시 생긴다. 호출자가
 /// 안내 경로와 살아 있는 후보 간선 중 가장 가까운 투영점을 주고, 여기서는 그
-/// 주변의 좁은 통로 안에서만 raw PDR 연속성을 허용한다.
-const locationMarkerNavigableLeashM = 0.8;
+/// 주변의 좁은 통로 안에서만 raw PDR 연속성을 허용한다. 0은 투영 가능한
+/// 선이 있으면 마커 중심을 그 선 위에 정확히 붙인다는 뜻이다.
+const locationMarkerNavigableLeashM = 0.0;
 
 typedef LocationMarkerProjection =
     PdrLocalPoint? Function(PdrLocalPoint position);
@@ -135,15 +136,11 @@ class LocationMarkerContinuity {
       final offset = next - navigable;
       final offsetM = offset.distance;
       if (offsetM > locationMarkerNavigableLeashM) {
-        // 경로가 교체되거나 한 snapshot에 여러 걸음이 배치돼 투영점이 멀리
-        // 바뀌더라도 그 차이를 한 프레임에 드러내지 않는다. 평상시에는 이전
-        // 프레임도 leash 안이므로 raw 이동량보다 큰 보정이 필요하지 않다.
-        final requiredCorrectionM = offsetM - locationMarkerNavigableLeashM;
-        final correctionM = math.min(
-          requiredCorrectionM,
-          rawDistanceM + locationMarkerReconcilePerStepM,
-        );
-        next = next - _scale(offset, correctionM / offsetM);
+        // shadow의 연속성은 간선을 따라가는 방향에서만 지킨다. 이 횡방향
+        // 보정까지 제한하면 화면 마커가 복도·경로 밖을 몇 걸음씩 떠다닌다.
+        next =
+            next -
+            _scale(offset, (offsetM - locationMarkerNavigableLeashM) / offsetM);
       }
     }
 

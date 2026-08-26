@@ -5,6 +5,8 @@
 /// 한 줄도 떼어낼 수 없었다.
 library;
 
+import 'dart:math' as math;
+
 import 'package:latlong2/latlong.dart' as ll;
 
 /// 빈 FeatureCollection. 레이어를 지웠다 다시 만드는 대신 데이터만 비울 때 쓴다.
@@ -41,4 +43,50 @@ Map<String, dynamic> geoJsonLineFeature(
       ],
     },
   };
+}
+
+/// [fraction]만큼의 폴리라인을 시작점부터 잘라, 경로가 자라나는 표시를 만든다.
+List<ll.LatLng> routeLinePrefix(List<ll.LatLng> points, double fraction) {
+  if (points.length < 2 || fraction <= 0) return const [];
+  if (fraction >= 1) return List<ll.LatLng>.of(points);
+  final lengths = <double>[];
+  var totalM = 0.0;
+  for (var index = 1; index < points.length; index += 1) {
+    final lengthM = _lineDistanceM(points[index - 1], points[index]);
+    lengths.add(lengthM);
+    totalM += lengthM;
+  }
+  if (totalM <= 1e-9) return const [];
+  final targetM = totalM * fraction;
+  final prefix = <ll.LatLng>[points.first];
+  var coveredM = 0.0;
+  for (var index = 1; index < points.length; index += 1) {
+    final lengthM = lengths[index - 1];
+    if (coveredM + lengthM <= targetM) {
+      prefix.add(points[index]);
+      coveredM += lengthM;
+      continue;
+    }
+    final t = lengthM <= 1e-9 ? 0.0 : (targetM - coveredM) / lengthM;
+    final start = points[index - 1];
+    final end = points[index];
+    prefix.add(
+      ll.LatLng(
+        start.latitude + (end.latitude - start.latitude) * t,
+        start.longitude + (end.longitude - start.longitude) * t,
+      ),
+    );
+    return prefix;
+  }
+  return prefix;
+}
+
+double _lineDistanceM(ll.LatLng start, ll.LatLng end) {
+  const metersPerDegreeLat = 111320.0;
+  final metersPerDegreeLng =
+      metersPerDegreeLat *
+      math.cos((start.latitude + end.latitude) * math.pi / 360);
+  final northM = (end.latitude - start.latitude) * metersPerDegreeLat;
+  final eastM = (end.longitude - start.longitude) * metersPerDegreeLng;
+  return math.sqrt(northM * northM + eastM * eastM);
 }

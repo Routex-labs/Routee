@@ -244,7 +244,7 @@ void main() {
         projectToNavigableGraph: (position) => PdrLocalPoint(position.eastM, 0),
       );
 
-      expect(shown.northM, lessThanOrEqualTo(locationMarkerNavigableLeashM));
+      expect(shown.northM, closeTo(locationMarkerNavigableLeashM, 1e-9));
     }
 
     expect(shown.eastM, closeTo(4.8, 1e-9));
@@ -269,6 +269,6 @@ void main() {
     );
 
     expect(shown.eastM, closeTo(0.7, 1e-9));
-    expect(shown.northM, closeTo(0.2, 1e-9));
+    expect(shown.northM, closeTo(0, 1e-9));
   });
 }

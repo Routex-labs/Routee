@@ -152,13 +152,17 @@ extension OutdoorMapRouteLayers on OutdoorMapBodyState {
     final indoor = _indoorRouteSegment;
     if (indoor != null && indoor.points.length >= 2) {
       final visuals = _indoorRouteVisuals(indoor);
+      final remaining = routeLinePrefix(
+        visuals.remaining,
+        _indoorRouteRevealProgress,
+      );
       await _syncCompletedRouteLayer(
         scopeId: _activeFloor,
         currentCompleted: visuals.completed,
       );
       final features = <Map<String, dynamic>>[];
-      if (visuals.remaining.length >= 2) {
-        features.add(geoJsonLineFeature(visuals.remaining, style: 'indoor'));
+      if (remaining.length >= 2) {
+        features.add(geoJsonLineFeature(remaining, style: 'indoor'));
       }
       // **실내→야외 여정은 예외다.** 두 구간이 한 여정이라 같이 보여야 한다.
       // 예전에는 여기서 그냥 돌아섰고, 그 뒤에 그려진 야외 구간이 같은 소스를
@@ -211,6 +215,35 @@ extension OutdoorMapRouteLayers on OutdoorMapBodyState {
       kOutdoorRouteSourceId,
       features.isEmpty ? emptyGeoJsonCollection() : geoJsonCollection(features),
     );
+  }
+
+  void _revealReroutedIndoorRoute() {
+    _indoorRouteRevealTicker?.dispose();
+    _indoorRouteRevealProgress = 0;
+    _indoorRouteRevealStartedAt = Duration.zero;
+    _indoorRouteRevealLastWriteAt = Duration.zero;
+    _indoorRouteRevealTicker = createTicker((elapsed) {
+      if (!mounted) return;
+      if (_indoorRouteRevealStartedAt == Duration.zero) {
+        _indoorRouteRevealStartedAt = elapsed;
+      }
+      final progress =
+          ((elapsed - _indoorRouteRevealStartedAt).inMicroseconds /
+                  const Duration(milliseconds: 420).inMicroseconds)
+              .clamp(0.0, 1.0);
+      _indoorRouteRevealProgress = 1 - (1 - progress) * (1 - progress);
+      if (elapsed - _indoorRouteRevealLastWriteAt >=
+              const Duration(milliseconds: 33) ||
+          progress >= 1) {
+        _indoorRouteRevealLastWriteAt = elapsed;
+        _syncRouteLayer();
+      }
+      if (progress >= 1) {
+        _indoorRouteRevealTicker?.dispose();
+        _indoorRouteRevealTicker = null;
+      }
+    })..start();
+    _syncRouteLayer();
   }
 
   /// 사용자에게 보여 줄 회색선 source를 갱신한다.
