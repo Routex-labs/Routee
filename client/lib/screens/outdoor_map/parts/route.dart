@@ -791,6 +791,28 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
     return '${destination.name}까지 · $label 경유';
   }
 
+  /// 지금 쥐고 있는 문에서 예약된 목적지까지 실내 구간을 **그 자리에서** 푼다.
+  /// 재료(여정 그래프·문·목적지 노드) 중 하나라도 없으면 null.
+  ///
+  /// [_retargetJourneyEntrance]와 **같은 계산**이다 — 그쪽이 문이 바뀔 때마다
+  /// 하는 일을, 여기서는 들어온 순간 한 번 더 한다.
+  MultiFloorRoute? _solveIndoorLegFromJourneyEntrance() {
+    final graph = _journeyBuildingGraph;
+    final endNodeId = _pendingIndoorDestination?.nodeId;
+    final entrance = _journeyEntrance ?? _selectedEntrance;
+    if (graph == null || endNodeId == null || entrance == null) return null;
+    final leg = computeMultiFloorRoute(
+      graph,
+      entranceRouteNodeId(graph.nodes, entrance),
+      endNodeId,
+    );
+    debugPrint(
+      '[indoor leg] 진입 시 재계산 — 문 ${entrance.id} · '
+      '구간 ${leg?.segments.length ?? -1}개',
+    );
+    return (leg == null || leg.isEmpty) ? null : leg;
+  }
+
   /// 안내 중인 문이 바뀌었으면 야외 도착점과 실내 구간을 새 문 기준으로 다시 맞춘다.
   ///
   /// 실내 구간은 서버에 다시 묻지 않고 들고 있던 그래프로 그 자리에서 푼다 —
@@ -828,9 +850,22 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
   /// 들어갔다가 다시 밖으로 나온 사용자에게 아무 경로도 안 남는다 — 안내가
   /// 통째로 사라진 것처럼 보이고, 처음부터 다시 검색해야 한다.
   Future<void> _activatePendingIndoorRoute() async {
-    final route = _pendingIndoorRoute;
     final destination = _pendingIndoorDestination;
-    if (route == null || destination == null) return;
+    if (destination == null) return;
+    // **예약된 구간이 비어 있으면 그 자리에서 다시 푼다.**
+    //
+    // 문은 걷는 동안 GPS를 따라 바뀌고([_retargetJourneyEntrance]), 새 문에서
+    // 경로가 안 풀리면 그 값이 null로 남는다. 그런데 진입 버튼은 목적지 예약만
+    // 본다([_guidanceEntersBuilding]) — 그래서 버튼은 그대로 뜨고, 눌러 들어오면
+    // 여기서 조용히 돌아서 **건물 안에 들어왔는데 경로가 없는** 화면이 됐다.
+    //
+    // 다시 푸는 데는 네트워크가 필요 없다. 들고 있던 여정 그래프로 방금 들어온
+    // 문에서 목적지까지 풀면 된다 — 문이 바뀔 때 하는 일과 같다.
+    final route = _pendingIndoorRoute ?? _solveIndoorLegFromJourneyEntrance();
+    if (route == null) {
+      _showSnack('건물 안 경로를 계산하지 못했습니다. 층 선택기로 목적지 층을 열어보세요.');
+      return;
+    }
 
     // 야외 안내가 살아 있을 때만 같은 여정의 다음 구간이다. 완료·취소된 이전
     // 안내가 남긴 예약을 새 실내 안내로 올리면, 그 회색선을 이어 붙여서는 안 된다.
