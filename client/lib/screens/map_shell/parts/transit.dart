@@ -60,10 +60,16 @@ extension _MapShellTransit on _MapShellScreenState {
     );
     if (!mounted) return;
 
+    // **실내 구간도 목록 단계에서 붙인다.** 안 붙이면 "최적 1시간 2분"이 건물
+    // 문에서 출발하는 시간인데, 정작 사용자는 3층에 서 있다 — 고른 뒤에야
+    // 실내 선이 그려지고 시간은 끝까지 안 나온다.
+    final withIndoor = await _withIndoorLeadLegs(filled, fallback: origin);
+    if (!mounted) return;
+
     // **채운 목록을 보관한다** — 원본을 넣으면 뒤로가기로 다시 연 목록에서만
     // 도보가 사라진다.
     _lastTransitQuery = (
-      routes: filled,
+      routes: withIndoor,
       destination: destination,
       origin: origin,
     );
@@ -71,12 +77,16 @@ extension _MapShellTransit on _MapShellScreenState {
     // 고를 때까지 앞 수단 경로가 남아 있었다. 조회가 성공한 뒤에 그리는 순서라야
     // 실패했을 때 앞 경로도 새 경로도 없는 빈 화면이 안 생긴다.
     await _previewTransitRoute(
-      filled,
+      withIndoor,
       destination: destination,
       origin: origin,
     );
     if (!mounted) return;
-    await _pickTransitRoute(filled, destination: destination, origin: origin);
+    await _pickTransitRoute(
+      withIndoor,
+      destination: destination,
+      origin: origin,
+    );
   }
 
   /// 고르기 전에 후보 하나를 **지도에만** 그린다. 나머지는 회색으로 깔린다 —
@@ -183,6 +193,61 @@ extension _MapShellTransit on _MapShellScreenState {
     );
   }
 
+  /// 건물 안에서 출발하는 여정이면 후보 **전부**의 앞에 실내 구간을 붙인다.
+  ///
+  /// 카카오는 우리 건물의 복도도 엘리베이터도 모른다. 그래서 실내 구간은 총계에
+  /// 없고, 붙이지 않으면 3층에 선 사용자가 "1시간 2분"이라고 적힌 목록에서
+  /// 고르게 된다 — 그 값은 문에서 출발하는 시간이다. 총계를 어떻게 올리는지와
+  /// 그때 생기는 근사는 [prependIndoorWalkLeg]에 적었다.
+  ///
+  /// **네트워크를 타지 않는다.** 문까지의 거리는 건물 그래프(이미 캐시에 있다)를
+  /// 한 번 훑어 얻고([OutdoorMapBodyState.indoorExitReach]), 후보마다 다시 하는
+  /// 일은 문 고르기뿐이다 — 후보가 15개라도 TMAP 할당량이 한 건도 안 나간다.
+  ///
+  /// 판정은 고른 뒤와 **같은 것**을 쓴다([journeyStartsIndoors]). 갈리면 목록에는
+  /// 실내 시간이 들어 있는데 정작 고르면 실내 선이 안 그려지는 상태가 생긴다.
+  Future<TransitRoutes> _withIndoorLeadLegs(
+    TransitRoutes routes, {
+    required LatLng fallback,
+  }) async {
+    if (routes.itineraries.isEmpty) return routes;
+    if (!journeyStartsIndoors(
+      origin: _selectedOrigin,
+      indoorStartReady:
+          indoorNavigationDriver.currentCalibration.canRenderPosition,
+    )) {
+      return routes;
+    }
+    final outdoor = _outdoorKey.currentState;
+    if (outdoor == null) return routes;
+    final reach = await outdoor.indoorExitReach(origin: _indoorOriginPoi());
+    if (!mounted || reach == null) {
+      debugPrint('[transit] 실내 선행 구간 건너뜀 — 닿는 문이 없다(그래프·앵커 확인)');
+      return routes;
+    }
+
+    debugPrint('[transit] 실내 선행 구간 붙임 — 닿는 문 ${reach.legs.length}개');
+    return TransitRoutes(
+      status: routes.status,
+      itineraries: [
+        for (final itinerary in routes.itineraries)
+          if (outdoor.indoorLeadFor(
+                reach,
+                transitBoardPoint(itinerary, fallback: fallback),
+              )
+              case final lead?)
+            prependIndoorWalkLeg(
+              itinerary,
+              seconds: lead.seconds,
+              meters: lead.meters,
+              exitName: lead.exitName,
+            )
+          else
+            itinerary,
+      ],
+    );
+  }
+
   /// 마지막 후보 목록을 다시 연다. 보관한 조회가 없으면(대중교통이 아니었거나
   /// 길찾기가 끝났으면) 아무 일도 하지 않는다 — 자동차는 계획 카드 안에 후보
   /// 패널이 그대로 남아 있다.
@@ -239,7 +304,7 @@ extension _MapShellTransit on _MapShellScreenState {
       // **건물 안에서 출발하면 정류장까지의 실내 구간을 먼저 그린다.**
       //
       // 거울상인 하차 쪽은 아래 [prepareIndoorLegFromDrop]으로 이미 있었는데,
-      // 승차 쪽은 함수([showIndoorLegToTransitBoarding])와 좌표 계산
+      // 승차 쪽은 함수([showIndoorLegToOutdoorStart])와 좌표 계산
       // ([transitBoardPoint])이 다 만들어져 있으면서 **부르는 자리만 없었다.**
       // 그래서 실내에서 대중교통을 시작하면 바깥 경로만 그려지고, 사용자는 지금
       // 서 있는 층에서 어느 문으로 나가야 하는지 화면에서 알 수 없었다.
@@ -247,17 +312,16 @@ extension _MapShellTransit on _MapShellScreenState {
       // 대중교통 경로를 그리기 **전에** 부른다 — 그 함수가 `_userDestination`을
       // 비우므로, 뒤에 부르면 방금 세운 도착 핀이 지워진다.
       //
-      // **도면 유무만 보면 안 된다**([transitStartsIndoors]) — 도보 갈래
+      // **근거는 실내 위치 하나다**([journeyStartsIndoors]) — 도보 갈래
       // ([classifyWalkRoute])와 같은 모양이라야 수단을 바꾸는 것만으로 안내
       // 앞부분이 사라지지 않는다.
       final boardingWalkOrigin =
-          transitStartsIndoors(
+          journeyStartsIndoors(
             origin: _selectedOrigin,
-            indoorContextActive: _indoorContextActive,
             indoorStartReady:
                 indoorNavigationDriver.currentCalibration.canRenderPosition,
           )
-          ? await outdoor.showIndoorLegToTransitBoarding(
+          ? await outdoor.showIndoorLegToOutdoorStart(
               transitBoardPoint(picked, fallback: origin),
               origin: _indoorOriginPoi(),
             )
@@ -294,26 +358,54 @@ extension _MapShellTransit on _MapShellScreenState {
       // 방금 하차 지점 기준으로 문을 다시 골랐다. 그대로 두면 지도에 그려진 도보는
       // 옛 끝점으로 가고 실내 구간만 새 문에서 시작해, 두 선이 서로 다른 곳을
       // 가리킨다. 자세한 근거는 [trimTrailingWalkLeg]에 있다.
-      final trimmed = trimTrailingWalkLeg(picked);
+      //
+      // **실내 구간은 먼저 떼어 둔다.** 안 떼면 바로 아래 [trimLeadingWalkLeg]가
+      // 카카오의 첫 도보 대신 그것을 잘라 낸다.
+      final (lead: indoorLead, rest: outdoorOnly) = takeIndoorWalkLead(picked);
+      final trimmed = trimTrailingWalkLeg(outdoorOnly);
 
-      // 앞 도보는 목록에서 이미 채워져 왔다([_withListWalkLegs]). 뒤 도보는 방금
-      // 고른 문으로 끝점이 바뀌었을 수 있어 다시 채우지만, 문이 목적지 그대로면
-      // 목록에서 부른 그 구간이라 메모([_transitWalks])가 받아 호출이 안 나간다.
+      // **첫 도보도 문 기준으로 다시 그린다.** 목록에서 채운 그 구간은 우리가
+      // 카카오에 보낸 출발 좌표(건물 안 GPS)에서 시작한다. 실내 선은 문에서
+      // 끝나는데 바깥 선은 건물 한가운데서 뻗어, 지도에서 **두 선이 안 이어진
+      // 채로 남았다** — 실기기에서 사용자가 지적한 화면이 이것이다. 거울상인
+      // 하차 쪽은 [trimTrailingWalkLeg]로 이미 이렇게 하고 있었고,
+      // [trimLeadingWalkLeg]도 그 목적으로 만들어져 있었는데 **부르는 자리만
+      // 없었다.**
+      //
+      // TMAP 호출이 한 건 더 나간다(출발점이 달라 메모가 안 받는다). 건물 안에서
+      // 출발할 때만이고, 그 한 건이 없으면 안내의 첫 구간이 통째로 어긋난다.
+      final headed = boardingWalkOrigin == null
+          ? trimmed
+          : trimLeadingWalkLeg(trimmed);
+
+      // 뒤 도보는 방금 고른 문으로 끝점이 바뀌었을 수 있어 다시 채우지만, 문이
+      // 목적지 그대로면 목록에서 부른 그 구간이라 메모([_transitWalks])가 받아
+      // 호출이 안 나간다.
       final completed = await _withTransitWalkLegs(
-        trimmed,
-        origin: origin,
+        headed,
+        origin: boardingWalkOrigin?.point ?? origin,
         destination: walkTarget,
       );
       if (!mounted) return;
 
+      // 떼어 둔 실내 구간을 되붙인다. 총계도 함께 돌아온다.
+      final withIndoorLead = indoorLead == null
+          ? completed
+          : prependIndoorWalkLeg(
+              completed,
+              seconds: indoorLead.seconds,
+              meters: indoorLead.meters,
+              exitName: boardingWalkOrigin?.label ?? indoorLead.exitName,
+            );
+
       await outdoor.showTransitRoute(
-        completed,
+        withIndoorLead,
         destination: walkTarget,
         label: '${destination.title}까지',
         // 실내 구간을 그렸으면 바깥 도보는 **그 문에서** 시작한다. 안 그러면
         // 실내 선은 문에서 끝나는데 바깥 선은 건물 안 좌표에서 뻗어, 두 선이
         // 서로 다른 곳을 가리킨다.
-        origin: boardingWalkOrigin ?? origin,
+        origin: boardingWalkOrigin?.point ?? origin,
         // 나머지 후보도 함께 넘겨 회색으로 깔린다. 고른 것 하나만 그리면 "다른
         // 길도 있다"가 시트를 다시 열기 전까지 화면에서 사라진다.
         //
@@ -458,7 +550,11 @@ extension _MapShellTransit on _MapShellScreenState {
       itinerary,
       origin: origin,
       destination: destination,
-      head: routes[0],
+      // **첫 도보도 출발점까지 이어 붙인다.** 뒤 도보와 같은 이유다 — 건물
+      // 안에서 출발하면 이 출발점이 문 좌표이고, TMAP 보행자 경로는 그 문이
+      // 아니라 가장 가까운 보행 도로에서 시작한다. 그대로 두면 실내 선이 끝난
+      // 문과 바깥 선이 시작하는 도로 사이가 비어, 두 구간이 남남으로 보인다.
+      head: extendRouteFromOrigin(routes[0], origin),
       // 마지막 도보는 **도착점까지 이어 붙인다.** TMAP 보행자 경로는 가장 가까운
       // 보행 가능 도로에서 끝나는데, 여기 도착점은 건물 출입구라 도로에서 몇십
       // 미터 떨어져 있다. 그대로 두면 선이 건물 앞 도로에서 뚝 끊기고, 정작 문

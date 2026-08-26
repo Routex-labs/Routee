@@ -69,7 +69,7 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     // 출구에서 `안내 시작` 버튼이 다시 뜨던 화면이 이것이다(실기기 증상).
     //
     // **대중교통 승차 구간도 같은 값으로 본다.** 그쪽은 야외 구간을 예약하지
-    // 않고 안내를 걸 때 통째로 그려 두므로([showIndoorLegToTransitBoarding])
+    // 않고 안내를 걸 때 통째로 그려 두므로([showIndoorLegToOutdoorStart])
     // [_pendingOutdoorDestination]이 끝까지 비어 있다. 그 값만 보면 대중교통으로
     // 나가는 사람은 항상 세션이 끝나 정류장까지 가는 길에 `안내 시작`이 다시
     // 뜬다 — 지금 실내 구간이 나가는 문으로 향하고 있는지([_exitEntranceOfIndoorRoute],
@@ -364,7 +364,7 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
   ///
   /// 실내 구간의 목적지 노드가 지상 출입구면 그렇다. 실내→야외 도보
   /// ([showIndoorToOutdoorRouteTo])와 실내→대중교통
-  /// ([showIndoorLegToTransitBoarding])이 **둘 다 출구를 목적지로 삼는 실내 경로**를
+  /// ([showIndoorLegToOutdoorStart])이 **둘 다 출구를 목적지로 삼는 실내 경로**를
   /// 그리므로, 한 조건이 두 여정을 함께 잡는다.
   ///
   /// [_pendingOutdoorDestination]으로 가르지 않는 이유가 그것이다 — 대중교통 쪽은
@@ -1122,6 +1122,11 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
   /// 않는다 — 도면만 보여주는 원래 동작 그대로다. 이미 다른 경로로 앵커가
   /// 찍혀 있으면([canRenderPosition]) 덮지 않는다 — 시트를 다시 열었다고 걷던
   /// 위치를 문 앞으로 되돌릴 이유는 없다.
+  ///
+  /// **보고 있는 층을 바꾸지 않는다.** 한때 지상 출입구 층으로 끌어와 앵커를
+  /// 찍었는데, 그 한 줄이 실기기에서 가장 크게 어긋난 자리였다 — 근거는
+  /// `docs/client/indoor-leg-in-outdoor-journey.md`의 「조용한 앵커는 층을 바꾸지
+  /// 않는다」.
   Future<void> _maybeAnchorOnQuietIndoorEntry() async {
     if (!mounted || !_indoorEntered) return;
     if (indoorNavigationDriver.currentCalibration.canRenderPosition) return;
@@ -1133,9 +1138,14 @@ extension OutdoorMapIndoor on OutdoorMapBodyState {
     );
     final floor = _groundEntranceFloor;
     if (entrance == null || floor == null) return;
+    // 이 갈래의 전제는 "방금 저 문으로 들어왔다"이고, 그 사람은 **그 문이 있는
+    // 층을 보고 있다.** 다른 층을 보고 있다면 전제가 이미 깨진 것이라 조용히
+    // 물러난다 — 위치는 사람이 잡는다(하단 바 두 버튼).
     if (_activeFloor != floor) {
-      await _switchOverlayFloor(floor);
-      if (!mounted || !_indoorEntered) return;
+      debugPrint(
+        '[anchor] 조용한 앵커 건너뜀 — 보는 층 $_activeFloor · 문 층 $floor',
+      );
+      return;
     }
     await _startIndoorTracking(entrance: entrance, position: position);
   }

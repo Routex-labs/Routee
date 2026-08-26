@@ -39,9 +39,10 @@ bool _isOutdoorPoint(DirectionsCandidate c) =>
 
 /// 어느 갈래로 갈지 정한다.
 ///
-/// [indoorContextActive](도면이 떠 있는가)와 [indoorStartReady](실내 위치가 잡혔는가)
-/// 는 **다르다** — 도면은 건물을 확대만 해도 켜지므로 밖에 선 사용자에게도 켜진다.
-/// 뭉개면 밖에 있는 사용자가 "출발 위치를 먼저 지정해주세요"만 보고 끝난다.
+/// **"건물 안에서 출발하는가"의 근거는 [indoorStartReady] 하나다** — 근거의 세기와
+/// AND로 묶었을 때 무엇이 깨지는지는 `docs/client/indoor-leg-in-outdoor-journey.md`
+/// 의 「실내 출발의 근거」에 있다. [indoorContextActive]는 **끝점 어느 쪽에도 실내
+/// 정보가 없을 때** 실내 그래프에 넘길지만 가른다(아래 갈래 5).
 ///
 /// 둘 다 **출발지를 고르지 않았을 때만** 쓴다. 고른 출발지가 건물 안 노드면 그
 /// 자체가 시작점이라, 지금 어디에 서 있는지는 어느 갈래인지를 바꾸지 않는다.
@@ -61,12 +62,11 @@ WalkRouteKind classifyWalkRoute({
   // 전까지 안을 볼 방법이 없다. 미리 보기와 실제 안내를 가르는 것은 이 판정이
   // 아니라 "안내 시작" 버튼이다.
   //
-  // **출발지가 없을 때(=지금 있는 곳)는 예전 조건 그대로다.** 도면만 보고 태우면
-  // 야외 지도를 보는 중에도 예전 앵커에서 경로가 뻗는다.
+  // **출발지가 없을 때(=지금 있는 곳)는 실내 위치가 근거다.** 도면은 안 본다 —
+  // 도면만 보고 태우면 밖에서 건물을 확대한 사람에게도 실내 경로가 뻗고, 반대로
+  // 도면이 접힌 사이에는 건물 안에 선 사람이 야외 갈래로 떨어진다.
   if (destinationIndoor &&
-      (origin == null
-          ? (indoorContextActive && indoorStartReady)
-          : origin.isIndoorPoint)) {
+      (origin == null ? indoorStartReady : origin.isIndoorPoint)) {
     return WalkRouteKind.indoorToIndoor;
   }
 
@@ -86,11 +86,15 @@ WalkRouteKind classifyWalkRoute({
   //
   // **도면 유무도 1)과 같이 다룬다.** 출발지를 직접 골랐으면 지금 야외 지도를
   // 보고 있어도 그 노드가 시작점이다. 도면을 요구하던 동안에는 그 요청이 아래
-  // `outdoor`로 떨어져 건물을 관통하는 TMAP 보행선이 그려졌다.
-  if (destination.nodeId == null &&
-      (origin == null
-          ? (indoorContextActive && indoorStartReady)
-          : origin.isIndoorPoint)) {
+  // `outdoor`로 떨어져 건물을 관통하는 TMAP 보행선이 그려졌다. 실기기에서
+  // B2에 선 사용자가 21 km짜리 야외 도보를 받은 것도 같은 자리다.
+  //
+  // **도착지는 진짜 야외여야 한다**([_isOutdoorPoint]). 한때 `nodeId == null`만
+  // 봤는데, 그러면 층만 달린 반쪽 후보(우리 건물 매장인데 그래프 노드가 없는
+  // 것)까지 이 갈래로 온다 — 건물 안 매장을 향해 **건물 밖으로 걸어 나가는**
+  // 안내가 된다. 예전에는 도면 조건이 그 경우를 우연히 가리고 있었다.
+  if (_isOutdoorPoint(destination) &&
+      (origin == null ? indoorStartReady : origin.isIndoorPoint)) {
     return WalkRouteKind.indoorToOutdoor;
   }
 
@@ -120,9 +124,9 @@ WalkRouteKind classifyWalkRoute({
 /// 판정 모양은 위 1) `indoorToIndoor` 갈래와 **같아야 한다.** 갈리면 화면에는
 /// 자동차·대중교통이 떠 있는데 계산은 실내 그래프로 도는 상태가 생긴다.
 ///
-/// 다른 점은 하나, **[indoorStartReady]를 묻지 않는다.** 그건 실내 위치가
-/// 잡혔는가이지 이 여정이 어떤 종류인가가 아니다 — 앵커를 아직 못 잡았다고
-/// 자동차 버튼이 나타나면, 누르는 순간 실내 구간이 통째로 빠진다.
+/// 다른 점은 하나, **두 근거를 OR로 받는다.** 앵커를 아직 못 잡았다고 자동차
+/// 버튼이 나타나면 누르는 순간 실내 구간이 통째로 빠지고, 반대로 도면이 접힌
+/// 사이에 나타나도 마찬가지다. 어느 쪽 근거든 하나면 건물 안 여정으로 본다.
 ///
 /// **두 끝점을 다 본다.** 도착지만 보면 "서울창업허브 → 샤브미담"처럼 멀리서
 /// 건물 안 매장을 찍는 길까지 참이 되는데, 그건 야외 이동이 대부분인 여정이라
@@ -131,7 +135,23 @@ bool isIndoorOnlyWalk({
   required DirectionsCandidate? origin,
   required DirectionsCandidate? destination,
   required bool indoorContextActive,
+  bool indoorStartReady = false,
 }) {
   if (destination == null || !destination.isIndoorPoint) return false;
-  return origin == null ? indoorContextActive : origin.isIndoorPoint;
+  return origin == null
+      ? (indoorContextActive || indoorStartReady)
+      : origin.isIndoorPoint;
 }
+
+/// 이 여정이 **건물 안에서 출발하는가**. 대중교통·자동차가 함께 쓴다.
+///
+/// [classifyWalkRoute]의 실내 갈래와 **같은 모양이어야 한다** — 같은 출발지가
+/// 도보에서는 실내로, 대중교통에서는 야외로 읽히면 수단을 바꾸는 것만으로
+/// 안내의 앞부분이 통째로 사라진다. 그래서 그 판정과 한 파일에 둔다.
+///
+/// 근거는 [indoorStartReady](실내 위치가 잡혔는가) 하나다. 도면이 떠 있는지는
+/// 보지 않는다 — 이유는 [classifyWalkRoute]와 같다.
+bool journeyStartsIndoors({
+  required DirectionsCandidate? origin,
+  required bool indoorStartReady,
+}) => origin == null ? indoorStartReady : origin.isIndoorPoint;

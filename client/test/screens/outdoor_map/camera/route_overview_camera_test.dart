@@ -11,7 +11,11 @@ import 'package:navigation_client/screens/outdoor_map/camera/route_overview_came
 void main() {
   test('개요가 물러선 축소는 도면을 접지 않는다', () {
     expect(
-      zoomOutKeepsIndoor(overviewHold: true, hasRouteToShow: true),
+      zoomOutKeepsIndoor(
+        overviewHold: true,
+        hasRouteToShow: true,
+        indoorPositionLive: false,
+      ),
       isTrue,
     );
   });
@@ -19,7 +23,11 @@ void main() {
   test('사용자가 직접 축소한 것이면 접는다', () {
     // 개요가 세운 붙들기가 없다 = 이 축소의 뜻은 "건물에서 나가겠다"다.
     expect(
-      zoomOutKeepsIndoor(overviewHold: false, hasRouteToShow: true),
+      zoomOutKeepsIndoor(
+        overviewHold: false,
+        hasRouteToShow: true,
+        indoorPositionLive: false,
+      ),
       isFalse,
     );
   });
@@ -27,8 +35,26 @@ void main() {
   test('경로가 사라지면 붙들기도 끝난다', () {
     // 없으면 개요에서 경로를 지운 사용자가 도시 배율에 실내 상태로 갇힌다.
     expect(
-      zoomOutKeepsIndoor(overviewHold: true, hasRouteToShow: false),
+      zoomOutKeepsIndoor(
+        overviewHold: true,
+        hasRouteToShow: false,
+        indoorPositionLive: false,
+      ),
       isFalse,
+    );
+  });
+
+  test('실내 위치가 살아 있으면 사용자가 축소해도 안 접는다', () {
+    // 접으면 **눈에 보이는 도면과 앱의 판정이 어긋난다** — 축소는 실내 위치를
+    // 버리지 않으므로, 접힌 뒤에도 사용자는 건물 안에 서 있다. 실기기에서 그
+    // 어긋남이 21 km짜리 야외 도보로 나왔다(`도면 false · 실내위치 true`).
+    expect(
+      zoomOutKeepsIndoor(
+        overviewHold: false,
+        hasRouteToShow: false,
+        indoorPositionLive: true,
+      ),
+      isTrue,
     );
   });
 

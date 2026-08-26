@@ -146,6 +146,20 @@ extension OutdoorMapUi on OutdoorMapBodyState {
     final indoorRouteDestination = _indoorRouteDestination;
     // 거리·시간을 한 번에 계산한다(예전엔 같은 계산을 두 번 돌았다).
     final indoorEta = _indoorEta();
+    // 하단 카드 한 자리를 **실내 카드가 쓸 것인가.**
+    //
+    // 실내 구간이 바깥 여정의 앞 구간이면([_indoorLegIsPrelude]) 그 자리는 바깥
+    // 여정 카드의 것이다. 실내 카드가 먼저 걸리는 동안에는 "계양도서관"을 찾아도
+    // **문까지의** 값만 떴다 — `남서쪽 출구까지 · 2분 · 116 m`. 실내 시간은
+    // 사라지지 않고 바깥 카드의 총계에 든다([_outdoorEta]·`prependIndoorWalkLeg`).
+    //
+    // **바깥 구간이 아직 없으면 그래도 실내 카드가 지킨다.** [showRouteTo]가
+    // `_route`를 잠시 null로 되돌리고 TMAP을 기다리므로, 안 지키면 그 사이 카드가
+    // 한 번 사라졌다 돌아온다.
+    final indoorCardOwnsSlot =
+        indoorRouteDestination != null &&
+        !(_indoorLegIsPrelude &&
+            (route != null || _transitItinerary != null));
     final indoorRouteVisible = _hasAnyRouteVisible;
     final debugEnabled = _debugModeController.enabled;
     final pdrActive =
@@ -654,7 +668,7 @@ extension OutdoorMapUi on OutdoorMapBodyState {
         // 걸면 그 갈래가 Stack에서 도착 카드보다 나중에 그려져(뒤가 위) 도착
         // 카드를 덮는다. 도착했는데 `안내 종료`가 안 보이던 실기기 증상이 이것이다.
         if (_arrivedDestination == null)
-          if (indoorRouteDestination != null)
+          if (indoorCardOwnsSlot)
             _bottomDockedCard(
               EtaCard(
                 key: _etaCardKey,
@@ -688,6 +702,9 @@ extension OutdoorMapUi on OutdoorMapBodyState {
                 key: _etaCardKey,
                 itinerary: itinerary,
                 label: _transitLabel ?? '목적지까지',
+                // 실내 구간이 앞에 붙어 있으면 무엇을 타고 내려갈지도 여기서
+                // 고른다 — 그 구간이 이 카드의 총 소요에 들어 있으므로.
+                leading: _verticalPreferenceExtras(),
                 transition: transition,
                 onStartGuidance: _guidanceStarted
                     ? null
@@ -708,7 +725,7 @@ extension OutdoorMapUi on OutdoorMapBodyState {
                     : '건물 입구까지',
                 guidanceStarted: _guidanceStarted,
                 transition: transition,
-                routeOptions: _directionsRouteExtras(context, route),
+                routeOptions: _outdoorRouteExtras(context, route),
                 extraMetric: _directionsFareMetric(route),
                 onClose: userDestination != null
                     ? _dismissUserDestinationFromEtaCard
@@ -781,6 +798,10 @@ extension OutdoorMapUi on OutdoorMapBodyState {
   /// 갈아 끼우는 것은 다른 사건이고, 자동차 후보 줄도 같은 규칙이다.
   Widget? _verticalPreferenceExtras() {
     if (_indoorMultiFloorRoute == null) return null;
+    // 안내를 시작한 뒤에는 갈아 끼우지 않는다. 실내 카드에서는 [EtaCard]가
+    // 이 자리를 아예 안 그려 그 규칙이 지켜졌는데, 바깥 여정 카드는 안내
+    // 중에도 선택 영역을 그리므로 여기서 한 번 더 막는다.
+    if (_guidanceStarted) return null;
     return VerticalPreferenceBar(
       selected: verticalPreferenceController.value,
       onSelected: (preference) =>
@@ -823,6 +844,26 @@ extension OutdoorMapUi on OutdoorMapBodyState {
       options: _directionsRouteOptions,
       selectedIndex: _selectedDirectionsOptionIndex,
       onSelect: (index) => unawaited(selectDirectionsOption(index)),
+    );
+  }
+
+  /// 바깥 여정 카드의 선택 영역 — 수직 이동 선호 줄 + 자동차 후보 줄.
+  ///
+  /// **실내 구간이 앞에 붙었으면 선호 줄이 여기 온다.** 그 구간의 시간이 이
+  /// 카드의 총 소요에 들어 있으므로([_outdoorEta]), 무엇을 타고 내려갈지 바꾸는
+  /// 자리도 그 숫자 바로 옆이어야 한다 — 실내 카드가 같은 이유로 갖고 있던
+  /// 자리다([_verticalPreferenceExtras]).
+  ///
+  /// 둘 다 없으면 null이라 카드는 제목부터 시작한다.
+  Widget? _outdoorRouteExtras(BuildContext context, DirectionsRoute route) {
+    final preference = _verticalPreferenceExtras();
+    final options = _directionsRouteExtras(context, route);
+    if (preference == null && options == null) return null;
+    if (preference == null) return options;
+    if (options == null) return preference;
+    return RoutexStack(
+      gap: RoutexStackGap.inline,
+      children: [preference, options],
     );
   }
 

@@ -44,6 +44,7 @@
 | [지도 스타일 규칙](client/map-style-rules.md) | 도면 색·라벨·아이콘의 근거와 MapLibre 함정 |
 | [전역 테마 넘기기](client/theme-handover.md) | Runtime Kit 전환의 조건·재 본 값·남은 순서 |
 | [실내 진입·이탈 판정 규칙](client/indoor-entry-rules.md) | GPS·zoom·근접 세 축의 임계값 근거 |
+| [실내 구간이 앞에 붙는 여정](client/indoor-leg-in-outdoor-journey.md) | 실내→야외·대중교통·자동차의 총 소요·카드·선호 줄 |
 | [GPS 스트림 정책](client/gps-stream-policy.md) | 스트림 수명·신선도·경로 재계산 주기 |
 | [안드로이드 heading 드리프트](client/android-heading-drift.md) | gyro hold가 영구 래치가 되던 구조와 그 수정 |
 | [에스컬레이터 층 판정 임계값](client/escalator-thresholds.md) | 상수마다의 실측 근거와 실측에서 나온 함정 |

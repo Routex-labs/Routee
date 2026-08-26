@@ -11,7 +11,7 @@ import 'package:navigation_client/repositories/building/mock_building_repository
 import 'package:navigation_client/repositories/place/mock_destination_repository.dart';
 import 'package:navigation_client/screens/map_shell/map_shell_screen.dart';
 import 'package:navigation_client/screens/outdoor_map/outdoor_map_screen.dart';
-import 'package:navigation_client/screens/map_shell/widgets/chrome/map_bottom_bar.dart';
+import 'package:navigation_client/screens/outdoor_map/widgets/entry_floor_prompt.dart';
 import 'package:navigation_client/screens/outdoor_map/widgets/floor_selector.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -184,21 +184,20 @@ void main() {
     await drain(tester);
     expect(find.byType(FloorSelector), findsOneWidget);
 
-    // 위치 보정(하단 바 우측 원형 버튼) 탭. 아직 실내 위치를 지정하지 않았으므로
-    // 실내 분기의 안내가 떠야 한다. GPS 분기였다면 geolocator 플러그인 채널이
-    // 없어 '위치를 다시 확인하지 못했습니다'가 떴을 것이다.
+    // 위치 보정(하단 바 우측 원형 버튼) 탭. 아직 실내 위치가 없으므로 이 버튼은
+    // **먼저 잡아 본다** — 야외에서 "내 위치"를 잡는 그 버튼과 같은 자리·같은
+    // 아이콘인데, 실내에서만 아무것도 안 하고 다른 버튼을 깜빡이던 것이 사용자가
+    // 지적한 어긋남이었다.
     await tester.tap(find.byIcon(Icons.my_location));
-    await tester.pump();
+    await drain(tester);
 
-    // **문장이 아니라 버튼이 말한다.** 눌러야 할 버튼을 말로 가리키는 안내는
-    // 그 버튼을 가리면서 떴다 — 지금은 "위치 지정"이 잠깐 깜빡인다.
-    expect(
-      tester
-          .widget<MapBottomBar>(find.byType(MapBottomBar))
-          .attentionOnPlaceLocation,
-      isTrue,
-    );
-    // GPS 갈래를 탔다면 플러그인 채널이 없어 이 문구가 떴을 것이다.
+    // **층부터 묻는다.** GPS는 층을 모른다 — 보고 있는 층에 그냥 찍으면 다른
+    // 층을 훑어보던 사용자가 거기 못 박히고, 자기 층으로 돌아와도 마커가 안
+    // 보인다(실기기: 지하 2층에 선 사람의 파란 점이 다른 층에 떴다).
+    expect(find.byType(EntryFloorPrompt), findsOneWidget);
+
+    // 새 GPS 조회는 하지 않는다 — 들고 있던 좌표를 쓴다. 조회 갈래였다면
+    // geolocator 플러그인 채널이 없어 이 문구가 떴을 것이다.
     expect(find.textContaining('위치를 다시 확인하지 못했습니다'), findsNothing);
   });
 }

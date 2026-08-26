@@ -7,25 +7,22 @@ library;
 
 /// 개요 때문에 축소한 카메라가 **실내 상태를 그대로 두어야** 하는가.
 ///
-/// 경로 전체를 담는 맞추기([animateCameraToPoints])에는 줌 하한이 없다. 목적지가
-/// 몇백 m만 떨어져도 배율이 실내 이탈 임계값(15.6) 아래로 내려가고, 대중교통이면
-/// 여정이 수 km라 아예 확실하게 내려간다. 예전에는 그래서 도면을 편 동안 아예
-/// 물러서지 않았고, 건물 안에서 길을 찾은 사용자는 어디로 가는 경로인지 못 본
-/// 채 `안내 시작`을 눌러야 했다.
-///
-/// 붙드는 것은 눈에 보이는 도면이 아니라 실내 상태다 — 도면·외곽선·dim scrim은
-/// 이미 zoom 표현식이 투명하게 지우고([indoorOverlayFadeExpr]), 층 선택기는 안내
-/// 카드가 뜨는 순간 접힌다(`_guidancePlanned`). 남는 차이는 "지금 건물 안에서
-/// 출발한다"는 사실 하나인데, 그것이 꺼지면 길찾기가 실내 갈래로 못 들어가
+/// 경로 전체를 담는 맞추기([animateCameraToPoints])에는 줌 하한이 없어, 목적지가
+/// 몇백 m만 떨어져도 배율이 실내 이탈 임계값 아래로 내려간다. 붙드는 것은 눈에
+/// 보이는 도면이 아니라 실내 상태다 — 꺼지면 길찾기가 실내 갈래로 못 들어가
 /// **실내 구간이 계산조차 되지 않는다.**
 ///
-/// [overviewHold]는 이 축소를 개요가 만들었는가다 — 사용자가 직접 축소한 것이면
-/// 그 뜻은 "건물에서 나가겠다"이므로 접는다. [hasRouteToShow]가 없으면 개요에서
-/// 경로를 지운 사용자가 도시 배율에 실내 상태로 갇힌다.
+/// [overviewHold]는 이 축소를 개요가 만들었는가, [hasRouteToShow]는 붙들 이유가
+/// 아직 있는가다. [indoorPositionLive]는 둘을 **웃돈다** — 실내 위치가 살아 있으면
+/// 이 사람은 건물 안이고, 접는 순간 화면과 판정이 어긋난다.
+///
+/// 실측과 버린 규칙은 `docs/client/indoor-leg-in-outdoor-journey.md`의
+/// 「축소해도 접지 않는다」.
 bool zoomOutKeepsIndoor({
   required bool overviewHold,
   required bool hasRouteToShow,
-}) => overviewHold && hasRouteToShow;
+  required bool indoorPositionLive,
+}) => indoorPositionLive || (overviewHold && hasRouteToShow);
 
 /// 안내를 끈 순간 카메라가 갈 곳.
 enum GuidanceStopCameraTarget {

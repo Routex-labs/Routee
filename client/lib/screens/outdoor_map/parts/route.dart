@@ -1354,6 +1354,7 @@ extension OutdoorMapRoute on OutdoorMapBodyState {
       _indoorMultiFloorRoute = null;
       _indoorRouteDestination = null;
       _indoorRoutePreviewOrigin = null;
+      _indoorLegIsPrelude = false;
       if (endGuidance) _guidanceStarted = false;
       _guidanceTrailSession.clear();
     });

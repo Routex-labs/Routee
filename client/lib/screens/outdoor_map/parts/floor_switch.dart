@@ -110,6 +110,11 @@ extension OutdoorMapFloorSwitch on OutdoorMapBodyState {
     // 지도에서 지운다 — 실내 화면과 동일 규칙.
     final multiRoute = _indoorMultiFloorRoute;
     final nextSegmentRoute = multiRoute?.segmentForFloor(floor)?.route;
+    debugPrint(
+      '[floor] 보는 층 $_activeFloor → $floor · '
+      '앵커 층 ${_pdrTrailState.anchor?.floorId} · '
+      '다층경로 ${_indoorMultiFloorRoute?.segments.map((s) => s.floorName).toList()}',
+    );
     setState(() {
       _activeFloor = floor;
       _floorGraph = null;

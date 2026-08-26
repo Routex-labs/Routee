@@ -6,7 +6,6 @@ library;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:navigation_client/models/route/directions_candidate.dart';
 import 'package:navigation_client/models/route/transit_route.dart';
 import 'package:navigation_client/screens/map_shell/transit_walk_handoff.dart';
 
@@ -211,72 +210,6 @@ void main() {
 
     test('구간이 없으면 그대로 둔다', () {
       expect(trimLeadingWalkLeg(plan([])).legs, isEmpty);
-    });
-  });
-
-  group('실내에서 출발하는가', () {
-    const indoor = DirectionsCandidate(
-      title: '스타벅스 리저브',
-      subtitle: 'B2',
-      point: LatLng(37.5259, 126.9284),
-      nodeId: 'N-1',
-      floor: 'B2',
-    );
-    const outdoor = DirectionsCandidate(
-      title: '뉴고려병원',
-      subtitle: '',
-      point: LatLng(37.6, 127.1),
-    );
-
-    test('고른 출발지가 실내 지점이면 도면·앵커와 무관하게 참', () {
-      expect(
-        transitStartsIndoors(
-          origin: indoor,
-          indoorContextActive: false,
-          indoorStartReady: false,
-        ),
-        isTrue,
-      );
-    });
-
-    test('고른 출발지가 야외 지점이면 도면이 떠 있어도 거짓', () {
-      expect(
-        transitStartsIndoors(
-          origin: outdoor,
-          indoorContextActive: true,
-          indoorStartReady: true,
-        ),
-        isFalse,
-      );
-    });
-
-    test('출발지가 없으면 도면과 실내 위치가 **둘 다** 있어야 참', () {
-      // 도면은 확대만으로도 켜진다. 하나로 뭉개면 건물 밖에 선 사용자의 경로가
-      // 있지도 않은 실내 구간을 먼저 그리려 든다.
-      expect(
-        transitStartsIndoors(
-          origin: null,
-          indoorContextActive: true,
-          indoorStartReady: false,
-        ),
-        isFalse,
-      );
-      expect(
-        transitStartsIndoors(
-          origin: null,
-          indoorContextActive: false,
-          indoorStartReady: true,
-        ),
-        isFalse,
-      );
-      expect(
-        transitStartsIndoors(
-          origin: null,
-          indoorContextActive: true,
-          indoorStartReady: true,
-        ),
-        isTrue,
-      );
     });
   });
 }

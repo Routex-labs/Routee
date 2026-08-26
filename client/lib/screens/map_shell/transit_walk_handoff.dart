@@ -10,7 +10,6 @@ library;
 
 import 'package:latlong2/latlong.dart';
 
-import '../../models/route/directions_candidate.dart';
 import '../../models/route/transit_route.dart';
 
 /// **내린 자리** — 마지막으로 "타는" 구간이 끝나는 곳.
@@ -87,20 +86,3 @@ TransitItinerary trimLeadingWalkLeg(TransitItinerary itinerary) {
     fare: itinerary.fare,
   );
 }
-
-/// 이 대중교통 안내가 **건물 안에서 출발하는가**.
-///
-/// 판정 모양을 `walk_route_kind.dart`의 실내 갈래와 일부러 맞췄다 — 같은
-/// 출발지가 도보에서는 실내로, 대중교통에서는 야외로 읽히면 수단을 바꾸는 것
-/// 만으로 안내의 앞부분이 통째로 사라진다.
-///
-/// [indoorContextActive]는 도면이 떠 있는가, [indoorStartReady]는 실내 위치가
-/// 잡혔는가다. **둘은 다르다** — 도면은 확대만으로도 켜지므로 밖에 선 사용자
-/// 에게도 켜진다. 고른 출발지가 있으면 그 자체가 시작점이라 둘 다 보지 않는다.
-bool transitStartsIndoors({
-  required DirectionsCandidate? origin,
-  required bool indoorContextActive,
-  required bool indoorStartReady,
-}) => origin == null
-    ? (indoorContextActive && indoorStartReady)
-    : origin.isIndoorPoint;

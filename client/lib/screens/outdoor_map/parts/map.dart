@@ -380,6 +380,9 @@ extension OutdoorMapMap on OutdoorMapBodyState {
         if (zoomOutKeepsIndoor(
           overviewHold: _routeOverviewHoldsIndoor,
           hasRouteToShow: _hasAnyRouteVisible,
+          // 실내 위치가 살아 있으면 이 사람은 건물 안이다 — 접지 않는다.
+          indoorPositionLive:
+              indoorNavigationDriver.currentCalibration.canRenderPosition,
         )) {
           break;
         }

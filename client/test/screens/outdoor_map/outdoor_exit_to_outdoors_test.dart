@@ -19,7 +19,9 @@ import 'package:navigation_client/repositories/place/mock_destination_repository
 import 'package:navigation_client/screens/outdoor_map/outdoor_map_screen.dart';
 import 'package:navigation_client/screens/outdoor_map/transition/indoor_transition_overlay.dart';
 import 'package:navigation_client/screens/outdoor_map/transition/indoor_transition_timeline.dart';
+import 'package:navigation_client/models/place/poi_search_result.dart';
 import 'package:navigation_client/screens/outdoor_map/widgets/floor_selector.dart';
+import 'package:navigation_client/widgets/eta_card.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// "밖으로 나가기" 버튼이 실제로 야외로 되돌리는지에 대한 회귀 테스트.
@@ -313,13 +315,55 @@ void main() {
     );
   });
 
+  testWidgets('실내→야외 여정의 계획 카드는 문까지가 아니라 목적지까지를 말한다', (
+    WidgetTester tester,
+  ) async {
+    // 실측 증상(더현대 서울 → 계양도서관, 도보): 경로는 두 토막 다 그려졌는데
+    // 하단 카드는 `남서쪽 출구까지 · 2분 · 116 m`만 띄웠다. 목적지까지의 한
+    // 시간 남짓은 화면 어디에도 없었다.
+    //
+    // 뿌리는 카드 갈래가 `_indoorRouteDestination != null`을 **먼저** 본 것이다.
+    // 실내 구간이 그려져 있다는 사실만으로는 그것이 여정 전체인지 앞 구간인지
+    // 알 수 없다 — 그것을 가르는 값이 `_indoorLegIsPrelude`다. 근거는
+    // `docs/client/indoor-leg-in-outdoor-journey.md`.
+    final positions = StreamController<Position>.broadcast();
+    await enterIndoorByButton(tester, positions);
+    await settleSensorWarmup(tester);
+
+    final state = tester.state<OutdoorMapBodyState>(find.byType(OutdoorMapBody));
+    // 출구(n-a)에서 30 m 떨어진 n-b를 출발지로 준다. 자동 앵커는 출구 노드에
+    // 찍히므로, 그대로 두면 실내 구간이 0 m라 "더했는지"를 볼 수가 없다.
+    await state.showIndoorToOutdoorRouteTo(
+      outsideDestination,
+      label: '계양도서관',
+      origin: const PoiSearchResult(
+        name: '매장',
+        floor: '1F',
+        point: LatLng(37.5664976, 126.978244),
+        nodeId: 'n-b',
+      ),
+    );
+    await drain(tester);
+
+    final card = tester.widget<EtaCard>(find.byType(EtaCard));
+    expect(
+      card.label,
+      contains('계양도서관'),
+      reason: '문 이름만 적힌 카드는 목적지까지 얼마나 남았는지를 말하지 않는다',
+    );
+    expect(card.label, contains('경유'), reason: '왜 선이 건물 모서리로 향하는지도 함께 적는다');
+    // 야외 구간만 193 m쯤이고 실내 구간이 30 m다. 실내 카드가 그 자리를 쥐고
+    // 있던 동안에는 30 m만 떴다.
+    expect(card.distanceMeters, greaterThan(150));
+  });
+
   testWidgets('나가기 버튼은 대중교통 승차 여정의 안내도 끊지 않는다', (WidgetTester tester) async {
     // 실측 증상: 실내에서 대중교통(버스 등) 목적지로 안내를 걸고 건물을 나가면
     // 도보 여정과 달리 `안내 시작` 버튼이 다시 떴다.
     //
     // 뿌리는 도보 여정과 같다 — [_dropIndoorPosition]이 여정이 문 밖에서
     // 이어지는지를 [_pendingOutdoorDestination]만으로 판정하는데, 대중교통
-    // 승차 구간은 그 값을 예약하지 않는다(`showIndoorLegToTransitBoarding`이
+    // 승차 구간은 그 값을 예약하지 않는다(`showIndoorLegToOutdoorStart`이
     // 야외 구간을 처음부터 통째로 그려서). 그래서 대중교통으로 나가는 사람은
     // 언제나 세션이 끊겼다.
     final positions = StreamController<Position>.broadcast();
@@ -327,9 +371,9 @@ void main() {
     await settleSensorWarmup(tester);
 
     final state = tester.state<OutdoorMapBodyState>(find.byType(OutdoorMapBody));
-    final boardingOrigin = await state.showIndoorLegToTransitBoarding(
+    final boardingOrigin = (await state.showIndoorLegToOutdoorStart(
       wellOutside,
-    );
+    ))?.point;
     await drain(tester);
     expect(
       boardingOrigin,

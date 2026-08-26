@@ -166,6 +166,18 @@ extension OutdoorMapRouteLayers on OutdoorMapBodyState {
     // 실내 경로가 활성이면 그걸 우선 그린다(평소에는 GPS 걷기 경로와 동시에
     // 표시하지 않는다 — 사용자는 지금 실내에 있고 실내 경로가 유일한 관심사).
     final indoor = _indoorRouteSegment;
+    // **진단 한 줄** — 카드는 실내 경로를 말하는데 그릴 선이 없는 경우만 찍는다.
+    // 실기기에서 "실내 경로 선이 없음"이 보고됐고, 그 상태가 세그먼트가 비어서인지
+    // 지금 보는 층이 경로에 없어서인지를 화면만 보고는 가를 수 없다.
+    if (_indoorRouteDestination != null &&
+        (indoor == null || indoor.points.length < 2)) {
+      debugPrint(
+        '[route layer] 실내 선 없음 — 보는 층 $_activeFloor · '
+        '세그먼트 ${indoor?.points.length ?? -1}점 · '
+        '다층 ${_indoorMultiFloorRoute?.segments.map((s) => s.floorName).toList()} · '
+        'prelude $_indoorLegIsPrelude · 야외 ${_route?.points.length ?? -1}점',
+      );
+    }
     if (indoor != null && indoor.points.length >= 2) {
       final visuals = _indoorRouteVisuals(indoor);
       final features = _completedRouteFeatures(
@@ -183,17 +195,26 @@ extension OutdoorMapRouteLayers on OutdoorMapBodyState {
       if (remaining.length >= 2) {
         features.add(geoJsonLineFeature(remaining, style: 'indoor'));
       }
-      // **실내→야외 여정은 예외다.** 두 구간이 한 여정이라 같이 보여야 한다.
-      // 예전에는 여기서 그냥 돌아섰고, 그 뒤에 그려진 야외 구간이 같은 소스를
-      // 덮거나(순서에 따라) 아예 못 그려져 **둘 중 하나는 반드시 사라졌다.**
-      // 거울상인 야외→실내는 이미 [_pendingIndoorRoute] 미리 보기로 둘을 함께
-      // 그리고 있다 — 그 비대칭을 없앤다.
+      // **실내 구간이 바깥 여정의 앞 구간이면 예외다.** 두 구간이 한 여정이라
+      // 같이 보여야 한다. 예전에는 여기서 그냥 돌아섰고, 그 뒤에 그려진 야외
+      // 구간이 같은 소스를 덮거나(순서에 따라) 아예 못 그려져 **둘 중 하나는
+      // 반드시 사라졌다.** 거울상인 야외→실내는 이미 [_pendingIndoorRoute]
+      // 미리 보기로 둘을 함께 그리고 있다 — 그 비대칭을 없앤다.
+      //
+      // 판정은 [_indoorLegIsPrelude] 하나다. 한때 `_pendingOutdoorDestination`을
+      // 봤는데 그 값은 **도보 갈래만** 세운다 — 그래서 실내에서 자동차를 고르면
+      // 실내 선만 남고 자동차 선이 통째로 사라졌다.
       //
       // 완료 구간은 실내 것만 쓴다. 아직 건물 안이라 야외 구간은 한 걸음도
       // 걷지 않았고, 그 회색선은 나간 뒤 야외 scope에서 새로 잡힌다.
-      final outdoorLeg = _pendingOutdoorDestination == null ? null : _route;
+      final outdoorLeg = _indoorLegIsPrelude ? _route : null;
       if (outdoorLeg != null && outdoorLeg.points.length >= 2) {
-        features.add(geoJsonLineFeature(outdoorLeg.points, style: 'walk'));
+        features.add(
+          geoJsonLineFeature(
+            outdoorLeg.points,
+            style: _routeIsDriving ? 'drive' : 'walk',
+          ),
+        );
       }
       await controller.setGeoJsonSource(
         kOutdoorRouteSourceId,
