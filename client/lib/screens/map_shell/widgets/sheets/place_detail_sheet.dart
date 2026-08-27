@@ -148,6 +148,12 @@ class PlaceDetailTarget {
 /// 도달할 수 없는 경로라 지운다.
 enum StoreInfoAction { setOrigin, setDestination }
 
+/// 장소 상세를 처음 열었을 때 보여 줄 본문 갈래.
+///
+/// 일반 제품 흐름은 [home]을 사용한다. 촬영·딥링크처럼 사용자가 이미 메뉴나
+/// 사진을 고른 상태를 복원해야 하는 호출자는 다른 값을 넘길 수 있다.
+enum PlaceDetailTab { home, menu, photos }
+
 /// 매장 상세 시트.
 ///
 /// 이름·층·카테고리와 길찾기 버튼은 이미 검색 결과에 있으므로 즉시 표시한다.
@@ -161,13 +167,27 @@ class PlaceDetailSheet extends StatefulWidget {
     this.onSelectNearbyStore,
     this.onShowEvent,
     this.repository,
+    this.initialChildSize,
+    this.initialTab = PlaceDetailTab.home,
     required this.onCloseAll,
-  });
+  }) : assert(
+         initialChildSize == null ||
+             (initialChildSize > 0 && initialChildSize <= 0.92),
+       );
 
   /// 지금 보여 줄 매장. **값이 바뀌면 시트를 다시 만들지 않고 내용만 바꾼다.**
   final ValueListenable<PlaceDetailTarget> target;
 
   final String buildingId;
+
+  /// 처음 나타나는 시트 높이 비율.
+  ///
+  /// null이면 화면 높이에 맞춘 제품 기본값을 사용한다. 촬영처럼 동일한 화면을
+  /// 여러 크기로 재현해야 할 때만 명시한다.
+  final double? initialChildSize;
+
+  /// 상세 본문에서 처음 선택할 갈래.
+  final PlaceDetailTab initialTab;
 
   /// 이 매장에서 가까운 다른 매장을 찾아 온다. 인자는 **이 매장의 입구 노드**다.
   ///
@@ -486,9 +506,9 @@ class _PlaceDetailSheetState extends State<PlaceDetailSheet> {
         for (final item in section.items)
           RoutexMediaItem(image: AssetImage(item.localAsset)),
     ];
-    final initialSize = placeDetailSheetInitialSize(
-      MediaQuery.sizeOf(context).height,
-    );
+    final initialSize =
+        widget.initialChildSize ??
+        placeDetailSheetInitialSize(MediaQuery.sizeOf(context).height);
 
     return PopScope(
       canPop: true,
@@ -557,6 +577,7 @@ class _PlaceDetailSheetState extends State<PlaceDetailSheet> {
                           // 사진이 없을 때도 overview는 그대로 첫 내용이 된다.
                           PlaceDetailSections(
                             sections: sections,
+                            initialTab: widget.initialTab,
                             showHeroCarousel: false,
                             // **행사 카드는 overview 안에 붙인다.** overview가 그냥
                             // Widget이라 새 슬롯을 만들 이유가 없다. 자리도 여기가
@@ -694,6 +715,7 @@ class PlaceDetailSections extends StatefulWidget {
   const PlaceDetailSections({
     super.key,
     required this.sections,
+    this.initialTab = PlaceDetailTab.home,
     this.overview,
     this.showHeroCarousel = true,
     this.now,
@@ -701,6 +723,9 @@ class PlaceDetailSections extends StatefulWidget {
   });
 
   final List<PlaceDetailSection> sections;
+
+  /// 처음 보여 줄 본문 갈래. 해당 갈래가 없으면 첫 번째 가능한 갈래를 쓴다.
+  final PlaceDetailTab initialTab;
 
   /// 대표 사진 바로 뒤, 나머지 상세 섹션보다 앞에 놓는 장소 요약과 주 행동.
   final Widget? overview;
@@ -733,7 +758,21 @@ const _menuTab = '메뉴';
 const _photoTab = '사진';
 
 class _PlaceDetailSectionsState extends State<PlaceDetailSections> {
-  String _activeTab = _homeTab;
+  late String _activeTab = _labelFor(widget.initialTab);
+
+  @override
+  void didUpdateWidget(covariant PlaceDetailSections oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialTab != widget.initialTab) {
+      _activeTab = _labelFor(widget.initialTab);
+    }
+  }
+
+  static String _labelFor(PlaceDetailTab tab) => switch (tab) {
+    PlaceDetailTab.home => _homeTab,
+    PlaceDetailTab.menu => _menuTab,
+    PlaceDetailTab.photos => _photoTab,
+  };
 
   @override
   Widget build(BuildContext context) {

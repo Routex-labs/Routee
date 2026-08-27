@@ -49,6 +49,8 @@ void main() {
     String? subcategory,
     FavoritePlace? favorite,
     NodeReach? reach,
+    double? initialChildSize,
+    PlaceDetailTab initialTab = PlaceDetailTab.home,
   }) {
     target.value = PlaceDetailTarget(
       title: '테스트 매장',
@@ -64,6 +66,8 @@ void main() {
         buildingId: 'building-1',
         onCloseAll: onCloseAll ?? () {},
         repository: repository,
+        initialChildSize: initialChildSize,
+        initialTab: initialTab,
       ),
     );
   }
@@ -273,6 +277,48 @@ void main() {
 
     expect(find.text('카페 아메리카노'), findsOneWidget);
     expect(find.text(RoutexTypography.keepWordsWhole('한 줄 소개')), findsNothing);
+  });
+
+  testWidgets('호출자가 지정한 메뉴 탭을 처음부터 보여 준다', (tester) async {
+    await tester.pumpWidget(
+      buildSubject(
+        initialTab: PlaceDetailTab.menu,
+        repository: _FakeRepository(
+          Future.value(
+            _detail(
+              sections: const [
+                {'type': 'summary', 'text': '한 줄 소개'},
+                {
+                  'type': 'menu',
+                  'items': [
+                    {'name': '카페 아메리카노'},
+                  ],
+                },
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('카페 아메리카노'), findsOneWidget);
+    expect(find.text(RoutexTypography.keepWordsWhole('한 줄 소개')), findsNothing);
+  });
+
+  testWidgets('호출자가 지정한 초기 높이를 시트에 적용한다', (tester) async {
+    await tester.pumpWidget(
+      buildSubject(
+        initialChildSize: 0.42,
+        repository: _FakeRepository(Future.value(_detailWithSummary())),
+      ),
+    );
+    await tester.pump();
+
+    final sheet = tester.widget<DraggableScrollableSheet>(
+      find.byType(DraggableScrollableSheet),
+    );
+    expect(sheet.initialChildSize, 0.42);
   });
 
   // 탭 하나짜리 탭 바는 아무것도 나누지 않으면서 자리만 차지한다.
