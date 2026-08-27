@@ -353,7 +353,10 @@ class IndoorGuidanceSession {
   /// 그래프·경로를 버리지 않는다 — 그것까지 버리면 다음 스냅샷이 올 때까지
   /// 화면이 컨텍스트 없는 상태로 남는다.
   void resetTracking() {
-    _corridor.reset();
+    // 층 이동으로 좌표만 새로 잡는 자리다. 학습해 둔 heading 보정각은
+    // 남긴다 — 같은 센서 세션이라 나침반 왜곡은 그대로다
+    // ([CorridorTrackingSession._carriedHeadingBiasDeg]).
+    _corridor.reset(keepHeadingBias: true);
     _snapshot = null;
     clearBoardingHold();
     _clearBoardingApproach();
@@ -391,7 +394,7 @@ class IndoorGuidanceSession {
     _graph = graph;
     if (floorLabels != null) _floorLabels = floorLabels;
     if (floorChanged) {
-      _corridor.reset();
+      _corridor.reset(keepHeadingBias: true);
       _snapshot = null;
       // 고정 지점은 **이전 층의 local m**이다. 같은 숫자가 새 층에서는 다른
       // 자리를 가리키므로 들고 가지 않는다. 조기 전환으로 목적 층 도면이 먼저
@@ -921,12 +924,27 @@ class IndoorGuidanceSession {
     } else {
       _verticalObservationHoldPointM = null;
     }
-    return EscalatorAltitudeOutcome(
+    final outcome = EscalatorAltitudeOutcome(
       started: _escalator.takeStartedTransition(),
       cancelled: _escalator.takeCancelledTransition(),
       confirmed: confirmed,
       events: _escalator.takeEvents(),
     );
+    // **탑승이 끝나면 세션이 스스로 고정을 푼다.** 예전에는 화면의
+    // `_endEscalatorRide`만 [clearBoardingHold]를 불렀는데, 그 호출이 빠지는 길이
+    // 실제로 여럿이다 — 도착 노드를 못 찾아 일찍 돌아가는 확정, 조기 전환 없이
+    // `landed`에서 바로 온 확정(그때는 화면의 탑승 상태가 비어 있어 공유 출구가
+    // 그대로 return한다), 전환이 겹쳐 `_applyingFloorTransition`에 막힌 확정,
+    // 화면이 이미 dispose된 확정. 그중 하나라도 걸리면 마커가 에스컬레이터
+    // 노드에 붙은 채 **영영** 남고, 사용자에게는 복구할 방법이 없다.
+    //
+    // 하차·취소는 판정기가 내는 종료 사건이고 고정을 소유하는 것도 이 세션이라,
+    // 푸는 자리도 여기가 맞다. 화면의 호출은 그대로 둔다(중복 호출은 무해하다).
+    if (outcome.confirmed != null || outcome.cancelled != null) {
+      clearBoardingHold();
+      _clearBoardingApproach();
+    }
+    return outcome;
   }
 
   void onRawMotion(RawMotionActivity activity) {
