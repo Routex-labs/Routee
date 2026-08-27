@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:indoor_pdr_core/indoor_pdr_core.dart';
 
 import '../../../domain/guidance/route_checkpoint.dart';
+import '../../../domain/guidance/route_approach_follower.dart';
 import '../../../domain/guidance/route_movement.dart';
 import '../../../domain/guidance/route_progress.dart';
 import '../../../models/building/building_graph.dart';
@@ -102,6 +103,36 @@ const boardingApproachVisibleSnapRadiusM = 1.5;
 /// 기다리면 marker가 실제 사용자보다 앞서 탑승점을 지나친 경우 다음 peak가
 /// "멀어짐"으로 읽혀 후보가 사라졌다. 첫 신뢰 가능한 근접 걸음에서 붙든다.
 const boardingApproachVisiblePeakCount = 1;
+
+/// 탑승점 직전의 남은 경로를 follower가 맡기 시작하는 반경.
+///
+/// follower는 시간으로 앞서 가지 않고 raw PDR 걸음만큼만 움직인다. 그래서
+/// 재탐색 안전망과 같은 16m부터 열어도 marker가 사람보다 앞서지 않는다. 이
+/// 범위 안에 두 번 이상 꺾이는 연결 간선이 있어도, 남은 polyline 전체를 순서대로
+/// 탄다.
+const routeApproachFollowerArmRadiusM = 16.0;
+
+/// follower를 처음 열 때 raw PDR가 경로에 있어야 하는 최대 거리.
+///
+/// 표시 matcher만 경로에 붙은 열린 공간의 U자 우회 경로는 따라가면 안 된다.
+/// 실제 복도 안에서 마지막 두 코너를 도는 상황은 raw PDR도 보통 2m 안에 남는다.
+const routeApproachFollowerSeedRawOffsetM = 2.0;
+
+/// follower 시작 시 raw PDR와 표시 matcher가 같은 경로 진행도에 있어야 하는
+/// 최대 차이.
+///
+/// U자 우회 경로에서는 raw PDR가 종점 직전 간선 곁을 스치더라도, matcher의
+/// 표시 위치는 그보다 한참 앞선 다른 구간에 남을 수 있다. 두 좌표가 같은
+/// polyline 진행도에 있을 때만 follower를 열어야 자유보행을 종점으로 끌지
+/// 않는다.
+const routeApproachFollowerSeedProgressToleranceM = 2.0;
+
+/// follower를 푸는 raw PDR의 경로 이탈 거리.
+///
+/// 마지막 코너의 heading mismatch는 위치 이탈이 아니므로 여기에는 방향을 넣지
+/// 않는다. 3m는 복도 폭·PDR 오차를 품되, 옆 복도로 실제로 들어간 경우는
+/// 연속 걸음에서 빠르게 잡는 값이다.
+const routeApproachFollowerDepartureRadiusM = 3.0;
 
 /// 고정 지점을 지금 위치 기준으로 다듬는다. 멀면 [currentM]을 그대로 쓴다.
 PdrLocalPoint? clampBoardingHold({
@@ -207,6 +238,18 @@ class IndoorGuidanceSession {
   bool _wasFollowingRouteIntoBoarding = false;
   bool _routeBoardingTerminalLocked = false;
 
+  /// 탑승점 직전에는 heading이 아닌 **걸음 거리**로 route polyline을 따른다.
+  ///
+  /// 탑승 감지는 기압·노드 근접을 합친 뒤늦은 신호다. 그 신호가 나서야 마지막
+  /// ㄱ자 간선을 그리기 시작하면 marker가 실제 사람보다 늦게 붙는다. 따라서
+  /// 다음 전이가 에스컬레이터로 확정된 동안 이 follower가 먼저 마지막 polyline을
+  /// 걷고, 명백한 이탈일 때만 버린다.
+  RouteApproachFollower? _routeApproachFollower;
+  String? _routeApproachFollowerNodeId;
+  final Set<int> _routeApproachFollowerPeakIds = <int>{};
+  PdrLocalPoint? _routeApproachFollowerLastRawM;
+  int _routeApproachFollowerDeparturePeaks = 0;
+
   /// 마지막으로 신뢰한 graph 위치에서 원시 PDR의 **이동 벡터만** 이어 붙인
   /// 탑승 접근 그림자. 화면에는 그리지 않고, 열린 공간에서 경로 간선을 잘라
   /// 에스컬레이터로 곧장 가는 경우의 근접 근거로만 쓴다.
@@ -248,6 +291,12 @@ class IndoorGuidanceSession {
   /// 탑승 감지 직전까지 이 경로를 정상 전진했는가. 진단·후보 선택에는 쓰되,
   /// 실제로 경로의 탑승 노드가 감지된 뒤 화면 활강을 막는 조건은 아니다.
   bool get wasFollowingRouteIntoBoarding => _wasFollowingRouteIntoBoarding;
+
+  /// 탑승점 직전 경로 follower가 marker 위치를 소유하는지.
+  ///
+  /// 화면은 `boardingDetected` 뒤의 시간 기반 보조 활강을 이 상태에서는 열지
+  /// 않는다. 이미 실제 걸음 속도로 같은 polyline을 걷고 있기 때문이다.
+  bool get isFollowingRouteBoarding => _routeApproachFollower != null;
 
   /// 화면 활강이 실제 탑승 노드에 닿았을 때 그 자리에 고정한다.
   ///
@@ -313,6 +362,7 @@ class IndoorGuidanceSession {
     _approachHoldPointM = null;
     _approachHoldEnteredAtMs = null;
     _routeBoardingTerminalLocked = false;
+    _clearRouteApproachFollower();
   }
 
   /// 접근 근거 자체를 버린다. [clearBoardingHold]와 나눈 이유는 **시간 상한** 때문이다 —
@@ -326,6 +376,7 @@ class IndoorGuidanceSession {
     _boardingApproachLastActivityConfirmedSteps = null;
     _clearBoardingApproachEvidence();
     _clearBoardingApproachShadow();
+    _clearRouteApproachFollower();
   }
 
   void _clearBoardingApproachEvidence() {
@@ -342,6 +393,14 @@ class IndoorGuidanceSession {
     _boardingApproachShadowLastRawM = null;
     _boardingApproachShadowNodeId = null;
     _boardingApproachShadowHeadingBiasDeg = null;
+  }
+
+  void _clearRouteApproachFollower() {
+    _routeApproachFollower = null;
+    _routeApproachFollowerNodeId = null;
+    _routeApproachFollowerPeakIds.clear();
+    _routeApproachFollowerLastRawM = null;
+    _routeApproachFollowerDeparturePeaks = 0;
   }
 
   /// 부착·층·경로는 그대로 두고 **보정만** 처음부터 다시 본다.
@@ -491,24 +550,31 @@ class IndoorGuidanceSession {
         route.pointsLocalM.isNotEmpty) {
       final routeEnd = route.pointsLocalM.last;
       final routeEndM = PdrLocalPoint(routeEnd.x, routeEnd.y);
-      if (_escalator.phase != EscalatorPhase.boardingDetected) {
-        final followingRoute = _followsExpectedBoardingApproach(
-          route: route,
-          graph: _graph,
-          result: result,
-        );
-        // 코너·교차점의 한 프레임은 어느 쪽에도 단정할 수 없다. 그때마다
-        // false로 뒤집으면 실제로 제대로 걸어온 사람도 마지막 탑승 감지에서
-        // 활강을 못 한다. 명백한 반대 방향/다른 복도로 확정된 경우에만 푼다.
-        if (followingRoute != null) {
-          _wasFollowingRouteIntoBoarding = followingRoute;
-        }
+      final followingRoute = _followsExpectedBoardingApproach(
+        route: route,
+        graph: _graph,
+        result: result,
+      );
+      // 코너·교차점의 한 프레임은 어느 쪽에도 단정할 수 없다. 그때마다 false로
+      // 뒤집으면 실제로 제대로 걸어온 사람도 마지막 탑승점에 못 붙는다.
+      if (followingRoute != null) {
+        _wasFollowingRouteIntoBoarding = followingRoute;
       }
-      routeApproachPositionM = _updateBoardingApproachShadow(
+      final followerPositionM = _updateRouteApproachFollower(
+        boardingNodeId: segment.transferFromNodeId!,
+        route: route,
+        routeEndM: routeEndM,
+        result: result,
+      );
+      final shadowPositionM = _updateBoardingApproachShadow(
         boardingNodeId: segment.transferFromNodeId!,
         routeEndM: routeEndM,
         result: result,
       );
+      // follower는 탑승 감지 결과가 아니라 raw PDR의 새 이동량으로만 전진한다.
+      // 따라서 이 상태에서는 그 route progress를 접근 거리에도 써야 matcher가
+      // 마지막 코너를 놓쳤다는 이유만으로 "탑승점에서 멀어짐"을 만들지 않는다.
+      routeApproachPositionM = followerPositionM ?? shadowPositionM;
       _escalator.onEscalatorRouteApproach(
         positionM: routeApproachPositionM,
         routeEndM: routeEndM,
@@ -528,6 +594,110 @@ class IndoorGuidanceSession {
       atMs: atMs,
       routeApproachPositionM: routeApproachPositionM,
     );
+  }
+
+  /// 탑승 감지보다 먼저 마지막 경로 polyline을 실제 걸음 거리만큼 진행한다.
+  ///
+  /// 센서 heading은 마지막 ㄱ자에서 늦게 돌아도 정상이라, follower의 진행·이탈
+  /// 판정에는 관여하지 않는다. raw PDR 위치가 경로 밖으로 연속 이탈하지 않는 한
+  /// 사용자가 0.7m 걸으면 marker도 polyline 위에서 정확히 0.7m 간다.
+  PdrLocalPoint? _updateRouteApproachFollower({
+    required String boardingNodeId,
+    required IndoorRoute route,
+    required PdrLocalPoint routeEndM,
+    required CorridorTrackingResult result,
+  }) {
+    final sameTarget = _routeApproachFollowerNodeId == boardingNodeId;
+    if (!sameTarget) _clearRouteApproachFollower();
+
+    var follower = _routeApproachFollower;
+    if (follower == null && route.pointsLocalM.length < 3) {
+      return null;
+    }
+    if (follower != null &&
+        follower.distanceToPolyline(result.rawPreviewPosition) >
+            routeApproachFollowerDepartureRadiusM) {
+      // 마지막 코너에서는 tracker가 한두 peak 동안 옆 간선을 1등으로 내기도
+      // 한다. 그 한 프레임이나 늦은 heading으로 follower를 풀면 다시 "5m
+      // 전에서 멈춤"으로 돌아간다. raw PDR 위치가 경로 밖인 상태가 연속될
+      // 때만 실제 이탈로 본다.
+      var sawNewPeak = false;
+      for (final step in result.optimisticStepAdvances) {
+        if (_routeApproachFollowerPeakIds.add(step.peakId)) sawNewPeak = true;
+      }
+      final distanceM = _takeRouteApproachFollowerDistance(result);
+      if (distanceM > 0.1 || sawNewPeak) {
+        _routeApproachFollowerDeparturePeaks++;
+        follower.advance(distanceM);
+      }
+      if (_routeApproachFollowerDeparturePeaks >= 3) {
+        _clearRouteApproachFollower();
+        return null;
+      }
+      return follower.position;
+    }
+    _routeApproachFollowerDeparturePeaks = 0;
+    if (follower == null) {
+      final withinApproach =
+          (routeEndM - result.matchedPreviewPosition).distance <=
+          routeApproachFollowerArmRadiusM;
+      if (!withinApproach ||
+          result.state == CorridorTrackingState.uncertain ||
+          result.leaderRelocated) {
+        return null;
+      }
+      follower = RouteApproachFollower.start(
+        points: route.pointsLocalM,
+        seed: result.previewPosition,
+      );
+      final rawFollower = RouteApproachFollower.start(
+        points: route.pointsLocalM,
+        seed: result.rawPreviewPosition,
+        maxSeedOffsetM: routeApproachFollowerSeedRawOffsetM,
+      );
+      // raw PDR가 우연히 종점 직전 간선 곁을 지나더라도, 표시 matcher와 경로
+      // 진행도가 다르면 열린 공간을 가로지르는 중이다. 둘이 같은 polyline
+      // 구간에 있을 때만 마지막 복도를 맡긴다.
+      if (follower == null ||
+          rawFollower == null ||
+          (rawFollower.progressM - follower.progressM).abs() >
+              routeApproachFollowerSeedProgressToleranceM) {
+        return null;
+      }
+      _routeApproachFollower = follower;
+      _routeApproachFollowerNodeId = boardingNodeId;
+      // 지금 snapshot의 peak는 seed 좌표에 이미 반영되어 있다. 같은 걸음을 한
+      // 번 더 더하면 follower가 실제 사람보다 한 걸음 앞서므로, 다음 snapshot부터
+      // 새 peak만 소비한다.
+      _routeApproachFollowerPeakIds.addAll(
+        result.optimisticStepAdvances.map((step) => step.peakId),
+      );
+      _routeApproachFollowerLastRawM = result.rawPreviewPosition;
+      return follower.position;
+    }
+
+    follower.advance(_takeRouteApproachFollowerDistance(result));
+    return follower.position;
+  }
+
+  /// matcher가 마지막 코너의 peak를 불확실하다고 버려도 사용자의 보행 자체는
+  /// 사라지지 않는다. follower는 그 구간에서 raw PDR 좌표의 연속 이동량을
+  /// 우선해 진행한다. raw 좌표가 같은 프레임에는 tracker가 새로 받아들인
+  /// optimistic step 거리만 보조로 쓴다.
+  double _takeRouteApproachFollowerDistance(CorridorTrackingResult result) {
+    final previousRawM = _routeApproachFollowerLastRawM;
+    _routeApproachFollowerLastRawM = result.rawPreviewPosition;
+    if (previousRawM != null) {
+      final rawDistanceM = (result.rawPreviewPosition - previousRawM).distance;
+      if (rawDistanceM > 0.02) return rawDistanceM;
+    }
+    var fallbackDistanceM = 0.0;
+    for (final step in result.optimisticStepAdvances) {
+      if (_routeApproachFollowerPeakIds.add(step.peakId)) {
+        fallbackDistanceM += step.distanceM;
+      }
+    }
+    return fallbackDistanceM;
   }
 
   /// 마지막 탑승점으로 가는 경로와 **명백히 반대인가**를 가린다.
@@ -717,6 +887,21 @@ class IndoorGuidanceSession {
       return;
     }
     _boardingApproachGateOpen = true;
+    // follower가 실제 걸음 거리로 route terminal까지 도착한 뒤에는 그 자리가
+    // 곧 탑승점이다. `boardingDetected`가 이미 떠 있다면 더 이상 다음 peak를
+    // 기다려 마지막 노드에서 풀릴 이유가 없으므로, 여기서만 노드 hold로 넘긴다.
+    // 감지 반경 안이라는 이유만으로는 절대 이 hold를 만들지 않는다.
+    if (_escalator.phase == EscalatorPhase.boardingDetected &&
+        _routeApproachFollower?.isAtTerminal == true) {
+      _approachHoldPointM = holdPoint;
+      _approachHoldEnteredAtMs = atMs;
+      return;
+    }
+    // 3m 근접 감지는 follower가 마지막 간선을 다 걷기 전에 들어올 수 있다.
+    // 이때 기존 evidence hold를 열면 현재 marker(-몇 m)를 고정해 버려 follower가
+    // 뒤에서 계속 진행해도 화면에는 보이지 않는다. terminal 도착 위 분기만
+    // 고정을 만들고, 그 전에는 follower가 표시 위치를 계속 소유한다.
+    if (_routeApproachFollower != null) return;
     // 탑승 전의 근접만으로는 위치를 붙들지 않는다. 3m 감지가 실제로 난
     // 순간의 표시 위치를 활강 시작점으로 써야 마지막 직각 간선이 살아 있다.
     if (_escalator.phase != EscalatorPhase.boardingDetected) return;
@@ -939,13 +1124,14 @@ class IndoorGuidanceSession {
     if (!_attached) return const [];
     final changes = _escalator.takePhaseChanges();
     for (final change in changes) {
-      final currentM = _corridor.result?.previewPosition;
+      final currentM =
+          _routeApproachFollower?.position ?? _corridor.result?.previewPosition;
       switch (change.phase) {
         case EscalatorPhase.boardingDetected:
-          // 3m 반경의 탑승 판정은 노드보다 앞에서 날 수 있다. 기존처럼 이
-          // 위치를 잠시 고정하되, 화면은 이 지점에서 남은 경로 polyline을 따라
-          // 탑승 노드까지 별도 활강한다. 활강이 끝나야 실제 노드 lock으로 바뀐다.
-          if (_boardingApproachGateOpen) {
+          // 3m 반경의 탑승 판정은 노드보다 앞에서 날 수 있다. route follower가
+          // 마지막 간선을 걷는 중이면 이 신호로 멈추지 않는다. 실제 다음 PDR
+          // peak가 marker를 같은 속도로 노드까지 보내야 한다.
+          if (_boardingApproachGateOpen && _routeApproachFollower == null) {
             _boardingHoldPointM =
                 _approachHoldPointM ??
                 _visibleBoardingHold(
@@ -1044,6 +1230,7 @@ class IndoorGuidanceSession {
               _boardingHoldPointM ??
               _verticalObservationHoldPointM ??
               _approachHoldPointM ??
+              _routeApproachFollower?.position ??
               result.previewPosition,
           source: GuidancePositionSource.tracked,
           headingDeg: _floorHeadingDeg(anchor),

@@ -323,6 +323,35 @@ PdrSnapshot _walkedNorth(int steps) {
   );
 }
 
+/// 마지막 가로 에스컬레이터 연결 간선에 들어섰지만, 나침반은 아직 세로 복도
+/// 방향을 보고 있는 실측 모양. 위치 polyline은 실제 ㄱ자로 꺾였고 heading만
+/// 늦는다.
+PdrSnapshot _walkedVestibuleWithLateHeading(int steps) {
+  final path = [
+    for (var index = 0; index <= steps; index += 1)
+      index <= 10
+          ? PdrLocalPoint(0, index * 0.7)
+          : PdrLocalPoint(-(index - 10) * 0.7, 7),
+  ];
+  return PdrSnapshot(
+    position: path.last,
+    path: path,
+    steps: steps,
+    distanceM: steps * 0.7,
+    orientationHeadingDeg: 0,
+    walkingHeadingDeg: 0,
+    hasHeading: true,
+    preview: PdrPreview(
+      position: path.last,
+      path: path,
+      steps: steps,
+      distanceM: steps * 0.7,
+      acceptedPeakTimesMs: List<int?>.filled(path.length, null),
+    ),
+    quality: _quality,
+  );
+}
+
 const _anchor = PdrAnchor(
   floorId: '1F',
   anchorLocalM: PdrLocalPoint(0, 0),
@@ -585,6 +614,22 @@ void main() {
       );
       expect(session.position!.localM.eastM, closeTo(-3.4, 0.1));
       expect(session.position!.localM.northM, closeTo(7, 0.1));
+    });
+
+    test('마지막 ㄱ자에서 heading이 늦어도 걸음 속도로 탑승 노드까지 따른다', () {
+      final session = vestibuleEscalatorSession();
+      for (var step = 0; step <= 15; step++) {
+        final atMs = 1000 + step * 500;
+        final result = session.onSnapshot(
+          _walkedVestibuleWithLateHeading(step),
+          timestampMs: atMs,
+        );
+        session.updateProgress(result, previewSteps: step, nowMs: atMs);
+      }
+
+      expect(session.isFollowingRouteBoarding, isTrue);
+      expect(session.position!.localM.eastM, closeTo(-3.4, 0.15));
+      expect(session.position!.localM.northM, closeTo(7, 0.15));
     });
 
     test('같은 전실을 지나도 경로가 에스컬레이터 탑승을 지목하지 않으면 붙들지 않는다', () {

@@ -5,7 +5,7 @@ class CorridorTrackerConfig {
     this.progressBucketM = 1.5,
     this.transitionPenaltyDegM = 3,
     this.deadEndPenaltyDeg = 90,
-    this.reverseTriggerDeg = 170,
+    this.reverseTriggerDeg = 115,
     this.absoluteErrorWeight = 0.25,
     this.costHorizonM = 25,
     this.maxSegmentErrorDeg = 60,
@@ -50,11 +50,11 @@ class CorridorTrackerConfig {
   /// 크게 벌점만 줘서, 다른 가설이 없을 때도 위치가 멈추지 않게 한다.
   final double deadEndPenaltyDeg;
 
-  /// 관측 방향이 현재 진행 방향과 거의 정반대일 때만 유턴 가설을 함께 만든다.
+  /// 관측 방향이 현재 진행 방향과 이만큼 어긋나면 유턴 가설을 함께 만든다.
   ///
-  /// 탑승점 앞의 ㄱ자·가로 연결 간선은 실제 몸/센서 heading이 90도 이상 늦게
-  /// 돌아도 정상 경로일 수 있다. 그 상태를 이탈로 만들지 않도록 180도에 가깝게
-  /// 둔다.
+  /// 이 값은 복도 matcher 전체의 실제 유턴 안전장치다. 탑승점 직전의 늦은
+  /// heading은 이 값을 전역으로 완화하지 않고, 경로 follower가 이미 선택된
+  /// polyline을 걸음 거리로 따르도록 처리한다.
   final double reverseTriggerDeg;
 
   /// 비용에서 절대 방위 오차가 차지하는 비중. 나머지는 형태(방위 변화) 오차다.

@@ -383,6 +383,9 @@ extension OutdoorMapEscalator on OutdoorMapBodyState {
   /// 한 프레임 판정보다 그 전이를 우선해 현재 보이는 자리부터 남은 경로
   /// polyline을 따라 실제 탑승 노드에 도착시킨다.
   void _startBoardingApproachGlide(EscalatorPhaseChange change) {
+    // route follower가 이미 실제 PDR 걸음 거리로 이 polyline을 걷는 중이다.
+    // 같은 구간을 시간 기반으로 한 번 더 재생하면 marker가 사람보다 앞서 간다.
+    if (_guidance.isFollowingRouteBoarding) return;
     if (_boardingApproachGlide != null) return;
     final route = _indoorRouteSegment;
     final nodeId = change.boardingNodeId;
