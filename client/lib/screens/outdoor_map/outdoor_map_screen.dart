@@ -1026,6 +1026,16 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   /// ([OutdoorMapElevator._resumeStepsAfterRide]).
   bool _stepsPausedForRide = false;
 
+  /// 사용자가 **출발점을 직접 지정**했다(하단 바 "위치 지정"·출발지 매장).
+  ///
+  /// 지정한 자리는 "지금 여기 서 있다"는 선언이라, `안내 시작`을 누르기 전까지
+  /// 걸음이 그 자리를 밀고 나가면 안 된다. 그 보류를 거는 조건의 절반이고,
+  /// 나머지 절반은 [_guidanceStarted]다([OutdoorMapPdr._syncStepHoldBeforeStart]).
+  ///
+  /// **GPS 자동 진입은 여기 들지 않는다.** 그쪽 앵커는 문을 걸어서 지나는 중에
+  /// 찍히므로, 그 순간부터 사용자는 이미 걷고 있다.
+  bool _startPinnedByUser = false;
+
   /// 엘리베이터 층 이동 판정기. 에스컬레이터 판정기(`_guidance.escalator`)와
   /// **따로 둔다** — 확정 근거가 다르고(에스컬레이터는 반 층, 엘리베이터는
   /// 내려서 걷기 시작한 순간), 한 상태기에 섞으면 어느 쪽이 걸음을 멈췄는지

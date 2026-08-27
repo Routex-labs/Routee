@@ -66,6 +66,15 @@ class IndoorNavigationDriver implements IndoorNavigationController {
   AltimeterStatus _altimeterStatus = const AltimeterStatus.unavailable();
 
   PdrSnapshot? _current;
+
+  // 걸음을 위치에 쌓지 않는 **사유**들. 하나라도 서 있으면 멈춘다.
+  //
+  // 세지 않고 사유로 두는 이유는 둘이 서로를 풀지 못하게 하기 위해서다 —
+  // 횟수라면 먼저 끝난 쪽이 아직 붙들고 있는 쪽까지 풀어 버린다. 사유가 이름을
+  // 갖고 있으면 각자 자기 것만 내린다.
+  bool _rideHoldsSteps = false;
+  bool _startHoldsSteps = false;
+
   CalibrationStatus _calib = const CalibrationStatus.uncalibrated();
   PdrRuntimeStatus _runtimeStatus = const PdrRuntimeStatus.idle();
   Map<String, Object?>? _lastPedometerFinalizeInfo;
@@ -134,7 +143,14 @@ class IndoorNavigationDriver implements IndoorNavigationController {
     _floorId = floorId;
     _guiding = true;
     _backgrounded = false;
+    // 지난 세션이 남긴 보류 사유는 여기서 끝난다. 남기면 새 세션이 시작부터
+    // 걸음이 멈춘 채로 서고, 사용자에게는 되돌릴 문이 없다.
+    _rideHoldsSteps = false;
+    _startHoldsSteps = false;
     _session.reset();
+    // reset은 tracking 플래그를 건드리지 않는다. 사유를 비운 것을 세션에도
+    // 반영해야 직전 세션에서 멈춰 둔 걸음이 다시 흐른다.
+    _applyStepTracking();
     _updateRuntime(PdrRuntimeState.starting);
     _eventSub ??= _source.events.listen(
       _onNativeEvent,
@@ -163,6 +179,8 @@ class IndoorNavigationDriver implements IndoorNavigationController {
     }
     _guiding = false;
     _backgrounded = false;
+    _rideHoldsSteps = false;
+    _startHoldsSteps = false;
     _updateRuntime(PdrRuntimeState.stopping);
     try {
       // stop 전에 native가 보유한 마지막 STEP_COUNTER/CMPedometer 상태를
@@ -355,14 +373,44 @@ class IndoorNavigationDriver implements IndoorNavigationController {
   Future<void> pauseStepTracking() async {
     // background pause와 달리 native source는 건드리지 않는다. 하차 판정의
     // 근거인 기압과 방향이 계속 들어와야 한다.
-    if (!_guiding || _backgrounded) return;
-    _session.pause(atMs: _session.lastMotionAtMs ?? _nowMs());
+    if (!_guiding) return;
+    _rideHoldsSteps = true;
+    _applyStepTracking();
   }
 
   @override
   Future<void> resumeStepTracking() async {
+    if (!_guiding) return;
+    _rideHoldsSteps = false;
+    _applyStepTracking();
+  }
+
+  /// 안내 시작 전 보류가 지금 서 있는가. **화면 배선을 확인하는 자리다** —
+  /// 마커가 멈춰 있다는 사실은 지도 레이어 픽셀에만 남아 위젯 트리에서 볼 수
+  /// 없어서, 그 유일한 근거인 이 값을 대신 본다.
+  @visibleForTesting
+  bool get stepsHeldBeforeStart => _startHoldsSteps;
+
+  @override
+  Future<void> setStepsHeldBeforeStart({required bool held}) async {
+    if (!_guiding || _startHoldsSteps == held) return;
+    _startHoldsSteps = held;
+    _applyStepTracking();
+  }
+
+  /// 사유들을 세션의 tracking 한 값으로 접는다.
+  ///
+  /// **background에서는 손대지 않는다** — 그쪽은 이미 멈춰 있고, 여기서 다시
+  /// 켜면 화면에 없는 동안의 걸음이 위치에 쌓인다. 대신 사유는 그대로 기록해
+  /// 두므로, 앞으로 돌아올 때 아직 유효한 보류가 그대로 이어진다.
+  void _applyStepTracking() {
     if (!_guiding || _backgrounded) return;
-    _session.resume(atMs: _session.lastMotionAtMs ?? _nowMs());
+    final atMs = _session.lastMotionAtMs ?? _nowMs();
+    if (_rideHoldsSteps || _startHoldsSteps) {
+      _session.pause(atMs: atMs);
+    } else {
+      _session.resume(atMs: atMs);
+    }
   }
 
   // ── 앱 lifecycle (앱 셸이 호출) ──
@@ -400,8 +448,10 @@ class IndoorNavigationDriver implements IndoorNavigationController {
     }
     try {
       await _source.start();
-      _session.resume(atMs: _session.lastMotionAtMs ?? _nowMs());
       _backgrounded = false;
+      // 무조건 재개하지 않는다. 탑승 중이거나 아직 `안내 시작` 전이면, 앱을
+      // 다녀온 것이 그 보류를 대신 풀어 주는 일이 되어서는 안 된다.
+      _applyStepTracking();
       _updateRuntime(PdrRuntimeState.starting);
     } on Object {
       _updateRuntime(

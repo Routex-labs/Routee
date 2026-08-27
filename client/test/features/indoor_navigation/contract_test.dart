@@ -122,6 +122,10 @@ class FakeIndoorNavigation implements IndoorNavigationController {
   Future<void> resumeStepTracking() async => log.add('resumeSteps');
 
   @override
+  Future<void> setStepsHeldBeforeStart({required bool held}) async =>
+      log.add('holdSteps:$held');
+
+  @override
   Future<void> onAppBackgrounded() async => log.add('backgrounded');
 
   @override

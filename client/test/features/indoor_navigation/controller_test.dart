@@ -89,10 +89,11 @@ Map<String, Object?> pedometerEvent({
   required int endMs,
   required double distanceM,
   List<double>? peaks,
+  int sessionId = 1,
 }) => {
   'source': 'ios_core_motion',
   'kind': 'pedometer',
-  'stepSessionId': 1,
+  'stepSessionId': sessionId,
   'steps': steps,
   'pedometerSessionStartMs': sessionStartMs,
   'pedometerTimestamp': endMs.toDouble(),
@@ -652,5 +653,156 @@ void main() {
 
     expect(driver.currentFloorId, 'F2');
     expect(driver.currentCalibration.anchor?.floorId, 'F2');
+  });
+
+  group('안내 시작 전 걸음 보류', () {
+    /// 출발점을 찍고 `안내 시작`을 누르기 직전까지의 상태를 만든다.
+    Future<void> pinStartAndHold() async {
+      await driver.startGuidance(floorId: 'F1');
+      source.emitRaw(motionEvent(tMs: 1000, heading: 0));
+      await settle();
+      await driver.confirmAnchorByPin(floorPointM: const PdrLocalPoint(0, 0));
+      await driver.setStepsHeldBeforeStart(held: true);
+    }
+
+    test('붙드는 동안에는 센서가 흘러도 위치가 움직이지 않는다', () async {
+      await pinStartAndHold();
+
+      source.emitRaw(
+        motionEvent(
+          tMs: 2000,
+          heading: 0,
+          stepPeakCount: 3,
+          latestStepPeakMs: 2000,
+        ),
+      );
+      source.emitRaw(
+        pedometerEvent(
+          steps: 6,
+          sessionStartMs: 900,
+          endMs: 3000,
+          distanceM: 4.2,
+          peaks: [1500, 2000, 2500],
+        ),
+      );
+      await settle();
+
+      expect(driver.currentSnapshot!.steps, 0);
+      expect(driver.currentSnapshot!.preview.steps, 0);
+      expect(driver.currentSnapshot!.path, [PdrLocalPoint.zero]);
+      // 붙드는 것은 걸음뿐이다 — 방위는 계속 따라가야 마커 삼각형이 제자리에서
+      // 돈다.
+      expect(driver.currentSnapshot!.hasHeading, isTrue);
+    });
+
+    test('안내를 시작하면 그동안의 몫 없이 지금부터 걷는다', () async {
+      await pinStartAndHold();
+
+      source.emitRaw(
+        motionEvent(
+          tMs: 2000,
+          heading: 0,
+          stepPeakCount: 3,
+          latestStepPeakMs: 2000,
+        ),
+      );
+      source.emitRaw(
+        pedometerEvent(
+          steps: 6,
+          sessionStartMs: 900,
+          endMs: 3000,
+          distanceM: 4.2,
+          peaks: [1500, 2000, 2500],
+        ),
+      );
+      await settle();
+
+      // `안내 시작`을 누른 순간.
+      source.emitRaw(motionEvent(tMs: 4000, heading: 0));
+      await settle();
+      await driver.setStepsHeldBeforeStart(held: false);
+
+      // 시작 뒤의 두 걸음. 누적 카운터는 8이지만 실리는 것은 이 둘뿐이다.
+      source.emitRaw(
+        pedometerEvent(
+          steps: 8,
+          sessionStartMs: 900,
+          endMs: 5200,
+          distanceM: 5.6,
+          peaks: [4500, 5000],
+        ),
+      );
+      await settle();
+
+      expect(
+        driver.currentSnapshot!.steps,
+        2,
+        reason: '멈춰 있던 동안의 걸음은 버린다 — 모아 뒀다 한 번에 풀면 마커가 튄다',
+      );
+    });
+
+    test('탑승 보류와 시작 보류는 서로를 풀지 않는다', () async {
+      await pinStartAndHold();
+      await driver.pauseStepTracking();
+
+      // 하차했지만 아직 `안내 시작`을 누르지 않았다.
+      await driver.resumeStepTracking();
+      source.emitRaw(
+        motionEvent(
+          tMs: 2000,
+          heading: 0,
+          stepPeakCount: 2,
+          latestStepPeakMs: 2000,
+        ),
+      );
+      source.emitRaw(
+        pedometerEvent(
+          steps: 4,
+          sessionStartMs: 900,
+          endMs: 3000,
+          distanceM: 2.8,
+          peaks: [1500, 2500],
+        ),
+      );
+      await settle();
+      expect(driver.currentSnapshot!.steps, 0);
+
+      // 반대쪽도 같다 — 안내를 시작해도 타는 중이면 걸음은 하차까지 멈춘다.
+      await driver.pauseStepTracking();
+      await driver.setStepsHeldBeforeStart(held: false);
+      source.emitRaw(
+        pedometerEvent(
+          steps: 8,
+          sessionStartMs: 900,
+          endMs: 4000,
+          distanceM: 5.6,
+          peaks: [3200, 3600],
+        ),
+      );
+      await settle();
+      expect(driver.currentSnapshot!.steps, 0);
+    });
+
+    test('새 세션은 지난 보류를 물려받지 않는다', () async {
+      await pinStartAndHold();
+      await driver.stopGuidance();
+
+      await driver.startGuidance(floorId: 'F1');
+      source.emitRaw(motionEvent(tMs: 5000, heading: 0));
+      // 새 세션은 native step-session도 새로 연다([FakePdrMotionSource]).
+      source.emitRaw(
+        pedometerEvent(
+          sessionId: 2,
+          steps: 3,
+          sessionStartMs: 4900,
+          endMs: 6000,
+          distanceM: 2.1,
+          peaks: [5200, 5600, 5900],
+        ),
+      );
+      await settle();
+
+      expect(driver.currentSnapshot!.steps, 3);
+    });
   });
 }

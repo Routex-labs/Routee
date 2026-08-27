@@ -245,6 +245,10 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
       _indoorRoutePreviewOrigin = null;
       _guidanceStarted = true;
     });
+    // **여기서부터 걸음이 위치를 민다.** 지정한 출발점에 세워 두던 보류를 푸는
+    // 유일한 자리다([_syncStepHoldBeforeStart]). 붙드는 동안의 걸음은 버려
+    // 왔으므로, 푸는 순간 그동안의 몫이 한꺼번에 실리지 않는다.
+    _syncStepHoldBeforeStart();
     final floor = origin?.floor;
     final nodeId = origin?.nodeId;
     if (origin != null && nodeId != null && floor != null && floor.isNotEmpty) {
@@ -342,6 +346,9 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
     setState(() {
       _guidanceStarted = true;
     });
+    // 실내 갈래와 같은 약속이다 — 시작을 누른 순간부터 걸음이 위치를 민다.
+    // 문 경유 여정은 이쪽으로 들어와 건물 안에서 출발한다.
+    _syncStepHoldBeforeStart();
     _notifyRouteStateIfChanged();
     // **문 경유 여정은 여기서 도면 층을 되돌린다.** 계획 화면은 목적지 매장을
     // 보여 주느라 그 매장 층을 펴 두는데([_focusIndoorJourneyDestination]),

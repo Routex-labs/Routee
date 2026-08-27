@@ -980,6 +980,7 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
 
   void _syncCorridorTracking(PdrSnapshot? snapshot) {
     if (_indoorEntered) _ensureGuidanceAttached();
+    _syncStepHoldBeforeStart();
     _maybeFlipAnchorAxis();
     _guidance
       ..setContext(
@@ -1041,6 +1042,12 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     bool announceFailure = false,
     bool forceFreshHeading = false,
   }) async {
+    // 기준점을 다시 잡는 자리다. 직전에 지정해 둔 출발점은 여기서 효력을
+    // 잃는다 — 이어서 [_confirmPdrAnchor]가 새로 찍으면 그때 다시 선다.
+    // 안 비우면 걸어 들어와 자동으로 앵커를 받은 사용자까지 걸음이 멈춘 채로
+    // 남는다(그쪽은 [_confirmPdrAnchor]를 지나지 않는다).
+    _startPinnedByUser = false;
+    _syncStepHoldBeforeStart();
     // 아래 사다리는 전부 "지금 세션 상태"를 읽어 갈린다. 정지가 아직 도는 중이면
     // 그 상태가 거짓말을 한다([PdrSessionLifecycle.awaitStop]).
     await _pdrLifecycle.awaitStop();
@@ -1248,6 +1255,22 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     await _confirmPdrAnchor(snapped.point);
   }
 
+  /// 안내 시작 전 걸음 보류를 지금 상태에 맞춘다. **보류의 단일 출구**다.
+  ///
+  /// 조건이 두 값에서 나오므로([_startPinnedByUser]·[_guidanceStarted]) 둘 중
+  /// 하나가 바뀌는 자리는 전부 여기를 지난다. 스냅샷마다도 한 번 지나가는데
+  /// ([_syncCorridorTracking]), 그 자리가 없으면 안내를 끝내고 계획 화면으로
+  /// 돌아온 화면처럼 조건만 바뀌고 부르는 사람이 없는 갈래가 남는다.
+  ///
+  /// 드라이버가 같은 값이면 되돌아가므로 몇 번을 불러도 상관없다.
+  void _syncStepHoldBeforeStart() {
+    unawaited(
+      indoorNavigationDriver.setStepsHeldBeforeStart(
+        held: _startPinnedByUser && !_guidanceStarted,
+      ),
+    );
+  }
+
   /// [notifyLocationChanged]는 "사용자의 현재 위치가 새로 잡혔다"를 상위에
   /// 알릴지다. 기본은 알린다 — 지도 탭·입구 자동 배치처럼 **새 위치가 생긴**
   /// 경우이기 때문이다. 출발지 매장을 따라 찍는 경우([_anchorAtStoreOrigin])만
@@ -1257,6 +1280,11 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     PdrLocalPoint floorPoint, {
     bool notifyLocationChanged = true,
   }) async {
+    // **찍은 그 순간부터 붙든다.** 아래 확정 절차에는 await가 몇 개 있고, 그
+    // 사이에 들어온 걸음도 사용자가 보기에는 "안내를 시작하지도 않았는데 움직인
+    // 위치"다([_syncStepHoldBeforeStart]).
+    _startPinnedByUser = true;
+    _syncStepHoldBeforeStart();
     final graph = _floorGraph;
     final axes = graph == null
         ? const PdrToFloorAxes.identity()
@@ -1319,6 +1347,9 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
   /// 같은 계약).
   Future<void> _cancelPdrAnchor() async {
     if (!_placingPdrAnchor) return;
+    // 지정을 접었으니 붙들 근거도 없다. 세션이 곧 멈춰 스냅샷이 끊기므로,
+    // 여기서 안 비우면 다음 세션의 첫 스냅샷이 낡은 값을 보고 걸음을 붙든다.
+    _startPinnedByUser = false;
     await indoorNavigationDriver.stopGuidance();
     _pdrDebugRecorder?.recordPedometerFinalize(
       indoorNavigationDriver.lastPedometerFinalizeInfo,

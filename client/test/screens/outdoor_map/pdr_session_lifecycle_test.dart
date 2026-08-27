@@ -264,6 +264,9 @@ class _FakeDriver implements IndoorNavigationController {
   Future<void> resumeStepTracking() async {}
 
   @override
+  Future<void> setStepsHeldBeforeStart({required bool held}) async {}
+
+  @override
   Future<void> onAppBackgrounded() async {}
 
   @override
