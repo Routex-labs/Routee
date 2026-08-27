@@ -40,7 +40,7 @@
 | 조기 안전 고정 | 경로 탑승 후보 + 같은 방향 수직 속도 1초 | 현재 표시 위치 고정과 탑승 노드 ID 잠금만 해제 |
 | 걸음 pause·마커 정지 | 근접 **또는** 누적 Δ `visibleVerticalDeltaM` | 걸음이 다시 흐를 뿐 |
 | 도면 교체 | 허가 + 램프 일관성 + 누적 Δ `mapSwapDeltaM` | **되돌릴 수 없다** |
-| 하차 확정 | 수직 속도 감소 + 유지 시간 | baseline 재설정 |
+| 하차 확정 | 수직 속도 감소 + 유지 시간 | baseline 재설정 · **모든 고정 해제** |
 
 판정은 두 겹이다. 1차(수직 속도가 잡힘)는 **활성 경로가 지목한 탑승 후보가 있을 때만**
 그 순간 표시 위치와 정확한 탑승·도착 노드 ID를 잠근다. 노드로 스냅하거나 배너·걸음 pause·
@@ -123,6 +123,7 @@ graph 간선은 보행 가능한 대표선이지 사람이 반드시 밟는 레�
 | 위치 고정(걸기) | `boardingApproachVisiblePeakCount` 1회 또는 탑승 노드 통과 | preview 사건이 없는 confirmed-only 배치는 같은 간선·진행 부호를 확인한 확정 걸음으로 대체한다. 고정을 걸 때 노드까지 1.5m 안이면 노드에 붙이고, 그 밖이면 순간이동시키지 않고 **현재 보이는 위치**를 붙든다 |
 | 조기 위치·대상 잠금 | 경로 후보 기준 방향성 누적 `minVisibleRiseM` 0.5m **또는** `minVerticalSpeedMps` 0.12m/s가 `verticalMotionMinMs` 1초 지속 | 둘은 서로의 선행 조건이 아니다. 누적 고도는 에스컬레이터를 걸어 올라 속도가 고르지 않아도 잡고, 속도는 중앙값 고도가 늦을 때 표시 위치를 먼저 붙든다. 최초 탑승·도착 ID도 같이 잠가 재탐색이 반대 레인을 넣지 못하게 한다. 경로 기반 0.5m 잠금은 속도가 평평해져도 유지하고, 시작 고도의 절반 문턱 안까지 실제로 되돌아온 뒤에만 취소한다 |
 | 위치 고정(풀기) | `boardingAbandonRadiusM` 8m + `boardingAbandonGraceMs` 15초 | 고정 진입보다 넓게 풀고, 탑승 직후에는 느린 기압 신호가 이어받을 시간을 둔다. 유예 뒤에도 수직 근거 없이 멀어지면 에스컬레이터를 타지 않고 통과한 것으로 본다 |
+| 위치 고정(끝내기) | 하차 확정 또는 취소 | 거리·시간과 **무관한** 종료 사건이다. 고정을 소유하는 `IndoorGuidanceSession`이 `onAltitude`에서 직접 푼다 — 예전에는 화면의 `_endEscalatorRide` 하나뿐이라, 그 호출이 빠지는 길(도착 노드 미발견, 조기 전환 없는 확정, 전환 겹침, dispose)에서 마커가 노드에 **영영** 붙어 있었다 |
 | 시간 탈출구 | `boardingPhaseTimeoutMs` 40초 무동작 | 반경 안에 머물러도 새 걸음이 40초 없으면 약한 후보와 고정을 접는다. 천천히 걷는 동안에는 걸음마다 갱신된다. 1차 수직 신호가 이어받거나 강한 수직 단계가 되면 이 탈출구의 대상이 아니다 |
 
 **탈출구가 둘인 이유**는 탑승점 앞에 섰다가 그냥 지나쳐 걸어가는 사람 때문이다. 거리
@@ -263,3 +264,5 @@ baseline은 기상 드리프트를 천천히 따라가지만, **지금 실제로
 | 로그 스키마(`altimeter_samples`·`floor_transition_events`) | [pdr-dev-integration.md](../pdr/pdr-dev-integration.md) |
 | 현장 검증 절차 | [field-verification-thehyundai.md](field-verification-thehyundai.md) 03 |
 | 검증 기준(합성 기압 시계열) | `client/test/features/indoor_navigation/escalator_transition_detector_test.dart` |
+| 하차가 고정을 푸는 계약 | `client/test/features/indoor_navigation/escalator_landing_release_test.dart` |
+| 탑승·하차 중 마커 방향 | [android-heading-drift.md](android-heading-drift.md) 「보정각은 층을 갈아타도 이어진다」 |
