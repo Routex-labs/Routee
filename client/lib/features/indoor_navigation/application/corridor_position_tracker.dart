@@ -232,10 +232,15 @@ class CorridorPositionTracker {
     int initialConfirmedSteps = 0,
     double initialConfirmedDistanceM = 0,
     int initialPreviewSteps = 0,
+    double initialHeadingBiasDeg = 0,
   }) {
     _sensorHeadingDeg = normalizeBearing(initialHeadingDeg);
     _headingCorrectionState = HeadingCorrectionState.learning;
-    _learningHeadingBiasDeg = 0;
+    // 물려받은 보정각은 **학습값으로만** 놓는다. 잠그지 않으므로 새 층에서 다시
+    // 근거가 쌓이면 그대로 다듬어지고, 층 frame이 정말 다르면 원래 필요했던
+    // 7m 안에 제자리를 찾는다. 0으로 시작하는 쪽이 언제나 나쁘다 — 그때는
+    // 학습해 둔 각(최대 60°)이 한 프레임에 통째로 사라져 삼각형이 튄다.
+    _learningHeadingBiasDeg = initialHeadingBiasDeg;
     _lockedHeadingCorrectionDeg = null;
     _resetHeadingEvidence();
     _lastConfirmedSteps = initialConfirmedSteps;

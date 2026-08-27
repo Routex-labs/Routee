@@ -253,6 +253,19 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
   /// 아직 없는 동안에는 [_indoorGapGpsPoint]를 **흐리게** 그린다. 셋 중 무엇을
   /// 고르는지는 [indoorMarkerAt] 하나가 정한다 — 소스가 하나뿐이라 화면 위의
   /// 점도 항상 하나다.
+  /// 활강이 정해 주는 마커 방향. 활강이 없거나 방향을 못 뽑으면 null.
+  ///
+  /// **마커 방향을 쓰는 두 자리가 이 하나를 본다** — 스냅샷 갱신
+  /// ([_syncPdrCurrentLayer])과 33Hz 방향 스트림([_onPdrHeading]). 두 곳이 각자
+  /// 판단하면 촘촘한 쪽이 늘 이겨서, 활강용으로 고른 방향이 매 틱 나침반으로
+  /// 덮인다(에스컬레이터에서 삼각형이 돌던 원인).
+  double? get _glideHeadingDeg =>
+      _escalatorGlide?.headingAtProgress(_escalatorGlideProgress.value) ??
+      _boardingApproachGlide?.headingAtProgress(_boardingApproachGlideProgress);
+
+  /// 지금 마커 방향의 주인이 활강인가.
+  bool get _markerHeadingOwnedByGlide => _glideHeadingDeg != null;
+
   Future<void> _syncPdrCurrentLayer({bool snap = false}) {
     // **두 마커는 서로의 반대쪽이라 함께 뒤집힌다.** 실내 쪽만 다시 그리는
     // 자리(앵커 확정·층 전환)에서 GPS 마커를 그대로 두면, 같은 사람 자리에
@@ -284,14 +297,9 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     // 활강은 경로가 마커의 위치를 결정하는 특수 상태다. 이때 PDR 머리를
     // 그대로 쓰면 점은 간선을 타는데 삼각형만 옆/뒤를 바라본다. 따라서
     // 현재 지나고 있는 polyline 간선의 방위각을 우선한다.
-    final escalatorGlide = _escalatorGlide;
-    final boardingApproachGlide = _boardingApproachGlide;
-    final glideHeading =
-        escalatorGlide?.headingAtProgress(_escalatorGlideProgress.value) ??
-        boardingApproachGlide?.headingAtProgress(
-          _boardingApproachGlideProgress,
-        );
-    final heading = here == null ? null : glideHeading ?? _pdrCurrentHeadingDeg;
+    final heading = here == null
+        ? null
+        : _glideHeadingDeg ?? _pdrCurrentHeadingDeg;
 
     final kind = marker == null
         ? _MarkerGlideKind.none
@@ -756,7 +764,14 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     _liveHeading = sample;
     // 삼각형과 카메라가 **같은 틱에** 같은 값을 받는다. 한쪽만 촘촘하면 코너에서
     // 삼각형이 앞질렀다 되돌아온다.
-    if (_markerGlideKind == _MarkerGlideKind.here) {
+    //
+    // **활강 중에는 방향을 여기서 갈지 않는다.** 활강은 위치의 출처가 경로인
+    // 특수 상태고, 그때 쓸 방향은 [_syncPdrCurrentLayer]가 활강 polyline에서
+    // 뽑는다. 이 33Hz 갈래가 그 값을 매 틱 나침반으로 덮어쓰고 있었다 —
+    // 에스컬레이터 위는 철제 구조물과 수직 이동으로 자기장이 가장 심하게
+    // 흔들리는 자리라, 점은 발판을 따라 흐르는데 삼각형만 사방으로 돌았다.
+    if (_markerGlideKind == _MarkerGlideKind.here &&
+        !_markerHeadingOwnedByGlide) {
       _markerGlide.aimHeadingAt(_pdrCurrentHeadingDeg);
     }
     _aimFollowCamera();

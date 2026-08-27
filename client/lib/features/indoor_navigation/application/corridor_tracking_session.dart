@@ -30,7 +30,19 @@ class CorridorTrackingSession {
   CorridorObservation? _lastObservation;
   bool _lastWasReset = false;
 
-  void reset() {
+  /// 마지막으로 학습해 둔 heading 보정각과 그 값이 유효한 frame.
+  ///
+  /// 보정각은 **층이 아니라 기기·건물의 성질**이다(철골이 나침반을 얼마나
+  /// 틀어 놓는가). 그래서 층을 갈아탈 때 앵커의 회전값을 물려받는 것과 같은
+  /// 이유로 이 값도 물려받는다 — 안 그러면 하차하는 순간 최대 60°가 0으로
+  /// 사라졌다가 7m를 걷는 동안 다시 차오르고, 그동안 삼각형이 계속 돈다.
+  ///
+  /// 다만 **frame이 같을 때만** 옮긴다. 보정각은 floor bearing에서 잰 값이라
+  /// 회전값이나 축이 바뀌면 같은 숫자가 다른 각을 뜻한다.
+  double _carriedHeadingBiasDeg = 0;
+  String? _frameKey;
+
+  void reset({bool keepHeadingBias = false}) {
     _tracker = null;
     _graphKey = null;
     _anchorKey = null;
@@ -38,6 +50,10 @@ class CorridorTrackingSession {
     _lastDistanceM = null;
     _lastObservation = null;
     _lastWasReset = false;
+    if (!keepHeadingBias) {
+      _carriedHeadingBiasDeg = 0;
+      _frameKey = null;
+    }
   }
 
   CorridorTrackingResult? update({
@@ -67,6 +83,7 @@ class CorridorTrackingSession {
         (_lastDistanceM != null && snapshot.distanceM < _lastDistanceM!);
     final nextGraphKey = _keyForGraph(graph);
     final nextAnchorKey = _keyForAnchor(anchor);
+    final nextFrameKey = _keyForFrame(anchor);
     if (_graphKey != nextGraphKey ||
         _anchorKey != nextAnchorKey ||
         _tracker == null ||
@@ -74,6 +91,9 @@ class CorridorTrackingSession {
       final initialPosition = snapshot.steps == 0
           ? anchor.anchorLocalM
           : transform.toFloor(snapshot.position);
+      final carriedBiasDeg = _frameKey == nextFrameKey
+          ? _carriedHeadingBiasDeg
+          : 0.0;
       _tracker = CorridorPositionTracker(graph)
         ..setPreferredRoute(
           edgeIds: preferredRouteEdgeIds,
@@ -88,9 +108,12 @@ class CorridorTrackingSession {
           initialConfirmedSteps: snapshot.steps,
           initialConfirmedDistanceM: snapshot.distanceM,
           initialPreviewSteps: snapshot.preview.steps,
+          initialHeadingBiasDeg: carriedBiasDeg,
         );
       _graphKey = nextGraphKey;
       _anchorKey = nextAnchorKey;
+      _frameKey = nextFrameKey;
+      _carriedHeadingBiasDeg = carriedBiasDeg;
       _lastSteps = snapshot.steps;
       _lastDistanceM = snapshot.distanceM;
       _lastObservation = null;
@@ -130,8 +153,20 @@ class CorridorTrackingSession {
     _lastWasReset = false;
     _lastSteps = snapshot.steps;
     _lastDistanceM = snapshot.distanceM;
+    _frameKey = nextFrameKey;
+    _carriedHeadingBiasDeg = output.headingBiasDeg;
     return output;
   }
+
+  /// 보정각을 옮겨도 되는지 가르는 키. 앵커 **좌표는 빼고** 회전과 축만 본다 —
+  /// 층을 갈아타면 좌표는 반드시 바뀌지만, 각의 의미는 회전·축이 정한다.
+  String _keyForFrame(PdrAnchor anchor) => [
+    anchor.rotationDeg,
+    anchor.axes.eastToX,
+    anchor.axes.northToX,
+    anchor.axes.eastToY,
+    anchor.axes.northToY,
+  ].join(':');
 
   String _keyForGraph(FloorGraph graph) => [
     for (final node in graph.nodes)
