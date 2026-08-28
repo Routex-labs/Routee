@@ -104,35 +104,28 @@ const boardingApproachVisibleSnapRadiusM = 1.5;
 /// "멀어짐"으로 읽혀 후보가 사라졌다. 첫 신뢰 가능한 근접 걸음에서 붙든다.
 const boardingApproachVisiblePeakCount = 1;
 
-/// 탑승점 직전의 남은 경로를 follower가 맡기 시작하는 반경.
+/// 탑승점 직전의 남은 **경로상 거리**가 이 값 안이면 follower가 맡는다.
 ///
 /// follower는 시간으로 앞서 가지 않고 raw PDR 걸음만큼만 움직인다. 그래서
-/// 재탐색 안전망과 같은 16m부터 열어도 marker가 사람보다 앞서지 않는다. 이
+/// 탑승 판정 안전망보다 앞선 24m부터 열어도 marker가 사람보다 앞서지 않는다. 이
 /// 범위 안에 두 번 이상 꺾이는 연결 간선이 있어도, 남은 polyline 전체를 순서대로
 /// 탄다.
-const routeApproachFollowerArmRadiusM = 16.0;
+const routeApproachFollowerArmRemainingM = 24.0;
 
-/// follower를 처음 열 때 raw PDR가 경로에 있어야 하는 최대 거리.
+/// follower를 처음 열 때 **표시 matcher**가 경로에 있어야 하는 최대 거리.
 ///
-/// 표시 matcher만 경로에 붙은 열린 공간의 U자 우회 경로는 따라가면 안 된다.
-/// 실제 복도 안에서 마지막 두 코너를 도는 상황은 raw PDR도 보통 2m 안에 남는다.
-const routeApproachFollowerSeedRawOffsetM = 2.0;
+/// raw PDR는 대각선 지름길·초기 기준축 오차로 이보다 훨씬 벗어날 수 있어 시작
+/// 조건에 쓰지 않는다. 활성 경로가 가리키는 matcher만 이 범위에 있으면 된다.
+const routeApproachFollowerSeedMatchOffsetM = 3.0;
 
-/// follower 시작 시 raw PDR와 표시 matcher가 같은 경로 진행도에 있어야 하는
-/// 최대 차이.
+/// follower가 탑승 노드에 도착한 뒤에도 이 시간과 걸음 거리를 모두 넘기도록
+/// 계속 걸었는데 수직 이동이 없다면, 실제로 다른 곳으로 간 것으로 본다.
 ///
-/// U자 우회 경로에서는 raw PDR가 종점 직전 간선 곁을 스치더라도, matcher의
-/// 표시 위치는 그보다 한참 앞선 다른 구간에 남을 수 있다. 두 좌표가 같은
-/// polyline 진행도에 있을 때만 follower를 열어야 자유보행을 종점으로 끌지
-/// 않는다.
-const routeApproachFollowerSeedProgressToleranceM = 2.0;
-
-/// follower를 푸는 raw PDR의 경로 이탈 거리.
-///
-/// 마지막 코너의 heading mismatch는 위치 이탈이 아니므로 여기에는 방향을 넣지
-/// 않는다. 3m는 복도 폭·PDR 오차를 품되, 옆 복도로 실제로 들어간 경우는
-/// 연속 걸음에서 빠르게 잡는 값이다.
-const routeApproachFollowerDepartureRadiusM = 3.0;
+/// 탑승 판정은 5~10초 늦을 수 있고 줄에서 잠시 서 있을 수도 있다. 따라서 시간
+/// 하나나 거리 하나만으로 풀지 않는다. 두 근거가 함께 있을 때만 자동 재탐색을
+/// 다시 허용한다.
+const routeApproachFollowerTerminalGraceMs = 20000;
+const routeApproachFollowerTerminalWalkAwayM = 12.0;
 
 /// 고정 지점을 지금 위치 기준으로 다듬는다. 멀면 [currentM]을 그대로 쓴다.
 PdrLocalPoint? clampBoardingHold({
@@ -248,7 +241,9 @@ class IndoorGuidanceSession {
   String? _routeApproachFollowerNodeId;
   final Set<int> _routeApproachFollowerPeakIds = <int>{};
   PdrLocalPoint? _routeApproachFollowerLastRawM;
-  int _routeApproachFollowerDeparturePeaks = 0;
+  int? _routeApproachFollowerReachedTerminalAtMs;
+  double _routeApproachFollowerWalkedAfterTerminalM = 0;
+  String? _expiredRouteApproachFollowerNodeId;
 
   /// 마지막으로 신뢰한 graph 위치에서 원시 PDR의 **이동 벡터만** 이어 붙인
   /// 탑승 접근 그림자. 화면에는 그리지 않고, 열린 공간에서 경로 간선을 잘라
@@ -318,6 +313,14 @@ class IndoorGuidanceSession {
     if (holdPoint == null) return false;
     _approachHoldPointM = holdPoint;
     _boardingHoldPointM = holdPoint;
+    // boardingDetected 때는 아직 노드보다 앞의 표시 위치가
+    // [_rideHoldPointM]으로 승격돼 있을 수 있다. 화면의 접근 활강이 노드에
+    // 도착한 뒤에도 그 옛 ride hold가 우선하면 marker가 한 번 뒤로 돌아갔다가
+    // 다시 붙는다. 수직 이동이 이미 확인된 상태에서는 이 최종 노드가 유일한
+    // 고정점이므로 함께 교체한다.
+    if (_escalator.phase == EscalatorPhase.verticalMotionDetected) {
+      _rideHoldPointM = holdPoint;
+    }
     _approachHoldEnteredAtMs = _nowMs();
     _routeBoardingTerminalLocked = true;
     return true;
@@ -400,7 +403,8 @@ class IndoorGuidanceSession {
     _routeApproachFollowerNodeId = null;
     _routeApproachFollowerPeakIds.clear();
     _routeApproachFollowerLastRawM = null;
-    _routeApproachFollowerDeparturePeaks = 0;
+    _routeApproachFollowerReachedTerminalAtMs = null;
+    _routeApproachFollowerWalkedAfterTerminalM = 0;
   }
 
   /// 부착·층·경로는 그대로 두고 **보정만** 처음부터 다시 본다.
@@ -411,6 +415,7 @@ class IndoorGuidanceSession {
   void resetTracking() {
     _corridor.reset();
     _snapshot = null;
+    _expiredRouteApproachFollowerNodeId = null;
     clearBoardingHold();
     _clearBoardingApproach();
   }
@@ -422,6 +427,7 @@ class IndoorGuidanceSession {
     _floorId = null;
     _graph = null;
     _multiFloorRoute = null;
+    _expiredRouteApproachFollowerNodeId = null;
     clearBoardingHold();
     _clearBoardingApproach();
   }
@@ -466,7 +472,14 @@ class IndoorGuidanceSession {
   /// 지금 안내 중인 다층 경로. 탑승점 고정과 경로 접근 판정이 쓴다.
   void setRoute(MultiFloorRoute? multiFloorRoute) {
     _multiFloorRoute = multiFloorRoute;
-    if (multiFloorRoute == null) _boardingHoldPointM = null;
+    if (multiFloorRoute == null) {
+      // 단층 경로로 바꾸거나 안내를 끝낸 것은 화면이 실제로 새 여정을 확정한
+      // 경우다. 반대로 자동 재탐색은 multi route를 유지한 채 새 객체를 넣으므로
+      // 접근 follower가 그 한 번의 후보 교체로 풀리지 않는다.
+      _boardingHoldPointM = null;
+      _expiredRouteApproachFollowerNodeId = null;
+      _clearBoardingApproach();
+    }
   }
 
   /// 보정 기준점. 확정 전(`canRenderPosition`이 false)에는 null로 준다.
@@ -543,11 +556,15 @@ class IndoorGuidanceSession {
         : _multiFloorRoute?.segmentForFloor(floor);
     final route = segment?.route;
     PdrLocalPoint? routeApproachPositionM;
+    final expiredBoardingApproach =
+        segment?.transferFromNodeId != null &&
+        _expiredRouteApproachFollowerNodeId == segment!.transferFromNodeId;
     if (segment != null &&
         segment.transferModeToNext == 'escalator' &&
         segment.transferFromNodeId != null &&
         route != null &&
-        route.pointsLocalM.isNotEmpty) {
+        route.pointsLocalM.isNotEmpty &&
+        !expiredBoardingApproach) {
       final routeEnd = route.pointsLocalM.last;
       final routeEndM = PdrLocalPoint(routeEnd.x, routeEnd.y);
       final followingRoute = _followsExpectedBoardingApproach(
@@ -563,8 +580,8 @@ class IndoorGuidanceSession {
       final followerPositionM = _updateRouteApproachFollower(
         boardingNodeId: segment.transferFromNodeId!,
         route: route,
-        routeEndM: routeEndM,
         result: result,
+        atMs: atMs,
       );
       final shadowPositionM = _updateBoardingApproachShadow(
         boardingNodeId: segment.transferFromNodeId!,
@@ -588,7 +605,10 @@ class IndoorGuidanceSession {
       _clearBoardingApproachShadow();
     }
     _syncBoardingApproach(
-      segment: segment,
+      // 충분히 오래 다른 곳으로 걸어 follower를 푼 탑승점은 같은 route 객체가
+      // 남아 있어도 다시 후보로 무장하지 않는다. 목적지 변경·안내 종료·층 전환
+      // 은 세션 reset을 거쳐 이 억제를 지운다.
+      segment: expiredBoardingApproach ? null : segment,
       result: result,
       confirmedSteps: steps,
       atMs: atMs,
@@ -604,64 +624,40 @@ class IndoorGuidanceSession {
   PdrLocalPoint? _updateRouteApproachFollower({
     required String boardingNodeId,
     required IndoorRoute route,
-    required PdrLocalPoint routeEndM,
     required CorridorTrackingResult result,
+    required int atMs,
   }) {
     final sameTarget = _routeApproachFollowerNodeId == boardingNodeId;
-    if (!sameTarget) _clearRouteApproachFollower();
+    if (!sameTarget) {
+      _clearRouteApproachFollower();
+      _expiredRouteApproachFollowerNodeId = null;
+    }
+
+    // 탑승 노드까지 도달한 뒤에도 충분히 오래·멀리 계속 걸었는데 수직 이동이
+    // 없었던 경로는 이번 여정에서 다시 자동으로 붙들지 않는다. 그렇지 않으면
+    // 같은 잘못된 탑승점에 follower가 매 프레임 재무장하는 루프가 생긴다.
+    if (_expiredRouteApproachFollowerNodeId == boardingNodeId) return null;
 
     var follower = _routeApproachFollower;
     if (follower == null && route.pointsLocalM.length < 3) {
       return null;
     }
-    if (follower != null &&
-        follower.distanceToPolyline(result.rawPreviewPosition) >
-            routeApproachFollowerDepartureRadiusM) {
-      // 마지막 코너에서는 tracker가 한두 peak 동안 옆 간선을 1등으로 내기도
-      // 한다. 그 한 프레임이나 늦은 heading으로 follower를 풀면 다시 "5m
-      // 전에서 멈춤"으로 돌아간다. raw PDR 위치가 경로 밖인 상태가 연속될
-      // 때만 실제 이탈로 본다.
-      var sawNewPeak = false;
-      for (final step in result.optimisticStepAdvances) {
-        if (_routeApproachFollowerPeakIds.add(step.peakId)) sawNewPeak = true;
-      }
-      final distanceM = _takeRouteApproachFollowerDistance(result);
-      if (distanceM > 0.1 || sawNewPeak) {
-        _routeApproachFollowerDeparturePeaks++;
-        follower.advance(distanceM);
-      }
-      if (_routeApproachFollowerDeparturePeaks >= 3) {
-        _clearRouteApproachFollower();
-        return null;
-      }
-      return follower.position;
-    }
-    _routeApproachFollowerDeparturePeaks = 0;
     if (follower == null) {
-      final withinApproach =
-          (routeEndM - result.matchedPreviewPosition).distance <=
-          routeApproachFollowerArmRadiusM;
-      if (!withinApproach ||
-          result.state == CorridorTrackingState.uncertain ||
+      if (result.state == CorridorTrackingState.uncertain ||
           result.leaderRelocated) {
         return null;
       }
       follower = RouteApproachFollower.start(
         points: route.pointsLocalM,
-        seed: result.previewPosition,
+        // continuity shadow는 화면을 부드럽게 잇기 위한 값일 뿐, 현재 경로상의
+        // 위치가 아니다. 접근 시작은 matcher가 활성 경로 어디까지 왔는지로만
+        // 정한다. raw PDR의 절대 오차·대각선 shortcut은 걸음 거리만 제공한다.
+        seed: result.matchedPreviewPosition,
+        maxSeedOffsetM: routeApproachFollowerSeedMatchOffsetM,
       );
-      final rawFollower = RouteApproachFollower.start(
-        points: route.pointsLocalM,
-        seed: result.rawPreviewPosition,
-        maxSeedOffsetM: routeApproachFollowerSeedRawOffsetM,
-      );
-      // raw PDR가 우연히 종점 직전 간선 곁을 지나더라도, 표시 matcher와 경로
-      // 진행도가 다르면 열린 공간을 가로지르는 중이다. 둘이 같은 polyline
-      // 구간에 있을 때만 마지막 복도를 맡긴다.
       if (follower == null ||
-          rawFollower == null ||
-          (rawFollower.progressM - follower.progressM).abs() >
-              routeApproachFollowerSeedProgressToleranceM) {
+          follower.totalM - follower.progressM >
+              routeApproachFollowerArmRemainingM) {
         return null;
       }
       _routeApproachFollower = follower;
@@ -673,10 +669,38 @@ class IndoorGuidanceSession {
         result.optimisticStepAdvances.map((step) => step.peakId),
       );
       _routeApproachFollowerLastRawM = result.rawPreviewPosition;
+      if (follower.isAtTerminal) {
+        _routeApproachFollowerReachedTerminalAtMs = atMs;
+      }
       return follower.position;
     }
 
-    follower.advance(_takeRouteApproachFollowerDistance(result));
+    final wasAtTerminal = follower.isAtTerminal;
+    final distanceM = _takeRouteApproachFollowerDistance(result);
+    follower.advance(distanceM);
+    if (!wasAtTerminal && follower.isAtTerminal) {
+      _routeApproachFollowerReachedTerminalAtMs = atMs;
+      _routeApproachFollowerWalkedAfterTerminalM = 0;
+    } else if (wasAtTerminal) {
+      _routeApproachFollowerWalkedAfterTerminalM += distanceM;
+    }
+    final reachedAt = _routeApproachFollowerReachedTerminalAtMs;
+    if (reachedAt != null &&
+        atMs - reachedAt >= routeApproachFollowerTerminalGraceMs &&
+        _routeApproachFollowerWalkedAfterTerminalM >=
+            routeApproachFollowerTerminalWalkAwayM &&
+        _escalator.phase != EscalatorPhase.verticalMotionDetected) {
+      // 탑승점에 붙은 뒤에도 20초·12m를 모두 넘겼다면, 수 초 늦는 탑승
+      // 판정보다 훨씬 강한 "다른 곳으로 계속 걸음" 근거다. 이때만 차단을
+      // 해제해 보통의 이탈 재탐색으로 넘긴다.
+      _expiredRouteApproachFollowerNodeId = boardingNodeId;
+      _approachHoldPointM = null;
+      _boardingHoldPointM = null;
+      _routeBoardingTerminalLocked = false;
+      _boardingApproachGateOpen = false;
+      _clearRouteApproachFollower();
+      return null;
+    }
     return follower.position;
   }
 
@@ -854,7 +878,13 @@ class IndoorGuidanceSession {
       _boardingApproachGateOpen = true;
       return;
     }
-    if (distanceM == null || distanceM > config.routeApproachArmRadiusM) {
+    // follower는 탑승 판정기보다 먼저, 남은 polyline 24m부터 화면과 재탐색만
+    // 보호한다. 이때 16m 판정 허가 반경 밖이라는 이유로 follower를 지우면 첫
+    // 코너 전의 대각선 shortcut을 다시 놓친다. 실제 판정기는 위 `_escalator`
+    // 호출에서 독립적으로 16m 안에 들어와야만 무장한다.
+    if (distanceM == null ||
+        (distanceM > config.routeApproachArmRadiusM &&
+            _routeApproachFollower == null)) {
       _approachHoldPointM = null;
       _approachHoldEnteredAtMs = null;
       _clearBoardingApproach();
@@ -1323,6 +1353,12 @@ class IndoorGuidanceSession {
     // 이탈 잠금이 새 길찾기에 남으면 같은 복도에서 재탐색을 못 하게 된다.
     if (route == null) {
       _rerouteRequestedForEdgeId = null;
+      // 목적지를 바꾸거나 안내를 끝내기 전에 화면이 이 값을 먼저 비운다. 이때만
+      // 기존 탑승 접근 상태를 명시적으로 버린다. 자동 재탐색의 후보 흔들림은
+      // 여기까지 오지 않으므로 follower를 옆 복도로 보내지 않는다.
+      clearBoardingHold();
+      _expiredRouteApproachFollowerNodeId = null;
+      _clearBoardingApproach();
     }
   }
 

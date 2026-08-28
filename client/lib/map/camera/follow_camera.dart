@@ -9,7 +9,8 @@ library;
 import 'package:indoor_pdr_core/indoor_pdr_core.dart'
     show normalizeDegrees, shortestDeltaDegrees;
 
-import '../../domain/guidance/location_marker_glide.dart' show glideFollowFactor;
+import '../../domain/guidance/location_marker_glide.dart'
+    show glideFollowFactor;
 
 /// [from]에서 [to]로 **0/360을 넘어 최단 경로로** 보간한 각(도).
 ///
@@ -31,6 +32,10 @@ double lerpBearingDeg(double from, double to, double t) => normalizeDegrees(
 ///
 /// 멈춰 있거나([walking]이 false) 진행 방향을 모르면 나침반 각을 그대로 쓴다 —
 /// 서 있는 사람의 "이동 방향"은 아무 값도 아니다.
+///
+/// heading 자체는 항상 센서에서 온 값(복도 보정 bias 적용 후)을 쓴다. 복도는
+/// 보정값을 학습하는 근거일 뿐, 사용자가 몸을 돌린 뒤에도 화면 각을 간선에
+/// 고정하는 근거는 아니다.
 double blendedFollowBearingDeg({
   required double orientationHeadingDeg,
   required double? walkingHeadingDeg,
@@ -81,5 +86,4 @@ double glidedFollowBearingDeg({
 
 /// 두 각의 최단 차(도, 절댓값). 데드밴드와 수렴 판정이 **같은 산수**를 보게
 /// 한다 — 한쪽만 360을 못 넘으면 경계에서 서로 다른 답을 낸다.
-double bearingGapDeg(double a, double b) =>
-    shortestDeltaDegrees(a - b).abs();
+double bearingGapDeg(double a, double b) => shortestDeltaDegrees(a - b).abs();

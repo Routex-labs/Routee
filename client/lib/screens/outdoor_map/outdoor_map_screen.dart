@@ -818,8 +818,9 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   ///
   /// MapLibre의 Future는 플랫폼 쪽 반영이 끝난 뒤 완료되므로 호출을 각각
   /// fire-and-forget하면 오래된 위치 쓰기가 최신 위치 뒤에 완료될 수 있다.
-  /// revision으로 대기 중인 낡은 쓰기를 건너뛰고, 이미 시작된 native 쓰기는
-  /// 직렬 queue 뒤의 최신 쓰기가 반드시 덮어쓰게 한다.
+  /// 이미 시작한 native 쓰기는 기다리되, 그 사이 들어온 값은 하나로 합쳐 바로
+  /// 다음 쓰기에 반영한다. 회전 중 매 프레임의 중간값을 전부 쌓으면 채널이
+  /// 밀리고, 반대로 전부 취소하면 사용자가 멈출 때까지 방향이 안 보인다.
   int _pdrMarkerRevision = 0;
 
   /// 마지막으로 **실제로 그린** 실내 위치와 그때의 층.
@@ -830,6 +831,11 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   ({String floorId, ll.LatLng point})? _lastIndoorMarker;
 
   Future<void> _pdrMarkerWriteQueue = Future<void>.value();
+
+  bool _pdrMarkerWriteInFlight = false;
+
+  ({int revision, MapLibreMapController controller, Map<String, dynamic> data})?
+  _pendingPdrMarkerWrite;
 
   /// 걸음 하나만큼씩 뛰어 오는 위치를 프레임 단위로 이어 그리는 보간기.
   ///
@@ -850,7 +856,7 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   /// ([_onPdrHeading]).
   PdrHeadingSample? _liveHeading;
 
-  /// 마커 소스에 마지막으로 **실제로 쓴** 그림. 같은 값이면 다시 쓰지 않는다.
+  /// 마커 소스에 마지막으로 **예약한** 그림. 같은 값이면 다시 쓰지 않는다.
   ({ll.LatLng? point, double? headingDeg, bool offFloor})? _lastWrittenMarker;
 
   /// 마커 소스를 마지막으로 쓴 시점(틱 누적 경과 기준).
@@ -1453,6 +1459,7 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
     _positionDropTimer?.cancel();
     _indoorRouteRevealTicker?.dispose();
     _arrivalRouteClearTimer?.cancel();
+    _indoorRerouteNoticeTimer?.cancel();
     _floorSwapVeilTimer?.cancel();
     _debugRideCompletionTimer?.cancel();
     _escalatorGlideProgress.dispose();
@@ -2578,6 +2585,11 @@ class OutdoorMapBodyState extends State<OutdoorMapBody>
   bool _indoorRerouteInFlight = false;
 
   int _lastIndoorRerouteAtMs = 0;
+
+  /// 실제 새 실내 경로가 지도에 교체된 직후에만 잠시 보인다. PDR의 역방향
+  /// 추정만으로는 켜지지 않는다 — 복도 코너에서 일시적으로 흔들릴 수 있다.
+  bool _showIndoorRerouteNotice = false;
+  Timer? _indoorRerouteNoticeTimer;
 
   /// 야외 POI 검색의 기준점.
   ///

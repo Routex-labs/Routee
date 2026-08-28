@@ -296,19 +296,27 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     final kind = marker == null
         ? _MarkerGlideKind.none
         : (marker.offFloor ? _MarkerGlideKind.dimmed : _MarkerGlideKind.here);
-    // 활강 중에는 잇지 않는다. 진행률이 이미 프레임마다 흐르고 있어서
-    // ([_startEscalatorGlide]), 여기서 한 번 더 이으면 두 겹이 되어 마커가
-    // 하차 노드에 늦게 닿는다 — 도면은 새 층인데 점은 아직 오는 중이 된다.
+    // 실제 층 이동 활강은 진행률이 이미 프레임마다 흐르므로 여기서 한 번 더
+    // 잇지 않는다. 반면 탑승점 접근은 **같은 층에서 보행 위치의 근거만
+    // 바뀌는** 전환이다. follower·shadow·hold 사이가 몇 m 벌어져도 이 마커가
+    // 스냅하면 마지막 코너에서 "툭" 보인다. 접근 활강 자체도 현재 그려진
+    // 마커에서 시작하므로 일반 marker glide로 한 겹 더 자연스럽게 잇는다.
     // 스타일·도면이 갈아 끼워지는 자리는 모두 snap으로 들어온다. 그때는 소스가
     // 새로 만들어졌을 수 있으므로, 같은 값이라도 한 번은 다시 써야 한다.
     if (snap) _lastWrittenMarker = null;
+    final preserveBoardingContinuity =
+        _guidance.isNearRouteBoarding ||
+        _guidance.isFollowingRouteBoarding ||
+        _boardingApproachGlide != null;
     final teleport =
-        snap ||
-        _boardingApproachGlide != null ||
-        _escalatorGlide != null ||
-        kind != _markerGlideKind;
+        snap || _escalatorGlide != null || kind != _markerGlideKind;
     _markerGlideKind = kind;
-    _markerGlide.aimAt(marker?.point, headingDeg: heading, snap: teleport);
+    _markerGlide.aimAt(
+      marker?.point,
+      headingDeg: heading,
+      snap: teleport,
+      preserveContinuity: preserveBoardingContinuity,
+    );
     _syncMarkerGlideTicker();
     return _writePdrMarkerSource(controller);
   }
@@ -337,28 +345,42 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     );
     _publishHeadingDebug(drawn.headingDeg);
 
-    final previous = _pdrMarkerWriteQueue;
-    _pdrMarkerWriteQueue = () async {
-      // 이전 native 호출이 실패해도 다음 센서 갱신은 계속 진행한다.
-      try {
-        await previous;
-      } catch (error, stackTrace) {
-        debugPrint('PDR marker update failed: $error\n$stackTrace');
-      }
-      // 큐에 들어온 사이 더 최신 snapshot이 왔다면 이 위치는 쓰지 않는다.
-      if (revision != _pdrMarkerRevision ||
-          !mounted ||
-          controller != _mapController ||
-          !_styleReady) {
-        return;
-      }
-      try {
-        await controller.setGeoJsonSource(kOutdoorPdrCurrentSourceId, data);
-      } catch (error, stackTrace) {
-        debugPrint('PDR marker update failed: $error\n$stackTrace');
-      }
-    }();
+    // native 쓰기는 동시에 보낼 수 없지만, 회전 중의 중간 heading을 모두 큐에
+    // 쌓을 수도 없다. 예전 revision 큐는 새 값이 오는 동안 대기 중인 모든 쓰기를
+    // 취소해 사용자가 멈춘 뒤에야 마커가 돌 수 있었다. 진행 중인 한 건 뒤에는
+    // 오직 **가장 최신 그림**만 남겨 즉시 이어 쓴다.
+    _pendingPdrMarkerWrite = (
+      revision: revision,
+      controller: controller,
+      data: data,
+    );
+    if (_pdrMarkerWriteInFlight) return _pdrMarkerWriteQueue;
+    _pdrMarkerWriteInFlight = true;
+    _pdrMarkerWriteQueue = _drainPdrMarkerWrites();
     return _pdrMarkerWriteQueue;
+  }
+
+  Future<void> _drainPdrMarkerWrites() async {
+    while (true) {
+      final pending = _pendingPdrMarkerWrite;
+      _pendingPdrMarkerWrite = null;
+      if (pending == null) break;
+      if (pending.revision != _pdrMarkerRevision ||
+          !mounted ||
+          pending.controller != _mapController ||
+          !_styleReady) {
+        continue;
+      }
+      try {
+        await pending.controller.setGeoJsonSource(
+          kOutdoorPdrCurrentSourceId,
+          pending.data,
+        );
+      } catch (error, stackTrace) {
+        debugPrint('PDR marker update failed: $error\n$stackTrace');
+      }
+    }
+    _pdrMarkerWriteInFlight = false;
   }
 
   /// 보간 틱을 켜고 끈다. **마커와 팔로우 카메라가 같은 틱을 탄다** — 둘이
@@ -727,6 +749,9 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     _liveHeading?.walkingDeg ?? _pdrTrailState.snapshot?.walkingHeadingDeg,
   );
 
+  bool _isFollowingRecentStep(int nowMs) =>
+      nowMs - _followCameraLastStepAtMs < followCameraWalkingStepWindowMs;
+
   /// 세션 좌표계의 각을 지도 bearing(진북 기준)으로 옮긴다. 앵커가 없거나
   /// 방향이 아직 자리를 못 잡았으면 null — 그때는 삼각형도 카메라도 돌리지
   /// 않는다.
@@ -829,14 +854,13 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     if (!_indoorFollowActive) return;
     if (_mapController == null || !_styleReady) return;
     final orientation = _pdrCurrentHeadingDeg;
-    if (orientation == null) return;
-
     final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final walking = _isFollowingRecentStep(nowMs);
+    if (orientation == null) return;
     _followCameraBearingDeg = blendedFollowBearingDeg(
       orientationHeadingDeg: orientation,
       walkingHeadingDeg: _pdrWalkingHeadingDeg,
-      walking:
-          nowMs - _followCameraLastStepAtMs < followCameraWalkingStepWindowMs,
+      walking: walking,
       walkingPullWeight: followCameraWalkingPullWeight,
     );
     _syncMarkerGlideTicker();
@@ -879,11 +903,15 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     final turned = bearingGapDeg(next, shown) > 0;
     if (!resumed && !moved && !turned) return false;
 
+    // native 카메라 명령이 끝나기 전에는 **표시된 각**을 앞당기지 않는다.
+    // 이전에는 여기서 먼저 `_followCameraShownBearingDeg = next`를 써서, 실제
+    // 지도는 아직 옛 bearing인데 Dart만 "이미 코너를 돌았다"고 믿었다. 그 사이
+    // 들어온 heading은 dead zone 안으로 소모돼 카메라가 코너에서도 멈춰 보일 수
+    // 있었다. bias는 목표각에만 더하고, 화면 상태는 실제 명령을 보낼 때만 갱신한다.
+    if (_followCameraInFlight) return false;
+
     _followCameraShownBearingDeg = next;
     _followCameraShownPoint = here;
-    // 앞 명령이 아직 안 돌아왔으면 이번 프레임은 계산만 하고 건너뛴다. 보간은
-    // 시간으로 하므로 건너뛴 프레임은 다음 명령이 그만큼 더 간 값으로 메운다.
-    if (_followCameraInFlight) return false;
     _followCameraInFlight = true;
     _followCameraDrivenAtMs = nowMs;
     // **애니메이션 없이 놓는다.** 보간은 이미 우리가 하고 있어서, 여기에
@@ -1033,7 +1061,9 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
     if (indoorNavigationDriver.currentRuntimeStatus.state ==
         PdrRuntimeState.idle) {
       if (!gatePermission) {
-        setState(() => _pdrTrailState.beginNewSession());
+        setState(() {
+          _pdrTrailState.beginNewSession();
+        });
         await indoorNavigationDriver.startGuidance(floorId: floor);
         return mounted;
       }
@@ -1104,6 +1134,19 @@ extension OutdoorMapPdr on OutdoorMapBodyState {
       floorId: floor,
       result: _guidance.trackingResult,
     );
+  }
+
+  /// 사용자가 새 안내를 실제로 시작한 순간, 이전 계획/안내의 회색 이력은
+  /// 남기지 않는다. 경로를 미리 보는 동안 PDR은 계속 돌아갈 수 있으므로
+  /// `isActive`만 보고 재사용하면 시작 버튼을 눌렀는데도 옛 흔적이 섞인다.
+  void _restartGuidanceTrailSession() {
+    final floor = _pdrTrailState.anchor?.floorId ?? _activeFloor;
+    if (floor == null) return;
+    _guidanceTrailSession.start(
+      floorId: floor,
+      result: _guidance.trackingResult,
+    );
+    unawaited(_syncDebugPdrLayers());
   }
 
   /// **내보내기가 세션을 닫는다**(디버그 모드에서 세션을 닫는 유일한 자리).

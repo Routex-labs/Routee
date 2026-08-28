@@ -7,6 +7,7 @@ LatLng _eastOf(LatLng from, double meters) =>
     LatLng(from.latitude, from.longitude + meters / 88400.0);
 
 const _origin = LatLng(37.5, 127.0);
+
 /// 반올림 없는 거리. `Distance()` 기본값은 정수 미터라 0.6m와 0m을 못 가른다.
 const _distance = Distance(roundResult: false);
 
@@ -75,7 +76,11 @@ void main() {
         walkedM += 0.7;
         final target = _eastOf(_origin, walkedM);
         glide.aimAt(target, headingDeg: 0);
-        for (var tick = 0; tick < (500 / _frame.inMilliseconds).floor(); tick++) {
+        for (
+          var tick = 0;
+          tick < (500 / _frame.inMilliseconds).floor();
+          tick++
+        ) {
           glide.advance(_frame);
         }
         lastLagM = _distance(glide.point!, target);
@@ -87,7 +92,9 @@ void main() {
     });
 
     test('멈춰 서면 목표에 붙고 타이머가 스스로 멈춘다', () {
-      final glide = _walkedOneStep(ticks: (1000 / _frame.inMilliseconds).ceil());
+      final glide = _walkedOneStep(
+        ticks: (1000 / _frame.inMilliseconds).ceil(),
+      );
       expect(glide.point, _eastOf(_origin, 0.7));
       expect(glide.isSettled, isTrue);
     });
@@ -98,10 +105,7 @@ void main() {
       slow.advance(_frame * 10);
 
       final steady = _walkedOneStep(ticks: 10);
-      expect(
-        slow.point!.longitude,
-        closeTo(steady.point!.longitude, 1e-9),
-      );
+      expect(slow.point!.longitude, closeTo(steady.point!.longitude, 1e-9));
     });
   });
 
@@ -120,6 +124,37 @@ void main() {
       final near = _eastOf(_origin, 0.7);
       glide.aimAt(near, headingDeg: 0, snap: true);
       expect(glide.point, near);
+      expect(glide.isSettled, isTrue);
+    });
+
+    test('같은 보행 여정의 표시 근거 교체는 멀어도 이어 간다', () {
+      // 에스컬레이터 직전 shadow → follower → hold 전환은 같은 사용자의
+      // 보행인데도 계산 좌표가 몇 m 벌 수 있다. 일반 4m 안전 스냅이 여기서
+      // 켜지면 마지막 코너에서 마커가 순간이동한다.
+      final glide = LocationMarkerGlide()..aimAt(_origin, headingDeg: 0);
+      final handoff = _eastOf(_origin, locationMarkerGlideSnapM + 1);
+
+      glide.aimAt(handoff, headingDeg: 90, preserveContinuity: true);
+
+      expect(glide.point, _origin);
+      expect(glide.isSettled, isFalse);
+      glide.advance(_frame);
+      expect(glide.point!.longitude, greaterThan(_origin.longitude));
+      expect(glide.point!.longitude, lessThan(handoff.longitude));
+    });
+
+    test('연속 보행 전환이어도 명시적 snap은 우선한다', () {
+      final glide = LocationMarkerGlide()..aimAt(_origin, headingDeg: 0);
+      final handoff = _eastOf(_origin, locationMarkerGlideSnapM + 1);
+
+      glide.aimAt(
+        handoff,
+        headingDeg: 90,
+        snap: true,
+        preserveContinuity: true,
+      );
+
+      expect(glide.point, handoff);
       expect(glide.isSettled, isTrue);
     });
   });

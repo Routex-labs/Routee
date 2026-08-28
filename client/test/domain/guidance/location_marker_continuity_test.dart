@@ -3,60 +3,6 @@ import 'package:indoor_pdr_core/indoor_pdr_core.dart';
 import 'package:navigation_client/domain/guidance/location_marker_continuity.dart';
 
 void main() {
-  group('경로 preview로 shadow 복귀', () {
-    test('경로 위에서 안정된 preview가 멀어진 shadow를 해제한다', () {
-      expect(
-        shouldReleaseShadowToGuidedPreview(
-          shadowActive: true,
-          previewOnGuidedRoute: true,
-          previewAmbiguous: false,
-          previewLeaderRelocated: false,
-          stablePreviewPeakCount: locationMarkerRouteRejoinStablePeakCount,
-          shadowDistanceToPreviewM: locationMarkerRouteRejoinDistanceM,
-        ),
-        isTrue,
-      );
-    });
-
-    test('실제 이탈·모호 후보·짧은 코너 오차에는 shadow를 유지한다', () {
-      for (final args in [
-        (
-          previewOnGuidedRoute: false,
-          previewAmbiguous: false,
-          previewLeaderRelocated: false,
-          stablePreviewPeakCount: 3,
-          shadowDistanceToPreviewM: 8.0,
-        ),
-        (
-          previewOnGuidedRoute: true,
-          previewAmbiguous: true,
-          previewLeaderRelocated: false,
-          stablePreviewPeakCount: 3,
-          shadowDistanceToPreviewM: 8.0,
-        ),
-        (
-          previewOnGuidedRoute: true,
-          previewAmbiguous: false,
-          previewLeaderRelocated: false,
-          stablePreviewPeakCount: 3,
-          shadowDistanceToPreviewM: 1.5,
-        ),
-      ]) {
-        expect(
-          shouldReleaseShadowToGuidedPreview(
-            shadowActive: true,
-            previewOnGuidedRoute: args.previewOnGuidedRoute,
-            previewAmbiguous: args.previewAmbiguous,
-            previewLeaderRelocated: args.previewLeaderRelocated,
-            stablePreviewPeakCount: args.stablePreviewPeakCount,
-            shadowDistanceToPreviewM: args.shadowDistanceToPreviewM,
-          ),
-          isFalse,
-        );
-      }
-    });
-  });
-
   test('후보가 몇 m 재배치돼도 화면은 raw 한 걸음만 전진한다', () {
     final continuity = LocationMarkerContinuity()
       ..reset(
@@ -271,9 +217,6 @@ void main() {
       headingBiasDeg: 0,
       leaderRelocated: false,
       ambiguous: true,
-      // 탑승 노드 lock은 tracker 내부 후보에만 적용한다. 화면 마커는 별도
-      // polyline 활강이 노드에 닿을 때까지 이 raw 연속성을 유지해야 한다.
-      forceMatchedPosition: false,
       projectToNavigableGraph: (position) => PdrLocalPoint(position.eastM, 0),
     );
 

@@ -44,7 +44,7 @@ void main() {
       expect(find.text('1.2km'), findsOneWidget);
     });
 
-    testWidgets('경로 이탈은 조작 지시 대신 재탐색 상태를 말한다', (tester) async {
+    testWidgets('역방향 추정만으로는 이탈 배너를 보이지 않는다', (tester) async {
       await tester.pumpWidget(
         wrap(
           const GuidanceBanner(
@@ -57,8 +57,15 @@ void main() {
         ),
       );
 
+      expect(find.text('경로를 벗어났습니다'), findsNothing);
+      expect(find.text('새 경로를 자동으로 찾고 있습니다'), findsNothing);
+    });
+
+    testWidgets('실제 새 경로 교체 뒤에만 기존 이탈 배너를 보인다', (tester) async {
+      await tester.pumpWidget(wrap(const GuidanceBanner(routeReplaced: true)));
+
       expect(find.text('경로를 벗어났습니다'), findsOneWidget);
-      expect(find.text('새 경로를 자동으로 찾고 있습니다'), findsOneWidget);
+      expect(find.text('새 경로를 자동으로 찾았습니다'), findsOneWidget);
     });
   });
 

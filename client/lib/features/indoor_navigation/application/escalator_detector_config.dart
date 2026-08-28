@@ -49,6 +49,10 @@ class EscalatorDetectorConfig {
   final double armRadiusM;
 
   /// 경로가 탑승 노드를 정확히 가리킬 때만 쓰는 넓은 허가 반경(실측 위치 오차 12m).
+  ///
+  /// 이 값은 탑승 판정기의 후보 허가 범위다. UI의 경로 follower는 별도로 남은
+  /// polyline 24m부터 시작하지만, 실제 `boardingDetected`는 여기와 3m 근접·접근
+  /// 감소 근거를 계속 만족해야 한다.
   final double routeApproachArmRadiusM;
 
   /// **기압이 이미 층 이동을 말할 때** 쓰는 허가 반경. 근거는

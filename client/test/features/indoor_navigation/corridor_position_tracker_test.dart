@@ -381,7 +381,7 @@ void main() {
       expect(afterBatch.optimisticLeadM, closeTo(1.4, 1e-9));
     });
 
-    test('preview tail이 비어도 안정된 경로 확정 걸음으로 shadow를 복귀시킨다', () {
+    test('preview tail이 비어도 shadow를 후보 좌표로 즉시 교체하지 않는다', () {
       final tracker =
           CorridorPositionTracker(
               _parallelGraph,
@@ -427,7 +427,7 @@ void main() {
           rawConfirmedStepPositions: const [PdrLocalPoint(2.4, 7)],
         ),
       );
-      final released = tracker.update(
+      final continued = tracker.update(
         _observation(
           atMs: 2000,
           confirmedSteps: 3,
@@ -439,9 +439,9 @@ void main() {
         ),
       );
 
-      expect(released.matchedPreviewPosition.northM, 7);
-      expect(released.previewPosition.northM, 7);
-      expect(released.previewUsesContinuityShadow, isFalse);
+      expect(continued.matchedPreviewPosition.northM, 7);
+      expect(continued.previewPosition.northM, 0);
+      expect(continued.previewUsesContinuityShadow, isTrue);
     });
 
     test('큰 preview 선행분은 배치 한 번으로 폐기하지 않는다', () {
@@ -1688,7 +1688,9 @@ void main() {
         reason: '잠금 상태 전환 자체가 마커를 재배치하면 안 된다',
       );
 
-      // 실제 회전과 유턴은 잠금값을 다시 학습하지 않고 그대로 적용한다.
+      // 같은 간선 위의 실제 회전·유턴은 기존 보정값을 유지한다. 새 간선에서만
+      // evidence epoch를 열어, 회전 표본을 오차로 먹지 않으면서도 복도가 바뀌면
+      // 보정값을 다시 검증할 수 있다.
       final afterCorner = walk(7, 160);
       expect(afterCorner.headingBiasDeg, closeTo(20, 0.2));
       expect(

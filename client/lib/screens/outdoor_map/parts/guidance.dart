@@ -79,6 +79,10 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
     if (!_indoorEntered) return;
     final anchor = _pdrTrailState.anchor;
     final toFloor = anchor == null ? null : FloorCoordinateTransform(anchor);
+    // 화면 마커·카메라가 쓰는 것과 **같은** 복도 bias를 진행률/이탈 판정에도
+    // 적용한다. 둘이 갈리면 화면에서는 파란 경로를 따라가는데, 세션은 보정 전
+    // 헤딩으로 "경로와 다른 방향"이라고 판단해 거짓 재탐색을 일으킬 수 있다.
+    final headingBiasDeg = result?.headingBiasDeg ?? 0;
     final update = _guidance.updateProgress(
       result,
       rerouteInFlight: _indoorRerouteInFlight,
@@ -86,10 +90,16 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
       previewSteps: snapshot?.preview.steps,
       orientationHeadingDeg: snapshot == null || toFloor == null
           ? null
-          : toFloor.toFloorBearing(snapshot.orientationHeadingDeg),
+          : _normalizeRouteProgressHeading(
+              toFloor.toFloorBearing(snapshot.orientationHeadingDeg) +
+                  headingBiasDeg,
+            ),
       walkingHeadingDeg: snapshot == null || toFloor == null
           ? null
-          : toFloor.toFloorBearing(snapshot.walkingHeadingDeg),
+          : _normalizeRouteProgressHeading(
+              toFloor.toFloorBearing(snapshot.walkingHeadingDeg) +
+                  headingBiasDeg,
+            ),
       // 탑승 중에는 이탈 판정을 건너뛴다. 조기 층 전환이 탑승점 고정을 풀어
       // `isPositionHeld`가 먼저 false가 되므로, 이 인자가 없으면 리셋된
       // 트래커 위치로 이탈 증거가 쌓여 재탐색이 돈다.
@@ -120,6 +130,11 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
     if (mounted) setState(() {});
     _syncArrivalHighlight();
     _syncArrival();
+  }
+
+  double _normalizeRouteProgressHeading(double headingDeg) {
+    final normalized = headingDeg % 360;
+    return normalized < 0 ? normalized + 360 : normalized;
   }
 
   /// 도착을 화면에 반영한다 — 도착 카드를 띄우고, 잠시 뒤 경로를 스스로 지운다.
@@ -256,6 +271,7 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
       );
       if (!mounted) return;
     }
+    _restartGuidanceTrailSession();
     _notifyRouteStateIfChanged();
     if (!mounted) return;
     // 야외와 **같은 약속**이다 — 시작을 누르면 화면이 내 자리로 내려간다. 실내는
@@ -342,6 +358,7 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
     setState(() {
       _guidanceStarted = true;
     });
+    if (_indoorEntered) _restartGuidanceTrailSession();
     _notifyRouteStateIfChanged();
     // **문 경유 여정은 여기서 도면 층을 되돌린다.** 계획 화면은 목적지 매장을
     // 보여 주느라 그 매장 층을 펴 두는데([_focusIndoorJourneyDestination]),
@@ -502,6 +519,7 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
     );
     if (startNodeId == null) return;
 
+    final previousRoute = _indoorRouteSegment;
     _indoorRerouteInFlight = true;
     try {
       // **재탐색에는 개요 연출을 붙이지 않는다.** 재탐색은 사용자가 걷고 있는
@@ -533,9 +551,22 @@ extension OutdoorMapGuidance on OutdoorMapBodyState {
         );
       }
       _lastIndoorRerouteAtMs = DateTime.now().millisecondsSinceEpoch;
+      // PDR의 `wrongWay`은 역방향 추정일 뿐 경로 교체의 증거가 아니다. 이 알림은
+      // 계산이 성공해 실제 경로 인스턴스가 바뀐 경우에만 잠깐 보여 준다.
+      if (mounted && !identical(previousRoute, _indoorRouteSegment)) {
+        _showIndoorRerouteNoticeForRouteReplacement();
+      }
     } finally {
       _indoorRerouteInFlight = false;
     }
+  }
+
+  void _showIndoorRerouteNoticeForRouteReplacement() {
+    _indoorRerouteNoticeTimer?.cancel();
+    setState(() => _showIndoorRerouteNotice = true);
+    _indoorRerouteNoticeTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted) setState(() => _showIndoorRerouteNotice = false);
+    });
   }
 
   /// 지금 이 층 실내 경로의 턴바이턴 안내. 없으면 null.

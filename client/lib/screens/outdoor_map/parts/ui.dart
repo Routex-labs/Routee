@@ -158,8 +158,7 @@ extension OutdoorMapUi on OutdoorMapBodyState {
     // 한 번 사라졌다 돌아온다.
     final indoorCardOwnsSlot =
         indoorRouteDestination != null &&
-        !(_indoorLegIsPrelude &&
-            (route != null || _transitItinerary != null));
+        !(_indoorLegIsPrelude && (route != null || _transitItinerary != null));
     final indoorRouteVisible = _hasAnyRouteVisible;
     final debugEnabled = _debugModeController.enabled;
     final pdrActive =
@@ -181,6 +180,7 @@ extension OutdoorMapUi on OutdoorMapBodyState {
       instruction: _guidanceStarted && !_showingArrivalOnly
           ? _indoorRouteGuidance
           : null,
+      routeReplaced: _showIndoorRerouteNotice,
       floorTransition: _guidanceStarted ? _floorTransitionUiState : null,
       arrivalAt: arrived == null
           ? null
@@ -326,8 +326,7 @@ extension OutdoorMapUi on OutdoorMapBodyState {
           curve: Curves.easeOut,
           right: RoutexSpacing.componentPadding,
           bottom:
-              _aboveBottomBarPx +
-              (indoorRouteVisible ? bottomBarLiftPx : 0),
+              _aboveBottomBarPx + (indoorRouteVisible ? bottomBarLiftPx : 0),
           child: SafeArea(
             top: false,
             child: IgnorePointer(child: _buildScaleBar(initialCenter.latitude)),
@@ -824,10 +823,7 @@ extension OutdoorMapUi on OutdoorMapBodyState {
       gap: RoutexStackGap.inline,
       children: [
         ?preference,
-        CollapsibleRouteSteps(
-          steps: steps,
-          destinationName: destination.name,
-        ),
+        CollapsibleRouteSteps(steps: steps, destinationName: destination.name),
       ],
     );
   }

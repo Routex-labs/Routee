@@ -558,7 +558,7 @@ void main() {
       expect(session.isPositionHeld, isFalse);
     });
 
-    test('열린 공간을 가로질러도 탑승 감지 전에는 자유보행을 계속 표시한다', () {
+    test('첫 코너 전의 대각선 shortcut도 탑승 경로를 순서대로 따른다', () {
       final session = shortcutEscalatorSession();
       for (var step = 0; step <= 14; step += 1) {
         final atMs = 1000 + step * 500;
@@ -573,21 +573,21 @@ void main() {
       final result = session.trackingResult!;
       const boarding = PdrLocalPoint(10, 0);
       expect(
-        (boarding - result.previewPosition).distance,
-        greaterThan(3),
-        reason: '고정 뒤 내부 tracker는 경로 종점에 잠기지만 화면은 이미 별도 hold다',
+        session.isFollowingRouteBoarding,
+        isTrue,
+        reason: 'raw PDR가 경로를 대각선으로 자르더라도 활성 탑승 경로를 유지한다',
       );
+      final shown = session.position!.localM;
       expect(
-        (boarding - result.rawPreviewPosition).distance,
-        lessThan(1),
-        reason: '원시 절대좌표를 표시하지는 않지만 실제 자유보행은 탑승점에 닿았다',
+        (shown - result.rawPreviewPosition).distance,
+        greaterThan(3),
+        reason: '표시 위치는 raw shortcut으로 에스컬레이터까지 순간이동하지 않는다',
       );
-      expect(session.boardingApproachDistanceM, lessThan(1));
       expect(session.isPositionHeld, isFalse);
       expect(
-        (session.position!.localM - result.rawPreviewPosition).distance,
+        (boarding - shown).distance,
         greaterThan(3),
-        reason: '탑승 접근 그림자는 자유보행을 판정에만 쓰고 표시 위치는 억지로 고정하지 않는다',
+        reason: '한 프레임에 종점으로 붙지 않고 route polyline을 걸음 거리만큼만 간다',
       );
     });
 
@@ -630,6 +630,25 @@ void main() {
       expect(session.isFollowingRouteBoarding, isTrue);
       expect(session.position!.localM.eastM, closeTo(-3.4, 0.15));
       expect(session.position!.localM.northM, closeTo(7, 0.15));
+    });
+
+    test('종점 뒤에도 오래 계속 걸으면 follower와 탑승 차단을 푼다', () {
+      final session = vestibuleEscalatorSession();
+      // 종점 도착 뒤에도 약 20초 동안 12m보다 많이 계속 걷는다. 실제 탑승이면
+      // 이 전에 수직 이동이 잡히므로, 이 두 근거가 함께 있을 때만 다른 곳으로
+      // 간 것으로 취급한다.
+      for (var step = 0; step <= 56; step++) {
+        final atMs = 1000 + step * 500;
+        final result = session.onSnapshot(
+          _walkedVestibuleWithLateHeading(step),
+          timestampMs: atMs,
+        );
+        session.updateProgress(result, previewSteps: step, nowMs: atMs);
+      }
+
+      expect(session.isFollowingRouteBoarding, isFalse);
+      expect(session.isNearRouteBoarding, isFalse);
+      expect(session.isPositionHeld, isFalse);
     });
 
     test('같은 전실을 지나도 경로가 에스컬레이터 탑승을 지목하지 않으면 붙들지 않는다', () {

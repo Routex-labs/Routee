@@ -105,7 +105,18 @@ class LocationMarkerGlide {
   /// [snap]은 **걸어서 간 이동이 아니라고 호출부가 아는 경우**다(층 전환, 앵커
   /// 재배치, 실내 진입/이탈, 에스컬레이터 활강). 호출부가 모르는 도약은
   /// [locationMarkerGlideSnapM]가 뒤에서 한 번 더 잡는다.
-  void aimAt(LatLng? target, {double? headingDeg, bool snap = false}) {
+  ///
+  /// [preserveContinuity]는 **같은 보행 여정 안에서 표시 근거만 바뀐 경우**다.
+  /// 예를 들어 에스컬레이터 직전에는 continuity shadow, 경로 follower, 탑승점
+  /// hold가 서로 다른 좌표를 잠깐 낼 수 있다. 이때 거리만 보고 스냅하면 실제
+  /// 걸음이 아닌 마커가 마지막 몇 m를 순간이동한다. 호출부가 그 여정의 연속성을
+  /// 보장할 때만 자동 스냅을 끄고, 명시적인 [snap]은 언제나 우선한다.
+  void aimAt(
+    LatLng? target, {
+    double? headingDeg,
+    bool snap = false,
+    bool preserveContinuity = false,
+  }) {
     if (target == null) {
       _target = null;
       _shown = null;
@@ -117,7 +128,8 @@ class LocationMarkerGlide {
     final teleport =
         snap ||
         shown == null ||
-        _metersBetween(shown, target) > locationMarkerGlideSnapM;
+        (!preserveContinuity &&
+            _metersBetween(shown, target) > locationMarkerGlideSnapM);
     _target = target;
     _targetHeadingDeg = headingDeg;
     if (teleport) {
@@ -188,7 +200,10 @@ class LocationMarkerGlide {
       _shownHeadingDeg = target;
       return true;
     }
-    final k = glideFollowFactor(elapsed, locationMarkerGlideHeadingTimeConstant);
+    final k = glideFollowFactor(
+      elapsed,
+      locationMarkerGlideHeadingTimeConstant,
+    );
     final eased = delta * k;
     final cap =
         locationMarkerGlideHeadingMaxRateDegPerSec *

@@ -112,11 +112,16 @@ class GuidanceBanner extends StatelessWidget {
   const GuidanceBanner({
     super.key,
     this.instruction,
+    this.routeReplaced = false,
     this.floorTransition,
     this.arrivalAt,
   });
 
   final RouteGuidanceInstruction? instruction;
+
+  /// 실제 경로 계산이 완료되어 지도 선이 새 경로로 교체된 순간만 true다.
+  /// PDR 방향 추정(`wrongWay`)은 코너·짧은 복도에서 흔들릴 수 있어 여기 쓰지 않는다.
+  final bool routeReplaced;
 
   /// 층 전환이 도는 중이면 그 단계. null이면 전환 중이 아니다.
   final FloorTransitionUiState? floorTransition;
@@ -126,7 +131,10 @@ class GuidanceBanner extends StatelessWidget {
 
   /// 그릴 것이 하나도 없는지. 호출부가 자리를 통째로 비울지 판단한다.
   bool get isEmpty =>
-      instruction == null && floorTransition == null && arrivalAt == null;
+      instruction == null &&
+      !routeReplaced &&
+      floorTransition == null &&
+      arrivalAt == null;
 
   @override
   Widget build(BuildContext context) {
@@ -152,15 +160,18 @@ class GuidanceBanner extends StatelessWidget {
         tone: RoutexStatusBannerTone.success,
       );
     }
-    final guidance = instruction;
-    if (guidance == null) return const SizedBox.shrink();
-    if (guidance.action == RouteGuidanceAction.wrongWay) {
+    if (routeReplaced) {
       return const RoutexStatusBanner(
         title: '경로를 벗어났습니다',
-        detail: '새 경로를 자동으로 찾고 있습니다',
+        detail: '새 경로를 자동으로 찾았습니다',
         icon: RoutexIcons.error,
         tone: RoutexStatusBannerTone.error,
       );
+    }
+    final guidance = instruction;
+    if (guidance == null) return const SizedBox.shrink();
+    if (guidance.action == RouteGuidanceAction.wrongWay) {
+      return const SizedBox.shrink();
     }
     return RoutexManeuverBanner(
       distance: _distanceLabel(guidance.distanceToActionM),

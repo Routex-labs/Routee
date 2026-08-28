@@ -27,33 +27,6 @@ const locationMarkerContinuitySettleM = 0.08;
 /// 선이 있으면 마커 중심을 그 선 위에 정확히 붙인다는 뜻이다.
 const locationMarkerNavigableLeashM = 0.0;
 
-/// 안내 경로 위로 돌아온 preview가 전역 continuity shadow를 끝낼 최소 거리.
-///
-/// 4m 안쪽의 차이는 코너를 지나는 동안의 자연스러운 선행·후행일 수 있어 shadow가
-/// 계속 흡수한다. 그보다 먼데도 **같은 경로 후보가 독립 peak 둘에서 안정**되면,
-/// shadow는 더 이상 점프 방지가 아니라 과거 오인식을 보존하는 값이다.
-const locationMarkerRouteRejoinDistanceM = 4.0;
-const locationMarkerRouteRejoinStablePeakCount = 2;
-
-/// 현재 경로에 맞는 안정된 preview로 전역 continuity shadow를 해제할지.
-///
-/// 실제 이탈은 이 함수까지 오지 않는다. [previewOnGuidedRoute]가 거짓이면 기존
-/// shadow를 유지해 재탐색 판정이 실제 tracker 위치를 보게 한다.
-bool shouldReleaseShadowToGuidedPreview({
-  required bool shadowActive,
-  required bool previewOnGuidedRoute,
-  required bool previewAmbiguous,
-  required bool previewLeaderRelocated,
-  required int stablePreviewPeakCount,
-  required double shadowDistanceToPreviewM,
-}) =>
-    shadowActive &&
-    previewOnGuidedRoute &&
-    !previewAmbiguous &&
-    !previewLeaderRelocated &&
-    stablePreviewPeakCount >= locationMarkerRouteRejoinStablePeakCount &&
-    shadowDistanceToPreviewM >= locationMarkerRouteRejoinDistanceM;
-
 typedef LocationMarkerProjection =
     PdrLocalPoint? Function(PdrLocalPoint position);
 
@@ -84,7 +57,6 @@ class LocationMarkerContinuity {
     required double headingBiasDeg,
     required bool leaderRelocated,
     required bool ambiguous,
-    bool forceMatchedPosition = false,
     LocationMarkerProjection? projectToNavigableGraph,
   }) {
     final shown = _position;
@@ -94,11 +66,6 @@ class LocationMarkerContinuity {
       reset(matchedPosition: matchedPosition, rawPosition: rawPosition);
       return matchedPosition;
     }
-    if (forceMatchedPosition) {
-      reset(matchedPosition: matchedPosition, rawPosition: rawPosition);
-      return matchedPosition;
-    }
-
     final rawDelta = _rotate(rawPosition - previousRaw, headingBiasDeg);
     final rawDistanceM = rawDelta.distance;
     final matchedDelta = matchedPosition - previousMatched;

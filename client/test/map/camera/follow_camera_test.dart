@@ -88,10 +88,7 @@ void main() {
     });
 
     test('프레임이 길수록 더 많이 돈다', () {
-      expect(
-        glide(0, 90, elapsed: frame * 2),
-        greaterThan(glide(0, 90)),
-      );
+      expect(glide(0, 90, elapsed: frame * 2), greaterThan(glide(0, 90)));
     });
 
     test('경계를 넘어도 짧은 쪽으로 돈다', () {
@@ -141,7 +138,10 @@ void main() {
     test('각이 통째로 벌어져도 상한을 넘지는 않는다', () {
       // 층 fit이나 하차 조준 뒤 팔로우가 돌아오는 경우의 안전판이다.
       final perFrame = maxRate * frame.inMilliseconds / 1000;
-      expect(bearingGapDeg(glide(0, 180), 0), lessThanOrEqualTo(perFrame + 1e-9));
+      expect(
+        bearingGapDeg(glide(0, 180), 0),
+        lessThanOrEqualTo(perFrame + 1e-9),
+      );
     });
   });
 

@@ -109,18 +109,6 @@ class CorridorPositionTracker {
   String? _routeStraightEpochNodeId;
   final List<OptimisticStepAdvance> _optimisticStepAdvances = [];
 
-  /// 경로 위 preview가 안정됐다는 독립 peak 수. 전역 continuity shadow가 한 번
-  /// 잘못된 평행 복도에 붙었다면, 이 근거가 찬 순간만 즉시 현재 경로 후보로
-  /// 돌려 보낸다. preview peak가 생략된 native batch에서는 확정 걸음도 같은
-  /// 근거가 되며, 단순 heartbeat는 여기에 세지 않는다.
-  int _routePreviewRejoinEvidencePeaks = 0;
-
-  /// 이번 갱신에서 preview와 중복 없이 받아들인 확정 걸음 수.
-  ///
-  /// 네이티브가 preview tail을 매 snapshot 내보내지 않는 기기에서는 이 값이
-  /// 없으면 shadow 복귀 근거가 영원히 0에 남는다.
-  int _confirmedRejoinEvidencePeaks = 0;
-
   bool get isInitialized => _beam.isNotEmpty;
 
   double get _headingBiasDeg =>
@@ -171,7 +159,6 @@ class CorridorPositionTracker {
     if (routeChanged) {
       _lastRouteStraightEpochIndex = -1;
       _continuityGraphEdge = null;
-      _routePreviewRejoinEvidencePeaks = 0;
     }
   }
 
@@ -253,8 +240,6 @@ class CorridorPositionTracker {
     _confirmedAdvanceM = 0;
     _leaderRelocated = false;
     _routeStraightEpochNodeId = null;
-    _confirmedRejoinEvidencePeaks = 0;
-    _routePreviewRejoinEvidencePeaks = 0;
     _lastRouteStraightEpochIndex = -1;
     _optimisticStepAdvances.clear();
     _lastConfirmedSegmentHeadingDeg = null;
@@ -294,7 +279,6 @@ class CorridorPositionTracker {
       );
     }
     _optimisticStepAdvances.clear();
-    _confirmedRejoinEvidencePeaks = 0;
     final previousRawConfirmedPosition = _rawConfirmedPosition;
     _rawConfirmedPosition = observation.rawConfirmedPosition;
     _rawPreviewPosition = observation.rawPreviewPosition;
@@ -325,7 +309,6 @@ class CorridorPositionTracker {
         previousRawConfirmedPosition: previousRawConfirmedPosition,
         rawConfirmedStepPositions: observation.rawConfirmedStepPositions,
       );
-      _confirmedRejoinEvidencePeaks = confirmedSegments.length;
       final transitionsBefore = _best?.transitions ?? 0;
       for (final segment in confirmedSegments) {
         _advanceBeam(segment);
@@ -930,8 +913,10 @@ class CorridorPositionTracker {
 
   /// 같은 층의 신뢰 가능한 직선 구간에서만 floor-frame 보정각을 학습한다.
   ///
-  /// 잠긴 뒤에는 이 함수가 진단 근거만 다시 모으고 적용값은 바꾸지 않는다.
-  /// 코너·유턴에서 센서 방향이 바뀐 것을 오차로 먹지 않는 것이 핵심이다.
+  /// 잠긴 bias는 코너·유턴에서 센서 방향이 바뀐 것을 오차로 먹지 않도록
+  /// 유지한다. 다만 다음 **새 직선 간선**이 안정화되면 그 값을 시작점으로
+  /// 다시 학습한다. 복도는 보정값을 검증하는 근거이고, 화면 heading 자체를
+  /// 간선에 고정하는 장치가 아니다.
   void _updateHeadingCorrection(
     List<({double headingDeg, double distanceM, PdrLocalPoint rawPoint})>
     segments, {
@@ -955,6 +940,15 @@ class CorridorPositionTracker {
 
     if (_headingEvidenceEdgeId != best.edge.id ||
         _headingEvidenceTravelSign != best.travelSign) {
+      // 새 복도가 현재 잠금값과 계속 어긋나는 경우를 다음 직선에서만 바로잡는다.
+      // 코너/후보 경쟁 중에는 위의 조기 return으로 여기까지 오지 않으므로, 몸을
+      // 돌린 한두 표본이 기존 보정값을 풀어 버리지는 않는다.
+      if (_headingCorrectionState == HeadingCorrectionState.locked) {
+        final retainedBias = _headingBiasDeg;
+        _lockedHeadingCorrectionDeg = null;
+        _learningHeadingBiasDeg = retainedBias;
+        _headingCorrectionState = HeadingCorrectionState.learning;
+      }
       _resetHeadingEvidence(edgeId: best.edge.id, travelSign: best.travelSign);
     }
 
@@ -1200,8 +1194,8 @@ class CorridorPositionTracker {
     int? occurredAtMs,
   }) {
     if (_optimisticBeam.isEmpty) return;
-    final previousLeaderId = _optimisticBest!.diagnosticId;
     final observed = normalizeBearing(headingDeg + _headingBiasDeg);
+    final previousLeaderId = _optimisticBest!.diagnosticId;
     final next = <Hypothesis>[];
     for (final original in _optimisticBeam) {
       final hypothesis = original.beginStep();
@@ -1366,42 +1360,15 @@ class CorridorPositionTracker {
     final previewLeaderRelocated =
         _leaderRelocated ||
         _optimisticStepAdvances.any((step) => step.leaderRelocated);
-    final previewOnGuidedRoute = _isPreferredRouteHypothesis(leader);
-    final continuityPosition = _markerContinuity.position;
-    final shadowDistanceToPreviewM = continuityPosition == null
-        ? 0.0
-        : (continuityPosition - _matchedPreviewPosition).distance;
-    final stableGuidedPreview =
-        previewOnGuidedRoute && !previewLeaderRelocated && !_previewIsAmbiguous;
-    if (stableGuidedPreview && _markerContinuity.isActive) {
-      // preview와 확정 batch가 같은 peak를 각자 싣기도 하므로 둘을 더하지
-      // 않는다. 반대로 preview가 생략된 batch도 있으므로 한쪽만 믿으면
-      // 복귀가 영원히 일어나지 않을 수 있다.
-      _routePreviewRejoinEvidencePeaks += math.max(
-        _optimisticStepAdvances.length,
-        _confirmedRejoinEvidencePeaks,
-      );
-    } else if (!stableGuidedPreview) {
-      _routePreviewRejoinEvidencePeaks = 0;
-    }
-    final forceGuidedPreview = shouldReleaseShadowToGuidedPreview(
-      shadowActive: _markerContinuity.isActive,
-      previewOnGuidedRoute: previewOnGuidedRoute,
-      previewAmbiguous: _previewIsAmbiguous,
-      previewLeaderRelocated: previewLeaderRelocated,
-      stablePreviewPeakCount: _routePreviewRejoinEvidencePeaks,
-      shadowDistanceToPreviewM: shadowDistanceToPreviewM,
-    );
     _previewPosition = _markerContinuity.update(
       matchedPosition: _matchedPreviewPosition,
       rawPosition: _continuityRawPosition,
       headingBiasDeg: _headingBiasDeg,
       leaderRelocated: previewLeaderRelocated,
       ambiguous: _previewIsAmbiguous,
-      // 탑승 종점 lock은 내부 후보만 경로 끝에 남긴다. 여기서 화면 shadow까지
-      // 강제로 교체하면 마지막 직각을 자른 원시 PDR가 한 프레임에 옆 복도로
-      // 순간이동한다. 표시점은 연결 간선 투영을 따라 직접 종점에 도착해야 한다.
-      forceMatchedPosition: forceGuidedPreview && !_lockPreferredRouteTerminal,
+      // 안정된 후보로 돌아와도 화면 좌표를 한 프레임에 교체하지 않는다. shadow는
+      // raw 보행만큼 전진하면서 매 peak 최대 0.2m씩 후보에 합쳐진다. 그래야
+      // 평행 복도·에스컬레이터 직전의 후보 복귀가 순간이동으로 보이지 않는다.
       projectToNavigableGraph: _nearestContinuityGraphPoint,
     );
     if (!_markerContinuity.isActive) _continuityGraphEdge = leader.edge;
